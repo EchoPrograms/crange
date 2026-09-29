@@ -1,0 +1,20 @@
+---
+- name: Ensure UFW manages IPv6 rules
+  ansible.builtin.lineinfile:
+    path: /etc/default/ufw
+    regexp: '^IPV6='
+    line: 'IPV6=yes'
+  notify: Reload UFW
+
+- name: Block all IPv6 traffic on routers
+  ansible.builtin.blockinfile:
+    path: /etc/ufw/before6.rules
+    marker: "# {mark} CRANGE BLOCK IPV6"
+    insertafter: '^# End required lines$'
+    backup: true
+    validate: '/usr/sbin/ip6tables-restore --test %s'
+    block: |
+      -A ufw6-before-input -j DROP
+      -A ufw6-before-output -j DROP
+      -A ufw6-before-forward -j DROP
+  notify: Reload UFW

@@ -1,0 +1,32 @@
+---
+- name: Check scenario service from its team router
+  hosts: routers
+  gather_facts: false
+  tasks:
+    - name: Check that the host responds to ping
+      ansible.builtin.command:
+        argv:
+          - ping
+          - -c
+          - "1"
+          - -W
+          - "{{ health_check.timeout }}"
+          - "{{ health_address }}"
+      changed_when: false
+      when: health_check.type == 'ping'
+
+    - name: Check TCP service
+      ansible.builtin.wait_for:
+        host: "{{ health_address }}"
+        port: "{{ health_check.port }}"
+        timeout: "{{ health_check.timeout }}"
+        state: started
+      when: health_check.type == 'tcp'
+
+    - name: Check HTTP service
+      ansible.builtin.uri:
+        url: "http://{{ health_address }}:{{ health_check.port }}{{ health_check.path }}"
+        status_code: "{{ health_check.status }}"
+        timeout: "{{ health_check.timeout }}"
+        return_content: false
+      when: health_check.type == 'http'

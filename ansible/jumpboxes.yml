@@ -1,0 +1,8 @@
+---
+- name: Configure cyber range jump boxes
+  hosts: jumpboxes
+  become: true
+  gather_facts: true
+
+  roles:
+    - jumpbox

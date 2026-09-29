@@ -1,0 +1,199 @@
+---
+- name: Allow project router SSH to team router
+  community.general.ufw:
+    rule: allow
+    direction: in
+    interface: eth0
+    from_ip: "{{ router_project_gateway }}"
+    to_port: "22"
+    proto: tcp
+  when: "'team_routers' in group_names or 'staging_routers' in group_names or 'custom_routers' in group_names"
+
+- name: Allow declared downstream networks upstream
+  community.general.ufw:
+    rule: allow
+    route: true
+    interface_in: eth1
+    interface_out: eth0
+    from_ip: "{{ item }}"
+    to_ip: any
+  loop: "{{ router_forward_sources | default([router_forward_source]) }}"
+
+- name: Allow Guacamole RDP to team network
+  community.general.ufw:
+    rule: allow
+    route: true
+    interface_in: eth0
+    interface_out: eth1
+    from_ip: "{{ router_guacamole_ip }}"
+    to_ip: "{{ router_team_network }}"
+    to_port: "3389"
+    proto: tcp
+- name: Allow Guacamole SSH through the project router
+  community.general.ufw:
+    rule: allow
+    route: true
+    interface_in: eth0
+    interface_out: eth1
+    from_ip: "{{ router_guacamole_ip }}"
+    to_ip: "{{ router_team_network }}"
+    to_port: "22"
+    proto: tcp
+  when: router_guac_ssh_upstream | default(false)
+  tags: [guac_access]
+
+- name: Read prior managed Guacamole SSH targets
+  ansible.builtin.slurp:
+    src: /var/lib/crange-managed-guac-ssh-targets
+  register: prior_guac_ssh_targets
+  failed_when: false
+  when: router_guac_ssh_targets is defined
+  tags: [guac_access]
+
+- name: Parse prior managed Guacamole SSH targets
+  ansible.builtin.set_fact:
+    router_prior_guac_ssh_targets: "{{ (prior_guac_ssh_targets.content | default('') | b64decode).splitlines() }}"
+  when: router_guac_ssh_targets is defined
+  tags: [guac_access]
+
+- name: Remove obsolete Guacamole SSH forwarding permissions
+  community.general.ufw:
+    rule: allow
+    route: true
+    delete: true
+    interface_in: eth0
+    interface_out: eth1
+    from_ip: "{{ router_guacamole_ip }}"
+    to_ip: "{{ item }}"
+    to_port: "22"
+    proto: tcp
+  loop: "{{ router_prior_guac_ssh_targets | default([]) }}"
+  when:
+    - router_guac_ssh_targets is defined
+    - item not in router_guac_ssh_targets
+  tags: [guac_access]
+
+- name: Allow Guacamole SSH to declared scenario guests
+  community.general.ufw:
+    rule: allow
+    route: true
+    interface_in: eth0
+    interface_out: eth1
+    from_ip: "{{ router_guacamole_ip }}"
+    to_ip: "{{ item }}"
+    to_port: "22"
+    proto: tcp
+  loop: "{{ router_guac_ssh_targets | default([]) }}"
+  tags: [guac_access]
+
+- name: Record managed Guacamole SSH targets
+  ansible.builtin.copy:
+    dest: /var/lib/crange-managed-guac-ssh-targets
+    owner: root
+    group: root
+    mode: "0600"
+    content: |
+      {% for target in router_guac_ssh_targets | default([]) %}
+      {{ target }}
+      {% endfor %}
+  when: router_guac_ssh_targets is defined
+  tags: [guac_access]
+
+- name: Allow controller SSH to lab hosts
+  community.general.ufw:
+    rule: allow
+    route: true
+    interface_in: eth0
+    interface_out: eth1
+    from_ip: "{{ router_controller_ip }}"
+    to_ip: "{{ router_team_network }}"
+    to_port: "22"
+    proto: tcp
+
+- name: Allow nested custom networks upstream through their parent team router
+  community.general.ufw:
+    rule: allow
+    route: true
+    interface_in: eth1
+    interface_out: eth0
+    from_ip: "{{ item.network }}"
+    to_ip: any
+  loop: "{{ router_custom_routes | default([]) }}"
+  when: "'team_routers' in group_names or 'staging_routers' in group_names"
+
+- name: Allow controller SSH to custom networks through their parent team router
+  community.general.ufw:
+    rule: allow
+    route: true
+    interface_in: eth0
+    interface_out: eth1
+    from_ip: "{{ router_controller_ip }}"
+    to_ip: "{{ item.network }}"
+    to_port: "22"
+    proto: tcp
+  loop: "{{ router_custom_routes | default([]) }}"
+  when: "'team_routers' in group_names or 'staging_routers' in group_names"
+
+- name: Allow Guacamole RDP to custom networks through their parent team router
+  community.general.ufw:
+    rule: allow
+    route: true
+    interface_in: eth0
+    interface_out: eth1
+    from_ip: "{{ router_guacamole_ip }}"
+    to_ip: "{{ item.network }}"
+    to_port: "3389"
+    proto: tcp
+  loop: "{{ router_custom_routes | default([]) }}"
+  when: "'team_routers' in group_names or 'staging_routers' in group_names"
+
+- name: Allow project-router SSH to custom routers through parent team routers
+  community.general.ufw:
+    rule: allow
+    route: true
+    interface_in: eth0
+    interface_out: eth1
+    from_ip: "{{ router_project_gateway }}"
+    to_ip: "{{ item.gateway }}"
+    to_port: "22"
+    proto: tcp
+  loop: "{{ router_custom_routes | default([]) }}"
+  when: "'team_routers' in group_names or 'staging_routers' in group_names"
+
+
+
+
+- name: Read prior managed custom routes
+  ansible.builtin.slurp:
+    src: /var/lib/crange-managed-custom-networks
+  register: prior_custom_routes
+  failed_when: false
+  when: "'team_routers' in group_names or 'staging_routers' in group_names"
+
+- name: Parse prior managed custom routes
+  ansible.builtin.set_fact:
+    router_managed_custom_sources: "{{ (prior_custom_routes.content | default('') | b64decode).splitlines() }}"
+  when: "'team_routers' in group_names or 'staging_routers' in group_names"
+
+- name: Remove obsolete custom egress permissions
+  community.general.ufw:
+    rule: allow
+    route: true
+    delete: true
+    interface_in: eth1
+    interface_out: eth0
+    from_ip: "{{ item }}"
+    to_ip: any
+  loop: "{{ router_managed_custom_sources | default([]) }}"
+  when:
+    - "'team_routers' in group_names or 'staging_routers' in group_names"
+    - item not in (router_custom_routes | default([]) | map(attribute='network') | list)
+
+- name: Record current managed custom routes
+  ansible.builtin.copy:
+    dest: /var/lib/crange-managed-custom-networks
+    owner: root
+    group: root
+    mode: "0600"
+    content: "{{ (router_custom_routes | default([]) | map(attribute='network') | list) | join('\n') }}\n"
+  when: "'team_routers' in group_names or 'staging_routers' in group_names"

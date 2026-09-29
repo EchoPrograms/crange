@@ -1,0 +1,8 @@
+---
+- name: Configure persistent routes on project and parent team routers
+  hosts: routers
+  gather_facts: false
+  become: true
+  tasks:
+    - name: Configure declared downstream routes
+      ansible.builtin.import_tasks: tasks/project-routes.yml

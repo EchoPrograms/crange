@@ -1,0 +1,54 @@
+/* CRANGE theme: monochrome, compact, and free of product taglines. */
+:root {
+    --cr-bg: #0b0c0d;
+    --cr-panel: #131516;
+    --cr-panel-2: #1b1f21;
+    --cr-line: #3c4246;
+    --cr-line-strong: #697177;
+    --cr-text: #f1f1f1;
+    --cr-muted: #98a0a5;
+}
+
+html, body, .login-ui, .client {
+    background: var(--cr-bg) !important;
+    color: var(--cr-text) !important;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace !important;
+}
+
+.login-ui .login-dialog,
+.login-ui .login-fields,
+.menu,
+.menu-dropdown,
+.connection,
+.connection-list {
+    background: var(--cr-panel) !important;
+    border-color: var(--cr-line) !important;
+    box-shadow: 0 18px 60px #000b !important;
+}
+
+.login-ui .app-name,
+.login-ui .app-version,
+.login-ui .logo {
+    display: none !important;
+}
+
+input, select, button, .menu-item, .connection {
+    background: #111415 !important;
+    color: var(--cr-text) !important;
+    border-color: var(--cr-line) !important;
+    border-radius: 2px !important;
+}
+
+button:hover, .menu-item:hover, .connection:hover,
+button:focus, input:focus, select:focus {
+    background: var(--cr-panel-2) !important;
+    border-color: var(--cr-line-strong) !important;
+}
+
+.header, .toolbar, .menu-heading {
+    background: #101213 !important;
+    border-color: var(--cr-line) !important;
+}
+
+a { color: var(--cr-text) !important; }
+.caption, .description, .subtitle, .login-ui .notice { color: var(--cr-muted) !important; }

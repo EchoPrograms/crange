@@ -1,0 +1,11 @@
+router_sysctls:
+  net.ipv4.ip_forward: '1'
+  net.ipv4.icmp_echo_ignore_all: '1'
+  net.ipv6.icmp.echo_ignore_all: '1'
+  net.ipv4.conf.all.send_redirects: '0'
+  net.ipv4.conf.default.send_redirects: '0'
+  net.ipv4.conf.all.accept_redirects: '0'
+  net.ipv4.conf.default.accept_redirects: '0'
+router_controller_ip: 10.60.0.20
+router_guacamole_ip: 10.60.0.10
+router_dns_ip: 10.60.2.1

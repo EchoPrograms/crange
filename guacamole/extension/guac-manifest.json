@@ -1,0 +1,6 @@
+{
+  "guacamoleVersion": "1.6.0",
+  "name": "CRANGE dark theme",
+  "namespace": "crange-theme",
+  "css": ["theme.css"]
+}

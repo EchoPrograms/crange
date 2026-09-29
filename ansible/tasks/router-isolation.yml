@@ -1,0 +1,31 @@
+---
+- name: Install IPv4 lab isolation
+  ansible.builtin.blockinfile:
+    path: /etc/ufw/before.rules
+    marker: "# {mark} CRANGE ISOLATION"
+    insertafter: '^# End required lines$'
+    backup: true
+    validate: '/usr/sbin/iptables-restore --test %s'
+    block: |
+      # Reject forwarded sources outside this router's downstream allocation.
+      # Permit lab DNS to OPNsense.
+      {% for source in router_forward_sources | default([router_forward_source]) %}
+      -A ufw-before-forward -i eth1 -s {{ source }} -d {{ router_dns_ip }} -p udp --dport 53 -j ACCEPT
+      -A ufw-before-forward -i eth1 -s {{ source }} -d {{ router_dns_ip }} -p tcp --dport 53 -j ACCEPT
+      {% endfor %}
+
+      # Block new downstream connections to internal and special-use networks.
+      {% for network in ['0.0.0.0/8', '10.0.0.0/8', '100.64.0.0/10', '127.0.0.0/8', '169.254.0.0/16', '172.16.0.0/12', '192.168.0.0/16', '224.0.0.0/4', '240.0.0.0/4'] %}
+      -A ufw-before-forward -i eth1 -d {{ network }} -m conntrack --ctstate NEW,INVALID,UNTRACKED -j DROP
+      {% endfor %}
+
+      # Permit declared sources to public destinations after internal filtering.
+      {% for source in router_forward_sources | default([router_forward_source]) %}
+      -A ufw-before-forward -i eth1 -s {{ source }} -j ACCEPT
+      {% endfor %}
+      -A ufw-before-forward -i eth1 -j DROP
+
+      # Permit DHCP requests to this router, but block other new downstream access.
+      -A ufw-before-input -i eth1 -p udp --sport 68 --dport 67 -j ACCEPT
+      -A ufw-before-input -i eth1 -m conntrack --ctstate NEW,INVALID,UNTRACKED -j DROP
+  notify: Reload UFW

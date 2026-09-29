@@ -1,0 +1,120 @@
+---
+- name: Configure cyber-range routers
+  hosts: routers
+  gather_facts: true
+  become: true
+
+  tasks:
+    - name: Ensure ping is available for scenario host checks
+      ansible.builtin.apt:
+        name: iputils-ping
+        state: present
+        update_cache: false
+
+    - name: Ensure router firewall package is installed
+      ansible.builtin.apt:
+        name: ufw
+        state: present
+        update_cache: false
+      when: "'custom_routers' in group_names"
+
+    - name: Configure persistent project routes
+      ansible.builtin.import_tasks: tasks/project-routes.yml
+
+    - name: Install persistent sysctl configuration
+      ansible.builtin.copy:
+        dest: /etc/sysctl.d/99-crange-router.conf
+        owner: root
+        group: root
+        mode: "0644"
+        content: |
+          {% for key, value in router_sysctls.items() %}
+          {{ key }} = {{ value }}
+          {% endfor %}
+      notify: Apply router sysctls
+
+    - name: Preserve router echo suppression during UFW reload and boot
+      ansible.builtin.lineinfile:
+        path: /etc/ufw/sysctl.conf
+        regexp: '^net/ipv4/icmp_echo_ignore_all='
+        line: net/ipv4/icmp_echo_ignore_all=1
+
+    - name: Allow controller SSH to routers
+      community.general.ufw:
+        rule: allow
+        interface: "{{ 'eth0' }}"
+        direction: in
+        from_ip: "{{ router_controller_ip }}"
+        to_port: "22"
+        proto: tcp
+
+    - name: Allow Guacamole SSH to routers
+      community.general.ufw:
+        rule: allow
+        interface: "{{ 'eth0' }}"
+        direction: in
+        from_ip: "{{ router_guacamole_ip }}"
+        to_port: "22"
+        proto: tcp
+      when: "'project_routers' in group_names"
+
+    - name: Configure router forwarding
+      ansible.builtin.import_tasks: tasks/router-forwarding.yml
+
+    - name: Configure team DHCP scopes
+      ansible.builtin.import_tasks: tasks/router-dhcp.yml
+
+    - name: Set UFW defaults
+      community.general.ufw:
+        direction: incoming
+        policy: deny
+
+    - name: Set UFW routed default
+      community.general.ufw:
+        direction: routed
+        policy: deny
+
+    - name: Enable UFW
+      community.general.ufw:
+        state: enabled
+
+
+
+    - name: Persist traceroute filtering in UFW
+      ansible.builtin.blockinfile:
+        path: /etc/ufw/before.rules
+        marker: "# {mark} CRANGE TRACEROUTE"
+        insertafter: '^# End required lines$'
+        backup: true
+        validate: '/usr/sbin/iptables-restore --test %s'
+        block: |
+          -A ufw-before-output -p icmp --icmp-type time-exceeded -j DROP
+          -A ufw-before-forward -i eth0 -o eth1 -p icmp --icmp-type time-exceeded -j DROP
+      notify: Reload UFW
+
+    - name: Configure lab isolation
+      ansible.builtin.import_tasks: tasks/router-isolation.yml
+
+    - name: Configure IPv6 blocking
+      ansible.builtin.import_tasks: tasks/block-ipv6.yml
+
+    - name: Apply pending firewall and service handlers
+      ansible.builtin.meta: flush_handlers
+
+    - name: Ensure declared router sysctls are active after firewall configuration
+      ansible.builtin.command: sysctl -p /etc/sysctl.d/99-crange-router.conf
+      changed_when: false
+
+  handlers:
+    - name: Apply router sysctls
+      ansible.builtin.command: sysctl -p /etc/sysctl.d/99-crange-router.conf
+      changed_when: true
+
+    - name: Reload UFW
+      community.general.ufw:
+        state: reloaded
+
+    - name: Restart team DHCP service
+      ansible.builtin.systemd:
+        name: dnsmasq
+        state: restarted

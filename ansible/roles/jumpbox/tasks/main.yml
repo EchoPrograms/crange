@@ -1,0 +1,38 @@
+---
+- name: Ensure jump-box packages are installed
+  ansible.builtin.apt:
+    name:
+      - openssh-server
+      - sudo
+      - python3
+      - cloud-init
+      - qemu-guest-agent
+      - xrdp
+      - xorgxrdp
+    state: present
+    update_cache: true
+    cache_valid_time: 3600
+
+- name: Enable and start SSH and RDP
+  ansible.builtin.systemd_service:
+    name: "{{ item }}"
+    enabled: true
+    state: started
+  loop:
+    - ssh
+    - xrdp
+
+- name: Ensure the QEMU guest agent is running
+  ansible.builtin.systemd_service:
+    name: qemu-guest-agent
+    state: started
+
+- name: Verify SSH and RDP are listening locally
+  ansible.builtin.wait_for:
+    host: 127.0.0.1
+    port: "{{ item }}"
+    state: started
+    timeout: 15
+  loop:
+    - 22
+    - 3389

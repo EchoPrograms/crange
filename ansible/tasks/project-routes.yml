@@ -1,0 +1,66 @@
+---
+- name: Install persistent router return routes
+  ansible.builtin.copy:
+    dest: /etc/network/if-up.d/crange-project-routes
+    owner: root
+    group: root
+    mode: "0755"
+    content: |
+      #!/bin/sh
+      set -eu
+      [ "${IFACE:-}" = "{{ router_downstream_interface | default('eth1') }}" ] || exit 0
+      [ "${ADDRFAM:-}" = "inet" ] || exit 0
+      STATE=/var/lib/crange-managed-routes
+      install -d -m 0755 /var/lib
+      touch "$STATE"
+      chmod 0600 "$STATE"
+      while IFS=' ' read -r old_network old_gateway; do
+        [ -n "$old_network" ] || continue
+        found=0
+        {% for route in router_routes | default([]) %}
+        [ "$old_network" = "{{ route.network }}" ] && found=1
+        {% endfor %}
+        if [ "$found" -eq 0 ]; then
+          /usr/sbin/ip -4 route del "$old_network" via "$old_gateway" dev "{{ router_downstream_interface | default('eth1') }}" 2>/dev/null || true
+        fi
+      done < "$STATE"
+      TMP="${STATE}.tmp"
+      : > "$TMP"
+      {% for route in router_routes | default([]) %}
+      /usr/sbin/ip -4 route replace {{ route.network }} via {{ route.gateway }} dev {{ router_downstream_interface | default('eth1') }}
+      printf '%s %s\n' '{{ route.network }}' '{{ route.gateway }}' >> "$TMP"
+      {% endfor %}
+      mv "$TMP" "$STATE"
+  when: "'project_routers' in group_names or 'team_routers' in group_names or 'staging_routers' in group_names or 'custom_routers' in group_names"
+
+- name: Read current project-router routes
+  ansible.builtin.command: ip -j -4 route show
+  register: project_router_routes_current
+  changed_when: false
+  check_mode: false
+  when: "'project_routers' in group_names or 'team_routers' in group_names or 'staging_routers' in group_names or 'custom_routers' in group_names"
+
+- name: Ensure each downstream subnet has a persistent route
+  ansible.builtin.command:
+    argv:
+      - ip
+      - -4
+      - route
+      - replace
+      - "{{ item.network }}"
+      - via
+      - "{{ item.gateway }}"
+      - dev
+      - "{{ router_downstream_interface | default('eth1') }}"
+  loop: "{{ router_routes | default([]) }}"
+  when:
+    - "'project_routers' in group_names or 'team_routers' in group_names or 'staging_routers' in group_names or 'custom_routers' in group_names"
+    - >-
+      (project_router_routes_current.stdout | from_json
+      | selectattr('dst', 'defined')
+      | selectattr('dst', 'equalto', item.network)
+      | selectattr('gateway', 'defined')
+      | selectattr('gateway', 'equalto', item.gateway)
+      | selectattr('dev', 'equalto', router_downstream_interface | default('eth1'))
+      | list | length) == 0
+  changed_when: true

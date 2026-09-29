@@ -1,0 +1,29 @@
+# Local credentials and machine-specific settings
+.env
+.env.*
+!.env.example
+*.tfvars
+*.tfvars.json
+*.auto.tfvars
+*.auto.tfvars.json
+*.pem
+*.key
+*.p12
+*.pfx
+
+# Terraform working data, state, and plans
+**/.terraform/
+*.tfstate
+*.tfstate.*
+*.tfplan
+crash.log
+
+# Generated inventories and Guacamole desired/applied manifests
+ansible/inventory/generated/
+guacamole/access/*.json
+guacamole/access/.*.json
+
+# Build output and Python cache
+guacamole/crange-theme.jar
+__pycache__/
+*.py[cod]
