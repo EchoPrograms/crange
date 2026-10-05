@@ -26,12 +26,19 @@ def main():
     project_id = int(val("project_id"))
     routers = val("routers")
     jumps = val("jump_boxes")
+    from crange_jumpboxes import effective_services
+    desired_file = args.terraform_dir / 'crange.auto.tfvars.json'
+    desired = json.loads(desired_file.read_text()) if desired_file.exists() else {}
     scenario_hosts = []
-    for output_name in ("scenario_boxes", "scenario_containers"):
-        for box in (val(output_name) or {}).values():
-            if box.get("address") and box.get("guac_protocol", "ssh") == "ssh":
-                scenario_hosts.append({"address": box["address"],
-                                       "network_id": str(box.get("network_id", box.get("team_id")))})
+    vnc_hosts = []
+    for kind, output_name in (('jumpbox', 'jump_boxes'), ('vm', 'scenario_boxes'), ('container', 'scenario_containers')):
+        for key, box in (val(output_name) or {}).items():
+            selected = effective_services(desired.get(output_name, {}).get(key, box), kind)
+            endpoint = {'address': box.get('address'), 'network_id': str(box.get('network_id', box.get('team_id')))}
+            if endpoint['address'] and 'ssh' in selected:
+                scenario_hosts.append(endpoint)
+            if endpoint['address'] and 'vnc' in selected:
+                vnc_hosts.append(endpoint)
     custom_networks = routers.get("custom_networks", {})
     project_router_ip = routers["project"]["address"]
     project_network = f"10.{project_id}.0.0/16"
@@ -116,6 +123,9 @@ def main():
         groups["routers"]["children"]["team_routers"]["hosts"][host] = {
             "ansible_host": team["address"],
             "ansible_ssh_common_args": f'{common_ssh} -o ProxyCommand="{proxy}"',
+            # Large pipelined modules can close stdin early across SSH -W.
+            # Use normal module transfer for routers behind the proxy.
+            "ansible_ssh_pipelining": False,
             "router_project_gateway": project_downstream,
             "router_forward_source": lan,
             "router_team_network": lan,
@@ -154,6 +164,9 @@ def main():
         groups["routers"]["children"]["staging_routers"]["hosts"][host] = {
             "ansible_host": staging["address"],
             "ansible_ssh_common_args": f'{common_ssh} -o ProxyCommand="{proxy}"',
+            # Large pipelined modules can close stdin early across SSH -W.
+            # Use normal module transfer for routers behind the proxy.
+            "ansible_ssh_pipelining": False,
             "router_project_gateway": project_downstream,
             "router_forward_source": lan,
             "router_team_network": lan,
@@ -193,6 +206,9 @@ def main():
             "ansible_host": net["address"],
             "router_owner_team_id": owner,
             "ansible_ssh_common_args": f'{common_ssh} -o ProxyCommand="{proxy}"',
+            # Large pipelined modules can close stdin early across SSH -W.
+            # Use normal module transfer for routers behind the proxy.
+            "ansible_ssh_pipelining": False,
             "router_project_gateway": project_downstream,
             "router_forward_source": net["lan"],
             "router_forward_sources": [net["lan"]],
@@ -208,6 +224,52 @@ def main():
                 if box["network_id"] == str(net["network_id"])
             ],
         }
+
+    # Add only deployed VNC endpoints on each router in their actual route.
+    # The project router sees all project endpoints; a team router sees only
+    # its LAN and owned custom LANs. Other teams receive no new permission.
+    for group_name, group in groups['routers']['children'].items():
+        for host in group.get('hosts', {}).values():
+            if group_name == 'project_routers':
+                networks = {item['network_id'] for item in vnc_hosts}
+            else:
+                networks = {str(host['router_team_network'].split('.')[2])}
+                if group_name in ('team_routers', 'staging_routers'):
+                    parent = next(iter(networks))
+                    networks.update(str(net['network_id']) for net in custom_networks.values()
+                                    if str(net['owner_team_id']) == parent)
+            host['router_guac_vnc_targets'] = sorted({item['address'] for item in vnc_hosts if item['network_id'] in networks})
+
+    groups["scenario_containers"] = {
+        "vars": {"ansible_connection": "ssh", "ansible_user": "user", "ansible_become": True,
+                 "ansible_ssh_private_key_file": KEY, "ansible_python_interpreter": "/usr/bin/python3"},
+        "hosts": {}, "children": {},
+    }
+    containers = val("scenario_containers") or {}
+    for key, container in containers.items():
+        host = f"p{project_id:03d}_ct_{key}"
+        values = {"ansible_host": container["address"]}
+        groups["scenario_containers"]["hosts"][host] = values
+        scope = "staging_containers" if int(container["team_id"]) == 254 else f"team_{int(container['team_id']):03d}_containers"
+        groups["scenario_containers"]["children"].setdefault(scope, {"hosts": {}})["hosts"][host] = values
+
+    groups["scenario_vms"] = {
+        "vars": {"ansible_connection": "ssh", "ansible_user": "user", "ansible_become": True,
+                 "ansible_ssh_private_key_file": KEY, "ansible_python_interpreter": "/usr/bin/python3"},
+        "hosts": {}, "children": {},
+    }
+    approved_file = args.terraform_dir / 'approved-scenario-templates.json'
+    approved_vms = json.loads(approved_file.read_text()) if approved_file.exists() else {}
+    for key, machine in (val("scenario_boxes") or {}).items():
+        template = desired.get('scenario_boxes', {}).get(key, {}).get('template')
+        profile = approved_vms.get(template, {}).get('profile', {})
+        if profile.get('os_type', 'l26') != 'l26' or profile.get('cloud_init') is False:
+            continue  # Administrator-managed Windows/BSD/manual images are not Linux Ansible targets.
+        host = f"p{project_id:03d}_vm_{key}"
+        values = {"ansible_host": machine["address"]}
+        groups["scenario_vms"]["hosts"][host] = values
+        scope = "staging_vms" if int(machine["team_id"]) == 254 else f"team_{int(machine['team_id']):03d}_vms"
+        groups["scenario_vms"]["children"].setdefault(scope, {"hosts": {}})["hosts"][host] = values
 
     for key, jump in jumps.items():
         address = jump["address"]

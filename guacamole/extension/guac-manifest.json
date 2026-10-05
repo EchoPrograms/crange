@@ -1,6 +1,9 @@
 {
   "guacamoleVersion": "1.6.0",
-  "name": "CRANGE dark theme",
+  "name": "CRANGE interface",
   "namespace": "crange-theme",
-  "css": ["theme.css"]
+  "css": ["theme.css"],
+  "js": ["ui.js"],
+  "authProviders": ["org.crange.guac.CrangeBridgeProvider"],
+  "translations": ["translations/en.json"]
 }

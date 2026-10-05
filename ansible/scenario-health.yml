@@ -1,5 +1,5 @@
 ---
-- name: Check scenario service from its team router
+- name: Check scenario service from its network router
   hosts: routers
   gather_facts: false
   tasks:

@@ -4,7 +4,7 @@
     name: dnsmasq
     state: present
     update_cache: false
-  when: "'custom_routers' in group_names"
+  when: "'team_routers' in group_names or 'staging_routers' in group_names or 'custom_routers' in group_names"
 
 - name: Configure DHCP service for this team subnet
   ansible.builtin.copy:

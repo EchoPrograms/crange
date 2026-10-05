@@ -1,0 +1,24 @@
+NFS_CORE_PARAM {
+    Protocols = 4;
+    NFS_Port = 2049;
+    Enable_UDP = false;
+}
+
+EXPORT {
+    Export_Id = 1;
+    Path = /srv/crange-library;
+    Pseudo = /crange-library;
+    Filesystem_id = 1.1;
+    Protocols = 4;
+    Transports = TCP;
+    Access_Type = None;
+    SecType = sys;
+    CLIENT {
+        Clients = 10.0.0.101, 10.0.0.102, 10.0.0.103, 10.0.0.104, 10.0.0.105, 10.60.0.20;
+        Access_Type = RW;
+        Squash = No_Root_Squash;
+    }
+    FSAL {
+        Name = VFS;
+    }
+}

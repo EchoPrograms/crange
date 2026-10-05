@@ -1,0 +1,31 @@
+---
+# Administrator only: never expose this host playbook through project workers.
+- name: Permit the library's userspace NFS file handles
+  hosts: library_host
+  become: true
+  tasks:
+    - name: Read the installed LXC seccomp baseline
+      ansible.builtin.slurp:
+        src: /usr/share/lxc/config/common.seccomp
+      register: lxc_seccomp_baseline
+
+    - name: Ensure dedicated LXC configuration directory exists
+      ansible.builtin.file:
+        path: /etc/lxc
+        state: directory
+        mode: '0755'
+
+    - name: Preserve the baseline except Ganesha's required file-handle syscall
+      ansible.builtin.copy:
+        dest: /etc/lxc/crange-library-145.seccomp
+        content: "{{ (lxc_seccomp_baseline.content | b64decode) | regex_replace('(?m)^open_by_handle_at errno 1\\n', '') }}"
+        owner: root
+        group: root
+        mode: '0644'
+
+    - name: Apply the dedicated profile only to CT145
+      ansible.builtin.lineinfile:
+        path: /etc/pve/lxc/145.conf
+        regexp: '^lxc.seccomp.profile:'
+        line: 'lxc.seccomp.profile: /etc/lxc/crange-library-145.seccomp'
+      # Reboot CT145 explicitly after a reviewed profile change.

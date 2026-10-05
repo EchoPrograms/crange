@@ -15,8 +15,8 @@
       ansible.builtin.apt:
         name: ufw
         state: present
-        update_cache: false
-      when: "'custom_routers' in group_names"
+        update_cache: true
+        cache_valid_time: 3600
 
     - name: Configure persistent project routes
       ansible.builtin.import_tasks: tasks/project-routes.yml

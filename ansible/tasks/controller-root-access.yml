@@ -1,0 +1,34 @@
+---
+- name: Create root SSH directory
+  ansible.builtin.file:
+    path: /root/.ssh
+    state: directory
+    owner: root
+    group: root
+    mode: '0700'
+
+- name: Authorize controller key for root without forwarding or a terminal
+  ansible.builtin.lineinfile:
+    path: /root/.ssh/authorized_keys
+    create: true
+    owner: root
+    group: root
+    mode: '0600'
+    regexp: '^.*{{ controller_public_key.split()[1] | regex_escape }}(?: .*)?$'
+    line: 'restrict {{ controller_public_key }}'
+
+- name: Read effective root authentication policy
+  ansible.builtin.command:
+    argv: [/usr/sbin/sshd, -T]
+  register: ssh_policy
+  changed_when: false
+
+- name: Require key authentication for root
+  ansible.builtin.lineinfile:
+    path: /etc/ssh/sshd_config
+    insertbefore: BOF
+    regexp: '^PermitRootLogin '
+    line: PermitRootLogin prohibit-password
+    validate: '/usr/sbin/sshd -t -f %s'
+  when: "'permitrootlogin without-password' not in ssh_policy.stdout and 'permitrootlogin prohibit-password' not in ssh_policy.stdout"
+  notify: Reload guest SSH

@@ -1,0 +1,125 @@
+---
+- name: Configure unique SSH identities for scenario containers
+  hosts: scenario_containers
+  gather_facts: false
+  become: true
+  tasks:
+    - name: Create the guest identity helper directory
+      ansible.builtin.file:
+        path: /usr/local/sbin
+        state: directory
+        owner: root
+        group: root
+        mode: "0755"
+
+    - name: Install the fixed guest identity helper
+      ansible.builtin.copy:
+        src: "{{ playbook_dir }}/../scripts/crange_guest_identity.py"
+        dest: /usr/local/sbin/crange-hostkeys
+        owner: root
+        group: root
+        mode: "0755"
+
+    - name: Detect the guest service manager
+      ansible.builtin.stat:
+        path: /run/systemd/system
+      register: guest_systemd
+
+    - name: Install clone host-key regeneration before SSH starts
+      ansible.builtin.copy:
+        dest: /etc/systemd/system/crange-hostkeys.service
+        owner: root
+        group: root
+        mode: "0644"
+        content: |
+          [Unit]
+          Description=Generate unique SSH keys for this CRANGE instance
+          Before=ssh.service sshd.service
+          [Service]
+          Type=oneshot
+          ExecStart=/usr/local/sbin/crange-hostkeys
+          RemainAfterExit=yes
+          [Install]
+          WantedBy=multi-user.target
+      when: guest_systemd.stat.exists
+
+    - name: Create SSH service override directory
+      ansible.builtin.file:
+        path: /etc/systemd/system/ssh.service.d
+        state: directory
+        owner: root
+        group: root
+        mode: "0755"
+      when: guest_systemd.stat.exists
+
+    - name: Ensure socket-activated SSH waits for host-key regeneration
+      ansible.builtin.copy:
+        dest: /etc/systemd/system/ssh.service.d/crange-hostkeys.conf
+        owner: root
+        group: root
+        mode: "0644"
+        content: |
+          [Unit]
+          Requires=crange-hostkeys.service
+          After=crange-hostkeys.service
+      when: guest_systemd.stat.exists
+
+    - name: Enable the guest identity service
+      ansible.builtin.systemd:
+        name: crange-hostkeys.service
+        enabled: true
+        daemon_reload: true
+      when: guest_systemd.stat.exists
+
+    - name: Install Alpine clone identity startup
+      ansible.builtin.copy:
+        dest: /etc/init.d/crange-hostkeys
+        owner: root
+        group: root
+        mode: "0755"
+        content: |
+          #!/sbin/openrc-run
+          depend() { need localmount hostname; before sshd; }
+          start() { /usr/local/sbin/crange-hostkeys; }
+      when: not guest_systemd.stat.exists
+
+    - name: Enable Alpine clone identity startup
+      ansible.builtin.command:
+        argv: [rc-update, add, crange-hostkeys, boot]
+      register: openrc_identity
+      changed_when: "'added' in openrc_identity.stdout"
+      when: not guest_systemd.stat.exists
+
+    - name: Ensure this instance has its own host keys
+      ansible.builtin.command:
+        argv: [/usr/local/sbin/crange-hostkeys]
+      register: identity
+      changed_when: (identity.stdout | from_json).rotated or (identity.stdout | from_json).generated
+      notify: Restart guest SSH with new host keys
+
+    - name: Ensure container SSH is running
+      ansible.builtin.systemd:
+        name: ssh
+        state: started
+        enabled: true
+      when: guest_systemd.stat.exists
+
+    - name: Ensure Alpine SSH is running
+      ansible.builtin.command:
+        argv: [rc-service, sshd, start]
+      when: not guest_systemd.stat.exists
+      changed_when: false
+
+  handlers:
+    - name: Restart systemd SSH with new host keys
+      listen: Restart guest SSH with new host keys
+      ansible.builtin.systemd:
+        name: ssh
+        state: restarted
+      when: guest_systemd.stat.exists
+
+    - name: Restart Alpine SSH with new host keys
+      listen: Restart guest SSH with new host keys
+      ansible.builtin.command:
+        argv: [rc-service, sshd, restart]
+      when: not guest_systemd.stat.exists

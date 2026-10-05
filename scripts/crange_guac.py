@@ -24,6 +24,35 @@ def _env_file(path):
             values[key.strip()] = value.strip().strip('"\'')
     return values
 
+def guest_parameters(record):
+    """Resolve guest credentials at use time; never put passwords in manifests."""
+    values = _env_file(os.environ.get('CRANGE_GUACAMOLE_ENV', '/home/crange/.config/crange/guacamole.env'))
+    protocol = record.get('protocol', 'ssh')
+    if protocol not in ('ssh', 'rdp', 'vnc'):
+        raise GuacamoleError('Unsupported remote access protocol.')
+    params = {'hostname': str(record['address']),
+              'port': str(record.get('port') or {'ssh': 22, 'rdp': 3389, 'vnc': 5900}[protocol])}
+    username = values.get('GUACAMOLE_GUEST_USERNAME', '')
+    password = values.get('GUACAMOLE_GUEST_PASSWORD', '')
+    from crange_guest_credentials import resolve
+    try:
+        custom = resolve(record)
+    except ValueError as exc:
+        raise GuacamoleError(str(exc)) from exc
+    if custom:
+        username, password = custom['username'], custom['password']
+    if username and protocol != 'vnc':
+        params['username'] = username
+    if password:
+        params['password'] = password
+    if protocol == 'rdp':
+        params.update({'ignore-cert': 'true', 'security': 'any'})
+    elif protocol == 'ssh':
+        params.setdefault('username', '')
+        params['host-key'] = ''
+    return params
+
+
 class GuacamoleClient:
     def __init__(self, base_url=None, username=None, password=None, opener=urlopen):
         values = _env_file(os.environ.get('CRANGE_GUACAMOLE_ENV', '/home/crange/.config/crange/guacamole.env'))
@@ -61,12 +90,7 @@ class GuacamoleClient:
     @staticmethod
     def _connection_payload(record):
         protocol = record.get('protocol', 'ssh')
-        port = str(record.get('port') or (3389 if protocol == 'rdp' else 22))
-        params = {'hostname': record['address'], 'port': port}
-        if protocol == 'rdp':
-            params.update({'ignore-cert': 'true', 'security': 'any'})
-        else:
-            params.update({'username': '', 'host-key': ''})
+        params = guest_parameters(record)
         # Guacamole's REST mapper expects both the parent and attributes keys
         # even when the connection lives at the root and has no attributes.
         return {'parentIdentifier': 'ROOT', 'name': record['name'],
@@ -75,9 +99,10 @@ class GuacamoleClient:
     def apply(self, manifest, state_path=None):
         self.login()
         source = self.data_source
-        users = self._request('GET', f'/api/session/data/{source}/users') or {}
+        managed_json_auth = manifest.get('auth_mode') == 'crange-json'
+        users = {} if managed_json_auth else (self._request('GET', f'/api/session/data/{source}/users') or {})
         missing = sorted({u['username'] for u in manifest.get('users', []) if u['username'] not in users})
-        if missing:
+        if missing and not managed_json_auth:
             raise GuacamoleError('Guacamole users must be provisioned before access can be applied: ' + ', '.join(missing))
         connections = self._request('GET', f'/api/session/data/{source}/connections') or {}
         state_path = Path(state_path) if state_path else None
@@ -89,6 +114,8 @@ class GuacamoleClient:
                 raise GuacamoleError(f'Cannot read Guacamole ownership state: {exc}') from exc
         owned = {str(item['name']): str(item['identifier']) for item in old.get('connections', []) if item.get('name') and item.get('identifier')}
         desired = {str(item['name']): item for item in manifest.get('connections', [])}
+        if len(desired) != len(manifest.get('connections', [])):
+            raise GuacamoleError('Duplicate Guacamole connection names; choose unique box display names.')
         identifiers, applied = {}, []
         for name, record in desired.items():
             if not record.get('address'):
@@ -109,11 +136,10 @@ class GuacamoleClient:
                 self._request('PUT', f'/api/session/data/{source}/connections/{identifier}', self._connection_payload(record))
             identifiers[name] = identifier
             applied.append(name)
-        resource_identifiers = {}
-        for name, record in desired.items():
-            resource_identifiers[name] = identifiers[name]
-            if record.get('key'):
-                resource_identifiers[str(record['key'])] = identifiers[name]
+        from crange_jumpboxes import resource_identifiers as index_resources
+        resource_identifiers = index_resources([{**record, 'identifier': identifiers[name]}
+                                               for name, record in desired.items()])
+        identifier_resources = {identifiers[name]: record.get('key', name) for name, record in desired.items()}
         desired_grants = set()
         for user in manifest.get('users', []):
             keys = set(user.get('connection_keys', []))
@@ -127,13 +153,14 @@ class GuacamoleClient:
                 teams = {str(t) for t in team_values}
                 keys.update(record.get('key', record.get('name', '')) for record in manifest.get('connections', [])
                             if record.get('default_for_team') and str(record.get('team_id')) in teams)
-            desired_grants.update((user['username'], resource_identifiers[key])
-                                  for key in keys if key in resource_identifiers)
+            desired_grants.update((user['username'], identifier)
+                                  for key in keys for identifier in resource_identifiers.get(key, set()))
         previous_grants = {(g.get('username'), str(g.get('identifier'))) for g in old.get('permissions', []) if g.get('username') and g.get('identifier')}
-        for username, identifier in sorted(desired_grants - previous_grants):
+        database_grants = set() if managed_json_auth else desired_grants
+        for username, identifier in sorted(database_grants - previous_grants):
             self._request('PATCH', f'/api/session/data/{source}/users/{username}/permissions',
                           [{'op': 'add', 'path': f'/connectionPermissions/{identifier}', 'value': 'READ'}])
-        for username, identifier in sorted(previous_grants - desired_grants):
+        for username, identifier in sorted(previous_grants - database_grants):
             self._request('PATCH', f'/api/session/data/{source}/users/{username}/permissions',
                           [{'op': 'remove', 'path': f'/connectionPermissions/{identifier}', 'value': 'READ'}])
         for name, identifier in sorted(owned.items()):
@@ -142,9 +169,13 @@ class GuacamoleClient:
             self._request('DELETE', f'/api/session/data/{source}/connections/{identifier}')
         if state_path:
             state_path.parent.mkdir(parents=True, exist_ok=True)
-            payload = json.dumps({'schema_version': 1,
-                                  'connections': [{'name': n, 'identifier': i} for n, i in sorted(identifiers.items())],
-                                  'permissions': [{'username': u, 'identifier': i} for u, i in sorted(desired_grants)]},
+            payload = json.dumps({'schema_version': 2,
+                                  'connections': [{**desired[n], 'name': n, 'identifier': i,
+                                                  'resource_key': desired[n].get('key', n)}
+                                                 for n, i in sorted(identifiers.items())],
+                                  'permissions': [{'username': u, 'identifier': i,
+                                                   'resource_key': identifier_resources[i]}
+                                                  for u, i in sorted(desired_grants)]},
                                  indent=2, sort_keys=True) + '\n'
             fd, temporary = tempfile.mkstemp(prefix=state_path.name + '.', dir=state_path.parent)
             try:

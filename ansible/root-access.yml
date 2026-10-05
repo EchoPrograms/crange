@@ -1,0 +1,19 @@
+---
+- name: Install controller root access on managed Linux guests
+  hosts: jumpboxes:scenario_containers:scenario_vms
+  become: true
+  gather_facts: false
+  vars:
+    controller_public_key: "{{ lookup('ansible.builtin.file', lookup('ansible.builtin.env', 'HOME') + '/.ssh/id_ed25519_range.pub') }}"
+  tasks:
+    - name: Install key access
+      ansible.builtin.import_tasks: tasks/controller-root-access.yml
+  handlers:
+    - name: Reload guest SSH
+      ansible.builtin.shell: |
+        if test -d /run/systemd/system; then
+          systemctl restart ssh.service || systemctl restart sshd.service
+        else
+          rc-service sshd reload
+        fi
+      changed_when: true

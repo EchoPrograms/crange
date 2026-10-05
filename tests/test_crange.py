@@ -24,6 +24,8 @@ class CrangeConfigTests(unittest.TestCase):
         crange.ENVS.mkdir()
         self.project = crange.ENVS / "project-003"
         self.project.mkdir()
+        (self.project / "template-profile.json").write_text(json.dumps({
+            "bios": "seabios", "machine": None, "scsi_hardware": "virtio-scsi-single", "os_type": "l26"}))
         template = crange.ENVS / "project-template"
         template.mkdir()
         (template / "main.tf").write_text("terraform {}\n")
@@ -62,11 +64,16 @@ jump_boxes = {
         self.assertEqual(cfg["jump_boxes"]["team1_jump01"]["node_name"], "proxmox4")
 
     def test_box_add_preserves_existing_declarations(self):
+        cfg = crange.json_config(self.project)
+        cfg["jump_boxes"]["team1_jump01"]["full_clone"] = False
+        crange.save_config(self.project, cfg)
         args = SimpleNamespace(project="3", name="t001-j02", team=1, node="proxmox4", cores=2, memory=4096, full_clone=None)
         crange.mutate_box(args, True)
         result = json.loads((self.project / "crange.auto.tfvars.json").read_text())
         self.assertIn("team1_jump01", result["jump_boxes"])
         self.assertIn("t001-j02", result["jump_boxes"])
+        self.assertTrue(result["jump_boxes"]["t001-j02"]["full_clone"])
+        self.assertFalse(result["jump_boxes"]["team1_jump01"]["full_clone"])
 
     def test_custom_network_adds_router_and_places_jump_box(self):
         net_args = SimpleNamespace(project="3", name="corp", team=1, network_id=100, node="proxmox4")
@@ -151,6 +158,27 @@ jump_boxes = {
         release = crange.load_release(3, "3.0")
         self.assertEqual(release["scenario"]["boot_order_permutations"], [["web", "db"], ["db", "web"]])
 
+    def test_release_clones_keep_guacamole_protocol_and_default_legacy_to_ssh(self):
+        vm = {"name": "desktop", "ip_last_octet": 20, "template": "approved-base",
+              "node_name": "proxmox4", "cores": 2, "memory_mb": 2048,
+              "full_clone": False, "started": True, "health_checks": [{"type": "ping"}]}
+        ct = dict(vm, template="approved-ct-base")
+        for protocol in (None, 'ssh', 'rdp'):
+            with self.subTest(protocol=protocol):
+                for item in (vm, ct):
+                    if protocol is not None:
+                        item['guac_protocol'] = protocol
+                    else:
+                        item.pop('guac_protocol', None)
+                release = {"release_id": "p003-1.0", "scenario": {
+                    "boxes": [vm], "containers": [ct], "templates": {
+                        "approved-base": {"template_id": 112, "template_node": "proxmox4"},
+                        "approved-ct-base": {"template_id": 120, "template_node": "proxmox4"}}}}
+                boxes = crange.release_scenario_boxes(self.project, release, "1", "release-1")
+                containers = crange.release_scenario_containers(self.project, release, "1", "release-1")
+                self.assertEqual(next(iter(boxes.values()))['guac_protocol'], protocol or 'ssh')
+                self.assertEqual(next(iter(containers.values()))['guac_protocol'], protocol or 'ssh')
+
     def test_scenario_add_checks_team_template_and_ip(self):
         args = SimpleNamespace(
             project="3", name="web", team=0, ip=20, template="approved-base",
@@ -161,6 +189,7 @@ jump_boxes = {
         result = json.loads((self.project / "crange.auto.tfvars.json").read_text())
         self.assertEqual(result["scenario_boxes"]["t254-web"]["team_id"], "254")
         self.assertEqual(result["scenario_boxes"]["t254-web"]["ip_last_octet"], 20)
+        self.assertTrue(result["scenario_boxes"]["t254-web"]["full_clone"])
         args.name = "other"
         with self.assertRaisesRegex(crange.CrangeError, "already assigned"):
             crange.cmd_scenario_add(args)

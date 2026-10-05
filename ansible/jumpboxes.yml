@@ -6,3 +6,5 @@
 
   roles:
     - jumpbox
+  tasks:
+    - ansible.builtin.import_tasks: tasks/guest-swap.yml

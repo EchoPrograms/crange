@@ -16,6 +16,13 @@ class ServiceTests(unittest.TestCase):
         self.assertIn('WorkingDirectory=/home/crange/crange', unit)
         self.assertIn('"/home/crange/crange/scripts/crange.py"', unit)
 
+    def test_compat_service_is_unprivileged_and_uses_fixed_adapter(self):
+        unit = unit_text('/repo', 'crange', '/home/crange', '/usr/bin/python3', role='proxmox-compat')
+        self.assertIn('User=crange\n', unit)
+        self.assertIn('scripts/crange_proxmox_compat.py', unit)
+        self.assertIn('NoNewPrivileges=true', unit)
+        self.assertNotIn('proxmox.env', unit)
+
     def test_rejects_unit_directive_injection(self):
         with self.assertRaises(ValueError):
             unit_text('/repo', 'crange\nUser=root', '/home/crange', '/usr/bin/python3')
@@ -28,3 +35,12 @@ class ServiceTests(unittest.TestCase):
         self.assertIn('User=crange\n', worker)
         self.assertIn('scripts/crange.py" worker', worker)
         self.assertNotIn('CRANGE_WORKER_EXTERNAL=1', worker)
+
+    def test_guacamole_ticket_broker_uses_private_unix_socket(self):
+        broker = unit_text('/home/crange/crange', 'crange', '/home/crange', '/usr/bin/python3', role='guac-broker')
+        self.assertIn('User=crange\n', broker)
+        self.assertIn('CRANGE_GUAC_JSON_KEY=/home/crange/.config/crange/guacamole-json.secret', broker)
+        self.assertIn('RuntimeDirectory=crange-guac', broker)
+        self.assertIn('RuntimeDirectoryMode=0770', broker)
+        self.assertIn('scripts/crange.py" guac-ticket-broker', broker)
+        self.assertNotIn('GUACAMOLE_PASSWORD', broker)

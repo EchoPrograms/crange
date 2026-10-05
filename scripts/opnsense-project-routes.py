@@ -6,6 +6,7 @@ import json
 import os
 import ssl
 import sys
+import time
 import urllib.error
 import urllib.request
 
@@ -95,6 +96,17 @@ def ensure(spec):
                 "refusing to create a duplicate."
             )
 
+    # Check route conflicts before creating a gateway so refusal leaves no orphan.
+    route_doc = api("GET", "/api/routes/routes/get")
+    routes = route_doc.get("route", {}).get("route", {})
+    matches = [(uuid, item) for uuid, item in routes.items() if item.get("network") == network]
+    if len(matches) > 1:
+        raise RuntimeError(f"Found multiple routes for {network}; refusing ambiguous changes.")
+    if matches:
+        current = matches[0][1]
+        if selected_choice(current.get("gateway")) != gname and current.get("descr") != f"CRANGE managed project p{pid:03d}":
+            raise RuntimeError(f"Route {network} is unmanaged or belongs to another project; refusing to overwrite it.")
+    changed = False
     if gateway_uuid is None:
         payload = {"gateway_item": {
             "disabled": "0",
@@ -116,6 +128,7 @@ def ensure(spec):
             "weight": "1",
         }}
         api("POST", "/api/routing/settings/add_gateway", payload)
+        changed = True
         api("POST", "/api/routing/settings/reconfigure", {})
         gateway_doc = api("GET", "/api/routing/settings/get")
         existing_gateways = gateway_doc.get("gateways", {}).get("gateway_item", {})
@@ -127,9 +140,19 @@ def ensure(spec):
     else:
         print(f"Gateway {gname} already matches ({gateway_ip} on {interface})")
 
-    route_doc = api("GET", "/api/routes/routes/get")
-    routes = route_doc.get("route", {}).get("route", {})
-    matches = [(uuid, item) for uuid, item in routes.items() if item.get("network") == network]
+    # Gateway choices are populated through configd and may lag a new gateway.
+    # Confirm its availability before a route write instead of submitting a
+    # value the route model still considers invalid.
+    if not matches or selected_choice(matches[0][1].get("gateway")) != gname:
+        deadline = time.monotonic() + 30
+        while True:
+            choices = api("GET", "/api/routes/routes/getroute").get("route", {}).get("gateway", {})
+            if isinstance(choices, dict) and gname in choices:
+                break
+            if time.monotonic() >= deadline:
+                raise RuntimeError(f"Gateway {gname} is saved but not yet available to the route API; retry route synchronization.")
+            time.sleep(1)
+
     route_payload = {"route": {
         "network": network,
         "gateway": gname,
@@ -138,6 +161,7 @@ def ensure(spec):
     }}
     if not matches:
         api("POST", "/api/routes/routes/addroute", route_payload)
+        changed = True
         print(f"Created OPNsense route {network} via {gname}")
     else:
         uuid, current = matches[0]
@@ -146,14 +170,18 @@ def ensure(spec):
             print(f"Route {network} already points to {gname}")
         elif str(current.get("descr", "")).startswith("CRANGE managed project "):
             api("POST", f"/api/routes/routes/setroute/{uuid}", route_payload)
+            changed = True
             print(f"Updated managed OPNsense route {network} to use {gname}")
         else:
             raise RuntimeError(
                 f"Route {network} already exists via {current_gateway} with description "
                 f"{current.get('descr')!r}; refusing to overwrite an unmanaged route."
             )
-    api("POST", "/api/routes/routes/reconfigure", {})
-    print("OPNsense routing configuration applied")
+    if changed:
+        api("POST", "/api/routes/routes/reconfigure", {})
+        print("OPNsense routing configuration applied")
+    else:
+        print("OPNsense routing already matches; no changes applied")
 
 
 

@@ -1,0 +1,64 @@
+{
+  "schema_version": 1,
+  "template_id": 3015,
+  "node": "proxmox4",
+  "kind": "vm",
+  "os": "debian-13",
+  "source": "https://cloud.debian.org/images/cloud/trixie/latest/debian-13-genericcloud-amd64.qcow2",
+  "source_checksum": "95e110dfcdbd0ed8a82a75ed9579802f9950cabf51a810dcc6388e81bc778188713878b9f28d583a0ea602fbf48b35996ae9ad37f584166d8fbd6489df248f53",
+  "checksum_algorithm": "sha512",
+  "builder_sha256": "9d4026803511ff599afabeb494b7ccd33f1f4a7023d6ac5b6b9bf02e7140e6cb",
+  "built_at": "2026-09-30T21:47:57.358027+00:00",
+  "status": "clone-verified",
+  "customized_sha256": "cf84974e3a1fe8fb6d4769077a766c230fab6e9456e6ceef222ab76430eef33f",
+  "hostname": "crange-base-debian-13",
+  "post_build_config": {
+    "ciupgrade": false
+  },
+  "clone_checks": [
+    {
+      "vmid": 3116,
+      "hostname": "crange-verify-debian-v2-a",
+      "ip": "10.60.0.220",
+      "fingerprint": "256 SHA256:u9uo+Ny+Bsykol0prbhFX0lXPqwBiszip4QFmUkvo+I root@crange-verify-debian-v2-a (ED25519)",
+      "machine_id": "e4566e0c1eda4bb3be4eeb4c8543ffac",
+      "guest_agent": true,
+      "cloud_init_advisories": {
+        "DEPRECATED": [
+          "'user' of type string is deprecated in 22.2 and scheduled to be removed in 27.2. Use 'users' list instead.",
+          "'user' of type string is deprecated in 22.2 and scheduled to be removed in 27.2. Use 'users' list instead."
+        ]
+      },
+      "controller_ssh": true,
+      "passwordless_sudo": true,
+      "graceful_shutdown": true
+    },
+    {
+      "vmid": 3117,
+      "hostname": "crange-verify-debian-v2-b",
+      "ip": "10.60.0.122",
+      "fingerprint": "256 SHA256:4tcJK4LRbPeaFmugiZViNZv6XE+CFsOBOrD4+OSU4uA root@crange-verify-debian-v2-b (ED25519)",
+      "machine_id": "e79e28986c1949efbf9c8151ccd70742",
+      "guest_agent": true,
+      "cloud_init_advisories": {
+        "DEPRECATED": [
+          "'user' of type string is deprecated in 22.2 and scheduled to be removed in 27.2. Use 'users' list instead.",
+          "'user' of type string is deprecated in 22.2 and scheduled to be removed in 27.2. Use 'users' list instead."
+        ]
+      },
+      "controller_ssh": true,
+      "passwordless_sudo": true,
+      "graceful_shutdown": true
+    }
+  ],
+  "static_network_check": {
+    "vmid": 3116,
+    "address": "10.60.0.220",
+    "reboot_persistence": true,
+    "host_key_persistence": true,
+    "password_login": true,
+    "graceful_shutdown": true,
+    "dns": true,
+    "https_egress": true
+  }
+}

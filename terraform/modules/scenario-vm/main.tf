@@ -8,12 +8,13 @@ terraform {
 }
 
 locals {
-  project = format("p%03d", var.box.project_id)
-  team    = format("t%03d", var.box.team_id)
-  vnet    = "${local.project}${local.team}"
-  name    = "${local.vnet}-${var.box.name}"
-  ip      = "10.${var.box.project_id}.${var.box.team_id}.${var.box.ip_last_octet}"
-  gateway = "10.${var.box.project_id}.${var.box.team_id}.1"
+  project    = format("p%03d", var.box.project_id)
+  team       = format("t%03d", var.box.team_id)
+  network_id = coalesce(var.box.network_id, var.box.team_id)
+  vnet       = coalesce(var.box.network_vnet, "${local.project}${local.team}")
+  name       = "${local.vnet}-${var.box.name}"
+  ip         = "10.${var.box.project_id}.${local.network_id}.${var.box.ip_last_octet}"
+  gateway    = "10.${var.box.project_id}.${local.network_id}.1"
 }
 
 resource "proxmox_virtual_environment_vm" "scenario" {
@@ -29,18 +30,19 @@ resource "proxmox_virtual_environment_vm" "scenario" {
   bios          = var.template_profile.bios
   machine       = var.template_profile.machine
   scsi_hardware = var.template_profile.scsi_hardware
-  boot_order    = ["scsi0"]
+  boot_order    = var.template_profile.boot_order
 
   clone {
-    vm_id     = var.box.template_id
-    node_name = var.box.template_node
-    full      = var.box.full_clone
+    vm_id        = var.box.template_id
+    node_name    = var.box.template_node
+    full         = var.box.full_clone
+    datastore_id = var.box.full_clone ? var.box.datastore_id : null
   }
 
   cpu {
     cores   = var.box.cores
     sockets = 1
-    type    = "host"
+    type    = var.template_profile.cpu_type
   }
 
   memory {
@@ -52,7 +54,7 @@ resource "proxmox_virtual_environment_vm" "scenario" {
   }
 
   agent {
-    enabled = false
+    enabled = var.template_profile.agent_enabled
     timeout = "5m"
   }
 
@@ -61,31 +63,38 @@ resource "proxmox_virtual_environment_vm" "scenario" {
     file_id   = "none"
   }
 
-  network_device {
-    bridge   = local.vnet
-    model    = "virtio"
-    firewall = true
-    mtu      = 1450
+  dynamic "network_device" {
+    for_each = var.template_profile.network_models
+    content {
+      bridge   = local.vnet
+      model    = network_device.value
+      firewall = true
+      mtu      = 1450
+    }
   }
 
-  initialization {
-    datastore_id = "local-lvm"
-    interface    = "ide0"
+  dynamic "initialization" {
+    for_each = var.template_profile.cloud_init ? [1] : []
+    content {
+      upgrade      = var.template_profile.upgrade_packages
+      datastore_id = var.box.datastore_id
+      interface    = "ide0"
 
-    dns {
-      servers = ["10.60.2.1"]
-    }
-
-    ip_config {
-      ipv4 {
-        address = "${local.ip}/24"
-        gateway = local.gateway
+      dns {
+        servers = ["10.60.2.1"]
       }
-    }
 
-    user_account {
-      username = "user"
-      keys     = [trimspace(var.ssh_public_key)]
+      ip_config {
+        ipv4 {
+          address = "${local.ip}/24"
+          gateway = local.gateway
+        }
+      }
+
+      user_account {
+        username = "user"
+        keys     = [trimspace(var.ssh_public_key)]
+      }
     }
   }
 
@@ -106,4 +115,15 @@ output "vm_id" {
 
 output "ip_address" {
   value = local.ip
+}
+
+output "placement" {
+  value = {
+    image_id      = var.box.image_id
+    node_name     = proxmox_virtual_environment_vm.scenario.node_name
+    datastore_id  = try(proxmox_virtual_environment_vm.scenario.disk[0].datastore_id, var.box.datastore_id)
+    template_id   = var.box.template_id
+    template_node = var.box.template_node
+    clone_mode    = var.box.full_clone ? "full" : "linked"
+  }
 }

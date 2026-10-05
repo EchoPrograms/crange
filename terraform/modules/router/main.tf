@@ -20,9 +20,27 @@ resource "proxmox_virtual_environment_container" "router" {
     var.router.tags
   )))
 
-  operating_system {
-    template_file_id = var.router.template_file_id
-    type             = "debian"
+  dynamic "operating_system" {
+    for_each = var.router.template_id == null ? [1] : []
+    content {
+      template_file_id = var.router.template_file_id
+      type             = "debian"
+    }
+  }
+  dynamic "clone" {
+    for_each = var.router.template_id == null ? [] : [1]
+    content {
+      vm_id        = var.router.template_id
+      node_name    = var.router.template_node
+      full         = true
+      datastore_id = var.router.datastore_id
+    }
+  }
+  lifecycle {
+    precondition {
+      condition     = var.router.template_id == null || (var.router.template_node == var.router.node_name && var.router.full_clone)
+      error_message = "Router CT templates require a verified destination-node replica and a full clone."
+    }
   }
 
   cpu {
@@ -89,4 +107,16 @@ output "management_address" {
 
 output "downstream_gateway" {
   value = split("/", var.router.downstream_address)[0]
+}
+
+output "placement" {
+  value = {
+    image_id         = var.router.image_id
+    node_name        = proxmox_virtual_environment_container.router.node_name
+    datastore_id     = try(proxmox_virtual_environment_container.router.disk[0].datastore_id, var.router.datastore_id)
+    template_file_id = var.router.template_file_id
+    template_id      = var.router.template_id
+    template_node    = var.router.template_node
+    clone_mode       = var.router.template_id == null ? "archive" : "full"
+  }
 }

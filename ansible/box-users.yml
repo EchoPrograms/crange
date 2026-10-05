@@ -1,0 +1,138 @@
+---
+- name: Manage accounts on the selected Linux box
+  hosts: all
+  become: true
+  gather_facts: false
+  tasks:
+    - name: Install controller root access
+      ansible.builtin.import_tasks: tasks/controller-root-access.yml
+
+    - name: Inspect account database
+      ansible.builtin.getent:
+        database: passwd
+      register: accounts
+
+    - name: Protect operating-system service accounts
+      ansible.builtin.assert:
+        that:
+          - account_name not in ansible_facts.getent_passwd or (ansible_facts.getent_passwd[account_name][1] | int >= 1000 and ansible_facts.getent_passwd[account_name][1] | int < 65534)
+        fail_msg: Operating-system service accounts cannot be managed here.
+      when: account_action not in ['list', 'access']
+
+    - name: Require a new account when creating
+      ansible.builtin.assert:
+        that: account_name not in ansible_facts.getent_passwd
+        fail_msg: This username already exists on the box.
+      when: account_action == 'create'
+
+    - name: Require an existing account for changes
+      ansible.builtin.assert:
+        that: account_name in ansible_facts.getent_passwd
+        fail_msg: This username does not exist on the box.
+      when: account_action in ['password', 'grant-sudo', 'revoke-sudo', 'delete']
+
+    - name: Create account or set its password
+      ansible.builtin.user:
+        name: '{{ account_name }}'
+        state: present
+        create_home: true
+        password: '{{ account_password_hash }}'
+        update_password: always
+      no_log: true
+      when: account_action in ['create', 'password']
+
+    - name: Grant sudo through a managed policy
+      ansible.builtin.copy:
+        dest: '/etc/sudoers.d/crange-account-{{ account_name }}'
+        owner: root
+        group: root
+        mode: '0440'
+        content: |
+          {{ account_name }} ALL=(ALL:ALL) ALL
+        validate: '/usr/sbin/visudo -cf %s'
+      when: account_action == 'grant-sudo'
+
+    - name: Remove managed sudo policy
+      ansible.builtin.file:
+        path: '/etc/sudoers.d/crange-account-{{ account_name }}'
+        state: absent
+      when: account_action in ['revoke-sudo', 'delete']
+
+    - name: Read supplementary groups
+      ansible.builtin.command:
+        argv: [id, -nG, '{{ account_name }}']
+      register: current_groups
+      changed_when: false
+      when: account_action == 'revoke-sudo'
+
+    - name: Remove privileged group membership
+      ansible.builtin.user:
+        name: '{{ account_name }}'
+        groups: '{{ current_groups.stdout.split() | reject("equalto", "sudo") | reject("equalto", "wheel") | reject("equalto", "admin") | list | join(",") }}'
+        append: false
+      when: account_action == 'revoke-sudo'
+
+    - name: Check for remaining external sudo permissions
+      ansible.builtin.command:
+        argv: [sudo, -l, -U, '{{ account_name }}']
+      register: remaining_sudo
+      changed_when: false
+      environment:
+        LC_ALL: C
+      failed_when: remaining_sudo.rc != 0 or 'is not allowed to run sudo' not in remaining_sudo.stdout
+      when: account_action == 'revoke-sudo'
+
+    - name: Detect systemd session management
+      ansible.builtin.stat:
+        path: /run/systemd/system
+      register: account_systemd
+      when: account_action == 'delete'
+
+    - name: End the deleted user's systemd sessions
+      ansible.builtin.command:
+        argv: [loginctl, terminate-user, '{{ account_name }}']
+      failed_when: false
+      when: account_action == 'delete' and account_systemd.stat.exists
+
+    - name: Terminate processes owned by the deleted user
+      ansible.builtin.command:
+        argv: [pkill, -TERM, -u, '{{ account_name }}']
+      register: terminate_user
+      failed_when: terminate_user.rc not in [0, 1]
+      changed_when: terminate_user.rc == 0
+      when: account_action == 'delete'
+
+    - name: Allow user processes to finish
+      ansible.builtin.pause:
+        seconds: 1
+      when: account_action == 'delete' and terminate_user.rc == 0
+
+    - name: End remaining processes owned by the deleted user
+      ansible.builtin.command:
+        argv: [pkill, -KILL, -u, '{{ account_name }}']
+      register: kill_user
+      failed_when: kill_user.rc not in [0, 1]
+      changed_when: kill_user.rc == 0
+      when: account_action == 'delete'
+
+    - name: Delete account and its home directory
+      ansible.builtin.user:
+        name: '{{ account_name }}'
+        state: absent
+        remove: true
+      when: account_action == 'delete'
+
+    - name: List login accounts
+      ansible.builtin.debug:
+        msg: 'BOX_USERS_JSON={{ ansible_facts.getent_passwd | dict2items | selectattr("value.1", "match", "^[1-9][0-9]{3,}$") | map(attribute="key") | reject("equalto", "nobody") | list | to_json }}'
+      when: account_action == 'list'
+
+  handlers:
+    - name: Reload guest SSH
+      ansible.builtin.shell: |
+        if test -d /run/systemd/system; then
+          systemctl restart ssh.service || systemctl restart sshd.service
+        else
+          rc-service sshd reload
+        fi
+      changed_when: true

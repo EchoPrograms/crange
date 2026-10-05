@@ -1,6 +1,7 @@
 variable "router" {
   type = object({
     hostname           = string
+    image_id           = optional(string, "")
     node_name          = string
     upstream_vnet      = string
     upstream_address   = string
@@ -17,6 +18,9 @@ variable "router" {
     datastore_id = optional(string, "local-lvm")
     dns_servers  = optional(list(string), ["10.60.0.1"])
 
+    template_id   = optional(number)
+    template_node = optional(string)
+    full_clone    = optional(bool, true)
     template_file_id = optional(
       string,
       "local:vztmpl/debian-13-standard_13.6-1_amd64.tar.zst"

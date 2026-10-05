@@ -26,8 +26,8 @@ html, body, .login-ui, .client {
     box-shadow: 0 18px 60px #000b !important;
 }
 
-.login-ui .app-name,
 .login-ui .app-version,
+.login-ui .version-number,
 .login-ui .logo {
     display: none !important;
 }
@@ -52,3 +52,307 @@ button:focus, input:focus, select:focus {
 
 a { color: var(--cr-text) !important; }
 .caption, .description, .subtitle, .login-ui .notice { color: var(--cr-muted) !important; }
+
+/* Guacamole normally puts login labels behind transparent empty inputs.
+   Keep real labels above the inputs so they remain visible after typing. */
+.login-ui .login-fields .labeled-field .field-header {
+    position: static !important;
+    z-index: auto !important;
+    opacity: 1 !important;
+    margin: 1em 0 .4em !important;
+    color: var(--cr-text) !important;
+}
+.login-ui .app-name { display: block !important; color: var(--cr-text) !important; }
+.login-ui .login-fields { box-shadow: none !important; }
+
+input, select, textarea, button, .button { font-family: inherit !important; }
+textarea, .notification, .modal .notification, .menu-dropdown .menu-contents,
+.location-chooser .dropdown, .transfer-manager, .clipboard,
+.menu-body, .page, .page-body, .settings, .preferences {
+    background-color: var(--cr-panel) !important;
+    color: var(--cr-text) !important;
+    border-color: var(--cr-line) !important;
+    text-shadow: none !important;
+}
+.notification .title-bar, .page-tabs .page-list ul, .section-tabs ul,
+thead, th, .section-header {
+    background-color: var(--cr-panel-2) !important;
+    color: var(--cr-text) !important;
+    border-color: var(--cr-line) !important;
+    text-shadow: none !important;
+}
+.list-item .name, .list-item .caption, label, legend, h1, h2, h3, h4,
+td, .menu-item, .menu-item a { color: var(--cr-text) !important; }
+.list-item .usage, .version, input::placeholder, textarea::placeholder {
+    color: var(--cr-muted) !important;
+    opacity: 1;
+}
+.list-item.selected, .list-item:not(.selected) .caption:hover,
+.page-tabs .page-list li a[href]:hover, .section-tabs li a:hover,
+.page-tabs .page-list li a[href].current, .section-tabs li a.current,
+tbody tr:hover {
+    background-color: #30383d !important;
+    color: var(--cr-text) !important;
+}
+.menu-dropdown .menu-contents li a:hover {
+    background-color: #30383d !important;
+}
+.placeholder {
+    color: var(--cr-muted) !important;
+    opacity: 1 !important;
+    text-shadow: none !important;
+}
+.list-item.in-use { opacity: 1 !important; }
+.button, input[type=submit], input[type=button] {
+    background: var(--cr-panel-2) !important;
+    color: var(--cr-text) !important;
+    border: 1px solid var(--cr-line-strong) !important;
+    text-shadow: none !important;
+    box-shadow: none !important;
+}
+input:focus-visible, select:focus-visible, textarea:focus-visible,
+button:focus-visible, a:focus-visible, .button:focus-visible {
+    outline: 2px solid #c4d5df !important;
+    outline-offset: 2px;
+}
+.login-ui p.login-error, .notification.error {
+    background: #361a1d !important;
+    color: #ffd5d8 !important;
+    border-color: #bd747c !important;
+}
+/* Filter only interface icons, never remote displays or desktop thumbnails. */
+.list-item .icon, .menu .icon, .menu-dropdown .icon,
+.user-menu .icon, .menu-dropdown .menu-indicator,
+.pager .icon, .form-field .password-field .icon,
+.expandable > .caption .expand {
+    filter: invert(1) grayscale(1);
+}
+.user-menu .menu-title, .user-menu .menu-contents li a {
+    position: relative;
+    background-image: none !important;
+}
+.user-menu .menu-title::before, .user-menu .menu-contents li a::before {
+    content: "";
+    position: absolute;
+    left: .5em;
+    top: 50%;
+    transform: translateY(-50%);
+    width: 1em;
+    height: 1em;
+    background-color: var(--cr-text);
+    mask: url(images/user-icons/guac-user.svg) center / contain no-repeat;
+}
+.user-menu .menu-contents li a::before {
+    left: .75em;
+    mask-image: url(images/action-icons/guac-config-dark.svg);
+}
+.user-menu .menu-contents li a[href="#/"]::before {
+    mask-image: url(images/action-icons/guac-home-dark.svg);
+}
+.user-menu .menu-contents li a.logout::before {
+    mask-image: url(images/action-icons/guac-logout-dark.svg);
+}
+
+/* Keep every menu surface and native option readable on the dark theme. */
+.menu .menu-content, .menu-dropdown .menu-contents,
+.connection-select-menu .menu-contents, .location-chooser .dropdown,
+.guac-context-menu, .context-menu, .notification .body {
+    background-color: #1b2025 !important;
+    color: #f4f6f8 !important;
+    border-color: #78838d !important;
+}
+.menu-dropdown .menu-contents { max-width: calc(100vw - 1em); min-width: 15em; }
+.menu-dropdown .menu-contents li,
+.menu-dropdown .menu-contents li a,
+.menu-dropdown .menu-contents .full-name,
+.menu-dropdown .menu-contents .name,
+.menu .menu-content .caption,
+.menu .menu-content .description,
+.menu .menu-content .choice-description {
+    color: #e2e7ec !important;
+    text-shadow: none !important;
+}
+.menu-dropdown .menu-contents .full-name {
+    white-space: normal !important;
+    overflow-wrap: anywhere;
+    line-height: 1.5;
+}
+.menu-dropdown .menu-contents li a:hover,
+.menu-dropdown .menu-contents li a:focus,
+.menu .list-item.selected { background-color: #384957 !important; }
+.menu-dropdown .menu-contents li a:not([href]),
+.menu-dropdown .menu-contents li a.disabled {
+    color: #aab5bf !important;
+    opacity: 1 !important;
+}
+.menu select, .menu input, .menu textarea, select option, select optgroup {
+    background-color: #111820 !important;
+    color: #f4f6f8 !important;
+    border-color: #78838d !important;
+    color-scheme: dark;
+}
+/* Normalize monochrome icon artwork, rather than invert already-light icons. */
+.list-item .icon, .menu .icon, .menu-dropdown .icon,
+.menu-dropdown .menu-indicator, .pager .icon,
+.form-field .password-field .icon, .expandable > .caption .expand {
+    filter: brightness(0) invert(1) !important;
+    opacity: 1;
+}
+.menu .icon .icon, .menu-dropdown .icon .icon { filter: none !important; }
+.menu .icon.disabled, .pager .icon.disabled { opacity: .65 !important; }
+/* Sorting indicators are black CSS triangles in the stock stylesheet. */
+th .sort-order.ascending, th .sort-order.descending { filter: brightness(0) invert(1); }
+
+/* Settings tables have standalone icons outside connection-list markup. */
+.settings .icon, .preferences .icon, .page-tabs .icon {
+    filter: brightness(0) invert(1) !important;
+    opacity: 1 !important;
+}
+.settings table, .page table {
+    background-color: #18212a !important;
+    border: 1px solid #80909e !important;
+    border-collapse: collapse;
+}
+.settings th, .settings td, .page th, .page td {
+    border-color: #667887 !important;
+    color: #f4f6f8 !important;
+}
+.settings tbody tr:nth-child(even), .page tbody tr:nth-child(even) {
+    background-color: #25313b !important;
+}
+.settings tbody tr:hover, .page tbody tr:hover {
+    background-color: #3d5060 !important;
+}
+.settings thead, .settings th, .page thead, .page th {
+    background-color: #334452 !important;
+}
+input:not([type=checkbox]):not([type=radio]), textarea, select {
+    background-color: #25313b !important;
+    color: #ffffff !important;
+    border: 1px solid #94a8b9 !important;
+    box-shadow: inset 0 1px 3px #0005 !important;
+}
+input::placeholder, textarea::placeholder { color: #c0cbd4 !important; }
+
+input[type=checkbox], input[type=radio] { accent-color: #ffffff !important; color-scheme: dark; }
+
+/* CRANGE server list */
+.cr-home { min-height: 100vh; padding: 28px clamp(16px, 3vw, 48px); background: var(--cr-bg); color: var(--cr-text); }
+.cr-home * { box-sizing: border-box; }
+.cr-home-header, .cr-list-toolbar, .cr-server-row, .cr-server-head { max-width: 1600px; margin-left: auto; margin-right: auto; }
+.cr-home-header { display: flex; align-items: center; justify-content: space-between; gap: 18px; margin-bottom: 22px; }
+.cr-kicker { color: #a9b5bb; font-size: 11px; letter-spacing: .14em; font-weight: 700; }
+.cr-home h1 { font-size: 25px; line-height: 1.2; margin: 5px 0 0; }
+.cr-header-actions { display: flex; align-items: center; gap: 10px; }
+.cr-header-actions .user-menu { margin: 0; }
+.cr-list-toolbar { display: flex; align-items: center; gap: 16px; margin-bottom: 12px; }
+.cr-search-label { font-size: 13px; white-space: nowrap; }
+.cr-list-toolbar input { min-width: 260px; max-width: 450px; width: 100%; padding: 9px 12px !important; }
+.cr-server-table { max-width: 1600px; margin: 0 auto; border: 1px solid #445057; border-radius: 6px; overflow: visible; }
+.cr-server-head, .cr-server-row { display: grid; grid-template-columns: minmax(170px, 2fr) minmax(105px, 1fr) minmax(105px, 1.1fr) minmax(90px, .65fr) minmax(190px, 1.4fr) minmax(260px, 2fr); gap: 12px; align-items: center; padding: 11px 14px; }
+.cr-server-head { font-size: 11px; text-transform: uppercase; letter-spacing: .08em; color: #c6d0d4; background: #283038; border-bottom: 1px solid #56636d; }
+.cr-server-row { background: #171b1e; border-bottom: 1px solid #394248; font-size: 13px; }
+.cr-server-row:nth-child(odd) { background: #1d2226; }
+.cr-server-row:last-child { border-bottom: 0; }
+.cr-server-row:hover { background: #2a3339; }
+.cr-server-name { display: flex; align-items: center; gap: 8px; min-width: 0; font-weight: 700; }
+.cr-server-name > span:nth-child(2) { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cr-server-name small { color: #aab7bd; font-size: 11px; font-weight: 400; margin-left: auto; }
+.cr-machine-icon { color: #d4e0e5; font-size: 16px; }
+.cr-server-ip { font-variant-numeric: tabular-nums; color: #e5edf1; }
+.cr-server-location small { display: block; color: #adb9c0; font-size: 11px; margin-top: 3px; }
+.cr-status { display: inline-block; border: 1px solid #7f7c67; color: #e6d5a0; border-radius: 3px; padding: 4px 7px; text-transform: capitalize; font-size: 11px; }
+.cr-status.on { color: #b8e7c1; border-color: #659675; background: #1b3326; }
+.cr-protocols, .cr-server-manage { display: flex; align-items: center; flex-wrap: wrap; gap: 5px; }
+.cr-protocol, .cr-server-manage button, .cr-home-header button, .cr-modal button { border: 1px solid #82919a !important; border-radius: 3px !important; color: #f2f5f6 !important; background: #2c363d !important; padding: 6px 9px !important; font-size: 11px; line-height: 1.2; font-weight: 700; text-decoration: none !important; cursor: pointer; }
+.cr-protocol:hover, .cr-server-manage button:hover, .cr-home-header button:hover, .cr-modal button:hover { background: #475a66 !important; border-color: #d3e3ec !important; }
+.cr-protocol.rdp { background: #233d51 !important; }
+.cr-protocol.ssh { background: #24442d !important; }
+.cr-protocol.vnc { background: #4a394e !important; }
+.cr-server-manage button:disabled, .cr-home-header button:disabled { opacity: .45; cursor: default; }
+.cr-row-job { grid-column: 1 / -1; color: #cce1ea; border-top: 1px solid #4a565d; padding-top: 10px; text-transform: capitalize; }
+.cr-row-job pre { white-space: pre-wrap; overflow-wrap: anywhere; max-height: 170px; overflow: auto; text-transform: none; font-size: 11px; }
+.cr-empty, .cr-error { max-width: 1600px; margin: 12px auto; padding: 15px; background: #232a2f; border: 1px solid #52616b; border-radius: 4px; }
+.cr-error { color: #ffd5d8; background: #371e22; border-color: #bd747c; }
+.cr-modal-backdrop { position: fixed; z-index: 10000; inset: 0; background: #000b; display: grid; place-items: center; padding: 20px; }
+.cr-modal { background: #1c2429; color: #f3f6f8; border: 1px solid #8896a0; border-radius: 6px; box-shadow: 0 18px 70px #000d; max-height: min(80vh, 760px); overflow: auto; width: min(620px, 100%); padding: 18px; }
+.cr-modal header, .cr-modal-actions { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.cr-modal h2 { font-size: 18px; margin: 0; }
+.cr-modal .cr-close { font-size: 21px; line-height: 1; }
+.cr-help { color: #c1cdd3; font-size: 12px; line-height: 1.5; }
+.cr-snapshot-create { display: grid; grid-template-columns: 1fr auto; gap: 8px; margin: 18px 0; }
+.cr-snapshot-create label { grid-column: 1 / -1; }
+.cr-snapshot-create input { min-width: 0; padding: 8px; }
+.cr-snapshot-row { display: flex; align-items: center; gap: 8px; padding: 8px 0; border-top: 1px solid #47535a; }
+.cr-snapshot-row span { flex: 1; }
+.cr-modal-actions { justify-content: flex-end; margin-top: 18px; }
+@media (max-width: 1100px) {
+  .cr-server-head { display: none; }
+  .cr-server-row { grid-template-columns: minmax(170px, 1.7fr) minmax(100px, 1fr) minmax(100px, 1fr); }
+  .cr-server-power, .cr-protocols, .cr-server-manage { grid-row: 2; }
+}
+@media (max-width: 680px) {
+  .cr-home { padding: 16px 10px; }
+  .cr-home-header { align-items: flex-start; }
+  .cr-list-toolbar { display: block; }
+  .cr-search-label { display: block; margin-bottom: 6px; }
+  .cr-list-toolbar input { min-width: 0; max-width: none; }
+  .cr-server-row { grid-template-columns: 1fr 1fr; gap: 8px; }
+  .cr-server-name, .cr-server-manage, .cr-protocols, .cr-row-job { grid-column: 1 / -1; }
+  .cr-server-power, .cr-protocols, .cr-server-manage { grid-row: auto; }
+  .cr-server-name small { margin-left: 8px; }
+}
+
+/* Stock Guacamole ships black X artwork for live sessions. Keep only the
+   interface icon bright; do not alter pixels from remote desktops. */
+.client-tile-disconnect, .close-other-connection img, .client-panel .close-other-connection img,
+.client-tile-header img[src$="/x.svg"] { filter: brightness(0) invert(1) !important; opacity: 1 !important; }
+.client-panel .close-other-connection, .client-tile-disconnect { background-color: #243039 !important; border: 1px solid #9babb5 !important; border-radius: 3px !important; }
+
+/* Keep connection controls primary and tuck administrative actions away. */
+.cr-server-head, .cr-server-row { grid-template-columns: minmax(170px, 2fr) minmax(105px, 1fr) minmax(105px, 1.1fr) minmax(90px, .65fr) minmax(210px, 1.5fr) 40px; }
+.cr-protocols { justify-content: flex-start; gap: 8px; }
+.cr-protocol { min-width: 64px; text-align: center; padding: 10px 14px !important; font-size: 13px; border-width: 2px !important; }
+.cr-protocol.rdp { background: #285d84 !important; border-color: #79b5e0 !important; }
+.cr-protocol.ssh { background: #2d6840 !important; border-color: #83c897 !important; }
+.cr-protocol.vnc { background: #694978 !important; border-color: #c5a1d5 !important; }
+.cr-protocol:hover { filter: brightness(1.2); }
+.cr-server-manage { position: relative; justify-content: flex-end; }
+.cr-server-manage .cr-more { font-size: 24px; padding: 2px 10px !important; background: transparent !important; border-color: transparent !important; }
+.cr-server-manage.open { z-index: 5; }
+.cr-management-menu { position: absolute; top: 100%; right: 0; min-width: 150px; display: flex; flex-direction: column; gap: 3px; padding: 6px; background: #252d33; border: 1px solid #82919a; border-radius: 4px; box-shadow: 0 6px 18px #0009; }
+.cr-management-menu button { text-align: left; padding: 10px 12px !important; }
+@media (max-width: 1100px) { .cr-server-row { grid-template-columns: minmax(170px, 1.7fr) minmax(100px, 1fr) minmax(100px, 1fr); } }
+@media (max-width: 700px) { .cr-server-row { grid-template-columns: 1fr 1fr; } .cr-protocols { grid-column: 1; justify-content: flex-start; } .cr-server-manage { grid-column: 2; } }
+
+/* Float outside the row without changing table layout. */
+.cr-server-row:nth-last-child(-n+2) .cr-management-menu { top: auto; bottom: 100%; }
+.cr-server-manage .cr-more:hover, .cr-server-manage .cr-more:focus, .cr-server-manage .cr-more:active { background: transparent !important; border-color: transparent !important; box-shadow: none !important; }
+.cr-server-manage .cr-more:focus-visible { outline: 1px solid #d3e3ec; outline-offset: 2px; }
+
+/* Logout is an intentional end state, styled like the CRANGE sign-in panel. */
+.logged-out-modal guac-modal { background: #0b0c0d !important; display: flex !important; align-items: center; justify-content: center; position: fixed; inset: 0; }
+.logged-out-modal .modal-contents { display: block !important; width: min(420px, calc(100vw - 40px)) !important; margin: 0 !important; padding: 0 !important; }
+.logged-out-modal .notification { display: block; box-sizing: border-box; width: 100% !important; max-width: none !important; padding: 32px !important; text-align: left; background: #171b1e !important; border: 1px solid #445057 !important; border-radius: 8px; box-shadow: 0 20px 70px #0008; }
+.logged-out-modal .notification::before { content: "Signed out"; display: block; margin-bottom: 12px; color: #f2f5f6; font-size: 24px; font-weight: 700; }
+.logged-out-modal .notification p { margin: 0 0 24px; color: #bac5cc; font-size: 14px; line-height: 1.6; }
+.logged-out-modal .notification p:last-child { margin-bottom: 0; }
+.logged-out-modal .notification button { width: 100%; padding: 12px 16px !important; background: #2c363d !important; border: 1px solid #82919a !important; border-radius: 4px !important; color: #f2f5f6 !important; font-size: 14px; font-weight: 700; }
+.logged-out-modal .notification button:hover { background: #475a66 !important; border-color: #d3e3ec !important; }
+
+/* Bridge the pointer path between the icon and floating menu. */
+.cr-management-menu::before { content: ""; position: absolute; top: -14px; left: 0; right: 0; height: 14px; }
+.cr-server-row:nth-last-child(-n+2) .cr-management-menu::before { top: auto; bottom: -14px; }
+
+.cr-team-group { max-width: 1600px; margin: 0 auto 16px; }
+.cr-team-heading { display: flex; align-items: center; gap: 12px; width: 100%; padding: 12px 14px !important; border: 1px solid #56636d !important; border-radius: 5px !important; background: #252d33 !important; text-align: left; font-size: 14px; }
+.cr-team-heading:hover { background: #303b43 !important; }
+.cr-team-heading strong { color: #f2f5f6; }
+.cr-team-project, .cr-team-count { color: #bac5cc; font-size: 12px; }
+.cr-team-count { margin-left: auto; }
+.cr-team-group .cr-server-table { margin: 6px 0 0 16px; }
+@media (max-width: 680px) { .cr-team-heading { gap: 8px; flex-wrap: wrap; } }
+
+.cr-project-select { min-width: 160px; padding: 8px 10px !important; border: 1px solid #82919a !important; background: #252d33 !important; color: #f2f5f6 !important; font-size: 13px; }
+.cr-project-group { max-width: 1600px; margin: 0 auto 28px; }
+.cr-project-heading { margin: 24px 0 12px; padding: 0 0 10px; border-bottom: 1px solid #56636d; font-size: 19px; font-weight: 700; color: #f2f5f6; }

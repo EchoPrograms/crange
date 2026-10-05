@@ -1,0 +1,50 @@
+{
+  "schema_version": 1,
+  "template_id": 3002,
+  "node": "proxmox4",
+  "hostname": "crange-base-alpine",
+  "kind": "container",
+  "archive": "alpine-3.24-default_20260714_amd64.tar.xz",
+  "archive_sha512": "9877b74de4c4878b70450502618f7b02952e792afdbc91f146f6cba507432dae516674d0bb3a306484d58edc722ff63db1ed3c4e5b0954fb2a2773ec8d8f33bd",
+  "source": "http://download.proxmox.com/images/system/alpine-3.24-default_20260714_amd64.tar.xz",
+  "catalog_version": "20260714",
+  "builder_sha256": "921a1acacf2b13856ed089f434540ffa35c71e0a0cfc8265017b3d181c90e707",
+  "built_at": "2026-09-30T19:41:34.782116+00:00",
+  "status": "clone-verified",
+  "os_release": "NAME=\"Alpine Linux\"\nID=alpine\nVERSION_ID=3.24.1\nPRETTY_NAME=\"Alpine Linux v3.24\"\nHOME_URL=\"https://alpinelinux.org/\"\nBUG_REPORT_URL=\"https://gitlab.alpinelinux.org/alpine/aports/-/issues\"\n",
+  "clone_checks": [
+    {
+      "vmid": 3105,
+      "ip": "10.60.0.142",
+      "fingerprint": "256 SHA256:nVHYG+FChPfAzjMCYTDKWJyKANq9u4Hx6xKT7B/Wd6w root@crange-verify-alpine-a (ED25519)",
+      "machine_id": "",
+      "controller_ssh": true,
+      "passwordless_sudo": true,
+      "hostname": "crange-verify-alpine-a",
+      "graceful_shutdown": true
+    },
+    {
+      "vmid": 3106,
+      "ip": "10.60.0.248",
+      "fingerprint": "256 SHA256:Y+Ijfa41z+3B3WSAboxVqbedqLQ2q/ySO4yLQBa7DEM root@crange-verify-alpine-b (ED25519)",
+      "machine_id": "",
+      "controller_ssh": true,
+      "passwordless_sudo": true,
+      "hostname": "crange-verify-alpine-b",
+      "graceful_shutdown": true
+    }
+  ],
+  "static_network_check": {
+    "address": "10.60.0.142",
+    "prefixlen": 24,
+    "gateway": "10.60.0.1",
+    "controller_ssh": true,
+    "passwordless_sudo": true,
+    "graceful_shutdown": true,
+    "host_key_persistence": true,
+    "verification_clones_removed": [
+      3105,
+      3106
+    ]
+  }
+}

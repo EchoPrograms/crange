@@ -1,0 +1,50 @@
+{
+  "schema_version": 1,
+  "template_id": 3001,
+  "node": "proxmox4",
+  "hostname": "crange-base-ubuntu-24-04",
+  "kind": "container",
+  "archive": "ubuntu-24.04-standard_24.04-2_amd64.tar.zst",
+  "archive_sha512": "45c2978e6b97fe292ada95fe06834276015e5739a594db4de2fdfd830fa0c37942e8ae118fc1e32ffd9154b3f9378b592738b668ea3957db41f2907b86f219de",
+  "source": "http://download.proxmox.com/images/system/ubuntu-24.04-standard_24.04-2_amd64.tar.zst",
+  "catalog_version": "24.04-2",
+  "builder_sha256": "921a1acacf2b13856ed089f434540ffa35c71e0a0cfc8265017b3d181c90e707",
+  "built_at": "2026-09-30T19:38:32.626054+00:00",
+  "status": "clone-verified",
+  "os_release": "PRETTY_NAME=\"Ubuntu 24.04 LTS\"\nNAME=\"Ubuntu\"\nVERSION_ID=\"24.04\"\nVERSION=\"24.04 LTS (Noble Numbat)\"\nVERSION_CODENAME=noble\nID=ubuntu\nID_LIKE=debian\nHOME_URL=\"https://www.ubuntu.com/\"\nSUPPORT_URL=\"https://help.ubuntu.com/\"\nBUG_REPORT_URL=\"https://bugs.launchpad.net/ubuntu/\"\nPRIVACY_POLICY_URL=\"https://www.ubuntu.com/legal/terms-and-policies/privacy-policy\"\nUBUNTU_CODENAME=noble\nLOGO=ubuntu-logo\n",
+  "clone_checks": [
+    {
+      "vmid": 3103,
+      "ip": "10.60.0.135",
+      "fingerprint": "256 SHA256:yhfIeakMYvlTM/grobSN86v/oP35HIuvWlE6ADGxzSc root@crange-verify-ubuntu2404-a (ED25519)",
+      "machine_id": "87543db4e63044f09e7d720929c423d7",
+      "controller_ssh": true,
+      "passwordless_sudo": true,
+      "hostname": "crange-verify-ubuntu2404-a",
+      "graceful_shutdown": true
+    },
+    {
+      "vmid": 3104,
+      "ip": "10.60.0.150",
+      "fingerprint": "256 SHA256:gZ/4QmHk5zAb8KbdOr1f04S0ynWo3zGiP9rMhecdIfs root@crange-verify-ubuntu2404-b (ED25519)",
+      "machine_id": "caedfe8c5936457099277170d5547b13",
+      "controller_ssh": true,
+      "passwordless_sudo": true,
+      "hostname": "crange-verify-ubuntu2404-b",
+      "graceful_shutdown": true
+    }
+  ],
+  "static_network_check": {
+    "address": "10.60.0.135",
+    "prefixlen": 24,
+    "gateway": "10.60.0.1",
+    "controller_ssh": true,
+    "passwordless_sudo": true,
+    "graceful_shutdown": true,
+    "host_key_persistence": true,
+    "verification_clones_removed": [
+      3103,
+      3104
+    ]
+  }
+}

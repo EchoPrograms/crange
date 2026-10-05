@@ -74,3 +74,32 @@ class AuthenticationTests(unittest.TestCase):
             self.auth.set_connection_access('manager', 4, ['jumpbox:other'])
         self.auth.set_access('manager', ['4'], {})
         self.assertEqual(self.auth.list_users()[0]['connections'], {})
+
+    def test_roles_are_project_scoped_and_demotion_updates_existing_sessions(self):
+        self.auth.set_access('manager', ['3', '4'])
+        token, _ = self.auth.login('manager', 'a long test password')
+        self.assertEqual(self.auth.session(token)['managed_projects'], [])
+        self.auth.set_project_role('manager', 3, 'manager')
+        self.assertEqual(self.auth.session(token)['managed_projects'], ['3'])
+        self.assertEqual(self.auth.list_users()[0]['roles'], {'3': 'manager', '4': 'participant'})
+        self.auth.set_project_role('manager', 3, 'participant')
+        self.assertEqual(self.auth.session(token)['managed_projects'], [])
+        with self.assertRaises(ValueError):
+            self.auth.set_project_role('manager', 5, 'manager')
+
+    def test_legacy_members_are_migrated_only_once(self):
+        with self.auth.connect() as db:
+            db.execute('DROP TABLE project_managers')
+        migrated = AuthStore(self.auth.path)
+        self.assertEqual(migrated.list_users()[0]['roles'], {'3': 'manager'})
+        migrated.set_password('participant', 'another long password', projects=['3'])
+        reopened = AuthStore(self.auth.path)
+        self.assertEqual(reopened.list_users()[1]['roles'], {'3': 'participant'})
+
+    def test_password_reset_preserves_roles_and_removed_membership_revokes_them(self):
+        self.auth.set_project_role('manager', 3, 'manager')
+        self.auth.set_password('manager', 'another long password', projects=['3'])
+        self.assertEqual(self.auth.list_users()[0]['roles'], {'3': 'manager'})
+        self.auth.set_access('manager', [])
+        self.auth.set_access('manager', ['3'])
+        self.assertEqual(self.auth.list_users()[0]['roles'], {'3': 'participant'})

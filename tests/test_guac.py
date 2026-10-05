@@ -41,6 +41,34 @@ class GuacamoleConnectorTests(unittest.TestCase):
         with self.assertRaisesRegex(GuacamoleError, 'provisioned'):
             client.apply({'project_id': 3, 'users': [{'username': 'manager', 'teams': {}}], 'connections': []})
 
+    def test_crange_json_auth_needs_no_database_users_and_retires_old_grants(self):
+        calls = []
+        def opener(request, timeout=0):
+            path = urlsplit(request.full_url).path
+            calls.append((request.method, path, request.data))
+            if path == '/api/tokens': return Response({'authToken': 't', 'dataSource': 'postgresql'})
+            if path.endswith('/connections') and request.method == 'GET':
+                return Response({'42': {'identifier': '42', 'name': 'P003 · jump'}})
+            return Response({})
+        client = GuacamoleClient('http://guac', 'admin', 'secret', opener)
+        with tempfile.TemporaryDirectory() as directory:
+            state = Path(directory) / 'project-003.applied.json'
+            state.write_text(json.dumps({'connections': [{'name': 'P003 · jump', 'identifier': '42'}],
+                                         'permissions': [{'username': 'manager', 'identifier': '42'}]}))
+            manifest = {'schema_version': 3, 'auth_mode': 'crange-json', 'project_id': 3,
+                        'users': [{'username': 'manager', 'connection_keys': ['jumpbox:j1']}],
+                        'connections': [{'key': 'jumpbox:j1', 'name': 'P003 · jump', 'address': '10.3.1.11',
+                                         'team_id': '1', 'protocol': 'rdp', 'default_for_team': True}]}
+            client.apply(manifest, state)
+            saved = json.loads(state.read_text())
+        self.assertFalse(any(path.endswith('/users') for _, path, _ in calls))
+        patches = [body for method, path, body in calls if method == 'PATCH' and path.endswith('/permissions')]
+        self.assertEqual(len(patches), 1)
+        self.assertIn(b'remove', patches[0])
+        self.assertEqual(saved['connections'][0]['resource_key'], 'jumpbox:j1')
+        self.assertEqual(saved['connections'][0]['address'], '10.3.1.11')
+        self.assertEqual(saved['permissions'][0]['resource_key'], 'jumpbox:j1')
+
     def test_removes_only_owned_connections_and_grants(self):
         calls = []
         def opener(request, timeout=0):

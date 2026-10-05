@@ -1,0 +1,25 @@
+#!/usr/sbin/nft -f
+flush ruleset
+
+table inet crange_library {
+    set nfs_clients {
+        type ipv4_addr
+        elements = { 10.0.0.101, 10.0.0.102, 10.0.0.103, 10.0.0.104, 10.0.0.105, 10.60.0.20 }
+    }
+    chain input {
+        type filter hook input priority 0; policy drop;
+        iifname "lo" accept
+        ct state established,related accept
+        ct state invalid drop
+        ip protocol icmp accept
+        meta l4proto ipv6-icmp accept
+        ip saddr 10.60.0.20 tcp dport 22 accept
+        ip saddr @nfs_clients tcp dport 2049 accept
+    }
+    chain forward {
+        type filter hook forward priority 0; policy drop;
+    }
+    chain output {
+        type filter hook output priority 0; policy accept;
+    }
+}

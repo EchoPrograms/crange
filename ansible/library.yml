@@ -1,0 +1,6 @@
+---
+- name: Configure the dedicated Debian NFSv4 library
+  hosts: library
+  become: true
+  roles:
+    - library

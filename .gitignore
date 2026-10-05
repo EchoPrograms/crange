@@ -10,6 +10,8 @@
 *.key
 *.p12
 *.pfx
+**/*.backup-*
+**/*.before-*
 
 # Terraform working data, state, and plans
 **/.terraform/
@@ -20,6 +22,9 @@ crash.log
 
 # Generated inventories and Guacamole desired/applied manifests
 ansible/inventory/generated/
+ansible.cfg
+ansible.cfg.before-ssh-fix
+releases/
 guacamole/access/*.json
 guacamole/access/.*.json
 
@@ -27,3 +32,6 @@ guacamole/access/.*.json
 guacamole/crange-theme.jar
 __pycache__/
 *.py[cod]
+
+# Runtime administrator installer build records
+templates/builds/

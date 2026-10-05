@@ -34,9 +34,10 @@ resource "proxmox_virtual_environment_vm" "jump" {
   boot_order    = ["scsi0"]
 
   clone {
-    vm_id     = var.box.template_id
-    node_name = var.box.template_node
-    full      = var.box.full_clone
+    vm_id        = var.box.template_id
+    node_name    = var.box.template_node
+    full         = var.box.full_clone
+    datastore_id = var.box.full_clone ? var.box.datastore_id : null
   }
 
   cpu {
@@ -71,7 +72,7 @@ resource "proxmox_virtual_environment_vm" "jump" {
   }
 
   initialization {
-    datastore_id = "local-lvm"
+    datastore_id = var.box.datastore_id
     interface    = "ide0"
 
     dns {
@@ -116,4 +117,15 @@ output "inventory_name" {
 
 output "reported_ipv4_addresses" {
   value = proxmox_virtual_environment_vm.jump.ipv4_addresses
+}
+
+output "placement" {
+  value = {
+    image_id      = var.box.image_id
+    node_name     = proxmox_virtual_environment_vm.jump.node_name
+    datastore_id  = try(proxmox_virtual_environment_vm.jump.disk[0].datastore_id, var.box.datastore_id)
+    template_id   = var.box.template_id
+    template_node = var.box.template_node
+    clone_mode    = var.box.full_clone ? "full" : "linked"
+  }
 }

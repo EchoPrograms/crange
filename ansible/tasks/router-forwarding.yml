@@ -52,7 +52,7 @@
 
 - name: Parse prior managed Guacamole SSH targets
   ansible.builtin.set_fact:
-    router_prior_guac_ssh_targets: "{{ (prior_guac_ssh_targets.content | default('') | b64decode).splitlines() }}"
+    router_prior_guac_ssh_targets: "{{ (prior_guac_ssh_targets.content | default('') | b64decode).splitlines() | reject('equalto', '') | list }}"
   when: router_guac_ssh_targets is defined
   tags: [guac_access]
 
@@ -92,11 +92,62 @@
     owner: root
     group: root
     mode: "0600"
-    content: |
-      {% for target in router_guac_ssh_targets | default([]) %}
-      {{ target }}
-      {% endfor %}
+    content: "{{ (router_guac_ssh_targets | default([]) | join('\n')) ~ '\n' }}"
   when: router_guac_ssh_targets is defined
+  tags: [guac_access]
+
+- name: Read prior managed Guacamole VNC targets
+  ansible.builtin.slurp:
+    src: /var/lib/crange-managed-guac-vnc-targets
+  register: prior_guac_vnc_targets
+  failed_when: false
+  when: router_guac_vnc_targets is defined
+  tags: [guac_access]
+
+- name: Parse prior managed Guacamole VNC targets
+  ansible.builtin.set_fact:
+    router_prior_guac_vnc_targets: "{{ (prior_guac_vnc_targets.content | default('') | b64decode).splitlines() | reject('equalto', '') | list }}"
+  when: router_guac_vnc_targets is defined
+  tags: [guac_access]
+
+- name: Remove obsolete Guacamole VNC forwarding permissions
+  community.general.ufw:
+    rule: allow
+    route: true
+    delete: true
+    interface_in: eth0
+    interface_out: eth1
+    from_ip: "{{ router_guacamole_ip }}"
+    to_ip: "{{ item }}"
+    to_port: "5900"
+    proto: tcp
+  loop: "{{ router_prior_guac_vnc_targets | default([]) }}"
+  when:
+    - router_guac_vnc_targets is defined
+    - item not in router_guac_vnc_targets
+  tags: [guac_access]
+
+- name: Allow Guacamole VNC to declared endpoints
+  community.general.ufw:
+    rule: allow
+    route: true
+    interface_in: eth0
+    interface_out: eth1
+    from_ip: "{{ router_guacamole_ip }}"
+    to_ip: "{{ item }}"
+    to_port: "5900"
+    proto: tcp
+  loop: "{{ router_guac_vnc_targets | default([]) }}"
+  tags: [guac_access]
+
+- name: Record managed Guacamole VNC targets
+  ansible.builtin.copy:
+    dest: /var/lib/crange-managed-guac-vnc-targets
+    owner: root
+    group: root
+    mode: "0600"
+    content: "{{ (router_guac_vnc_targets | default([]) | join('\n')) ~ '\n' }}"
+  when: router_guac_vnc_targets is defined
   tags: [guac_access]
 
 - name: Allow controller SSH to lab hosts
@@ -172,7 +223,7 @@
 
 - name: Parse prior managed custom routes
   ansible.builtin.set_fact:
-    router_managed_custom_sources: "{{ (prior_custom_routes.content | default('') | b64decode).splitlines() }}"
+    router_managed_custom_sources: "{{ (prior_custom_routes.content | default('') | b64decode).splitlines() | reject('equalto', '') | list }}"
   when: "'team_routers' in group_names or 'staging_routers' in group_names"
 
 - name: Remove obsolete custom egress permissions

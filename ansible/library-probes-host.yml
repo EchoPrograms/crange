@@ -1,0 +1,31 @@
+---
+# Trusted administrator workflow; never exposed as a project-manager command.
+- name: Maintain the unconnected image acceptance bridge
+  hosts: library_probe_hosts
+  gather_facts: false
+  become: true
+  tasks:
+    - name: Define the dedicated bridge without physical ports or addresses
+      ansible.builtin.copy:
+        dest: /etc/network/interfaces.d/crange-probe
+        owner: root
+        group: root
+        mode: "0644"
+        content: |
+          auto crprobe1450
+          iface crprobe1450 inet manual
+              bridge-ports none
+              bridge-stp off
+              bridge-fd 0
+              mtu 1450
+
+    - name: Check whether the dedicated bridge exists
+      ansible.builtin.command: ip link show crprobe1450
+      register: library_probe_bridge
+      changed_when: false
+      failed_when: false
+
+    - name: Bring up only the dedicated bridge
+      ansible.builtin.command: ifup crprobe1450
+      when: library_probe_bridge.rc != 0
+      changed_when: true

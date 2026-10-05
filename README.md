@@ -1,10 +1,23 @@
 # CRANGE
 
+CRANGE manages isolated Proxmox cyber-range projects through reviewed Terraform, Ansible and queued dashboard workflows.
+
+## Documentation
+
+- [User guide](docs/user-guide.md): projects, Team 0 staging, machines, releases, access and jobs.
+- [Administrator guide](docs/administrator-guide.md): controller setup, accounts, images, distribution, backups and troubleshooting.
+- [Architecture](docs/architecture.md): control plane, networking, security and source map.
+- [CLI/API reference](docs/reference.md): command shapes, endpoints and state locations.
+- [Template workflows](docs/admin-templates.md), [custom jump boxes](docs/custom-jump-boxes.md), [guest accounts](docs/box-user-management.md), [Guacamole integration](docs/guacamole-integration.md).
+- [Distribution operations](docs/distribution-operations.md), [library deployment](docs/library-deployment.md), [storage audit](docs/template-storage-audit.md), [acceptance plan](DISTRIBUTION-PLAN.md).
+
+The guides describe checked-in behavior. Automatic placement and the new library/cache multi-node workflow remain disabled pending live acceptance; the deployed library does not establish rollout readiness. Existing detailed audit/delivery documents are historical evidence, not installation instructions.
+
 ## Dashboard
 
 The controller dashboard serves its frontend and API together on port 8000.
-The service binds to the controller management interface; forward it through
-SSH when working remotely.
+The installed service binds to `0.0.0.0:8000`; restrict network access and forward it through
+SSH when working remotely. Standalone `serve` defaults to loopback.
 
 ```sh
 sudo scripts/crange served --user crange
@@ -13,7 +26,12 @@ sudo -u crange-web -H scripts/crange password admin --admin
 
 `crange password` prompts for a password without putting it in shell history.
 For a project manager, use
-`sudo -u crange-web -H scripts/crange password NAME --projects 3`.
+`sudo -u crange-web -H scripts/crange password NAME --projects 3 --role manager`.
+New non-admin accounts default to participant access. Participants can open
+their assigned Guacamole labs; project managers can manage infrastructure and
+access assignments only in projects where they hold the manager role. Platform
+administrators edit each user's project roles in CRANGE Users. Existing project
+memberships retain manager access when upgrading.
 The dashboard uses server-side sessions and a same-origin API. Project
 managers see and operate only their assigned projects. The dashboard runs as
 `crange-web` while the automation worker runs as `crange`; the web account
@@ -21,20 +39,37 @@ cannot read the Proxmox or OPNsense credential files. Jobs are persisted in
 `/var/lib/crange-jobs/jobs.sqlite3`; password hashes and sessions are stored
 separately under the web account's home directory.
 
-Project user assignments queue a fixed `guac-sync` workflow. It writes an
-auditable `guacamole/access/project-NNN.json` desired-state manifest containing
-team users, default jump-box connections, and explicitly assigned scenario
-guests. `guac-sync` only renders desired state; applying it is a separate
-reviewed action. Guacamole credentials never enter the
-dashboard or job payloads.
+The project **Users** tab manages Guacamole-only accounts with their own
+passwords; **CRANGE Users** manages dashboard accounts. Creating a project user,
+changing connection access or passwords, disabling, and removing users queue
+fixed `guac-users` jobs and display their output in the job dialog. The inferred
+login is `pNNN-username`, for example `p003-player01`. Team selection grants that
+team's default jump box; additional VM, container, and jump-box grants are
+explicit. Passwords are encrypted by the private broker before storage and
+never included in job arguments, audit records, or output.
 
 Configure the protected connector once on the controller with
-`scripts/crange guac-config`, then use the project Users page to queue
-`guac-sync` and apply the reviewed access manifest.
+`scripts/crange guac-config`. `guac-sync PROJECT` generates connection desired
+state; `guac-apply PROJECT` applies connections and refreshes native account
+grants. `guac-users PROJECT` applies accounts without configuring infrastructure.
+The project Users **Refresh connections** button queues `guac-refresh PROJECT`.
+Successful deployment/configuration jobs also refresh connections and access
+automatically; failures report the completed infrastructure action separately.
+
+Dashboard users can also open Guacamole through one-minute JSON-auth tickets signed by a
+separate local controller broker. Generate the protected shared key with
+`sudo -u crange scripts/crange guac-json-key`, transfer it directly over SSH to
+the Guacamole host, and stage the matching 1.6.0 JSON-auth extension with
+`scripts/install-guac-json-auth.sh --stage`. Re-run the service installer on
+the controller to start the broker. Applying the Guacamole installer with
+`--apply` restarts the Guacamole web application and disconnects active Guac
+sessions; schedule that step accordingly. The key is never printed or stored
+in this repository.
 
 The matching Guacamole presentation extension is in `guacamole/extension`;
 build it with `scripts/build-guac-theme.py` and install the resulting JAR in
 Guacamole's protected extensions directory during a planned servlet restart.
+`cryptography` from `requirements.txt` is required by the ticket broker.
 
 Planning from the dashboard retains a saved Terraform plan for one hour and
 displays its plan ID. Apply requires selecting that exact plan. Input changes
@@ -69,7 +104,7 @@ scripts/crange configure 3 all --yes
 
 `configure PROJECT routes|routers|boxes|all --yes` regenerates Terraform-backed inventory and runs the existing reviewed Ansible playbooks. It configures project-router routes first, then project routers, team routers through the project-router SSH proxy, staging routers, and jump boxes.
 
-Scenario VM and release commands use approved templates from each project's `approved-scenario-templates.json`. The current approved base is template VM 112 on `proxmox4`. Each release capture powers down the staging VM, makes a full disk copy, converts it to a project-scoped Proxmox template, and restarts staging. The manifest pins that new template ID and node; changing an alias cannot silently change an existing release. Static scenario IPs are `.2`–`.100`; Team 0 is selected with `--team 0`. HTTP/TCP health checks are explicit metadata and run from the team or staging router. A basic flow is:
+Scenario VM and release commands use approved templates from each project's `approved-scenario-templates.json`. The legacy approved base is template VM 112 on `proxmox4`; inspect the project catalogs for current approvals. Each release capture powers down the staging VM, makes a full disk copy, converts it to a project-scoped Proxmox template, and restarts staging. The manifest pins that new template ID and node; changing an alias cannot silently change an existing release. Static scenario IPs are `.2`–`.100`; Team 0 is selected with `--team 0`. HTTP/TCP health checks are explicit metadata and run from the team or staging router. A basic flow is (replace image aliases with approved values; release rollout requires a recorded passing fresh-clone test):
 
 ```sh
 scripts/crange scenario-add 3 web --team 0 --ip 20 --template approved-base --node proxmox4 \
@@ -77,7 +112,7 @@ scripts/crange scenario-add 3 web --team 0 --ip 20 --template approved-base --no
 scripts/crange infra-plan 3
 scripts/crange infra-apply 3 --yes
 scripts/crange scenario-health 3
-scripts/crange release-capture 3 1.0.0 --boot-order web,dns
+scripts/crange release-capture 3 1.0.0 --boot-order web
 scripts/crange release-test-prepare 3 1.0.0
 scripts/crange infra-plan 3
 scripts/crange infra-apply 3 --yes

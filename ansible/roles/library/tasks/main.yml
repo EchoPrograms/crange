@@ -1,0 +1,120 @@
+---
+- name: Install userspace NFS and administration packages
+  ansible.builtin.apt:
+    name:
+      - nfs-ganesha
+      - nfs-ganesha-vfs
+      - nftables
+      - openssh-server
+    state: present
+    update_cache: true
+
+- name: Ensure library export directory exists
+  ansible.builtin.file:
+    path: /srv/crange-library
+    state: directory
+    owner: root
+    group: root
+    mode: '0755'
+
+- name: Install the single NFSv4 export
+  ansible.builtin.template:
+    src: ganesha.conf.j2
+    dest: /etc/ganesha/ganesha.conf
+    owner: root
+    group: root
+    mode: '0644'
+  notify: Restart Ganesha
+
+- name: Configure guest firewall
+  ansible.builtin.template:
+    src: nftables.conf.j2
+    dest: /etc/nftables.conf
+    owner: root
+    group: root
+    mode: '0644'
+    validate: /usr/sbin/nft -c -f %s
+  notify: Reload library firewall
+
+- name: Require SSH key authentication
+  ansible.builtin.copy:
+    dest: /etc/ssh/sshd_config.d/20-crange-library.conf
+    owner: root
+    group: root
+    mode: '0644'
+    content: |
+      PasswordAuthentication no
+      KbdInteractiveAuthentication no
+      PermitRootLogin prohibit-password
+  notify: Reload SSH
+
+- name: Create nftables service override directory
+  ansible.builtin.file:
+    path: /etc/systemd/system/nftables.service.d
+    state: directory
+    mode: '0755'
+
+- name: Avoid unsupported systemd mount namespaces inside the container
+  ansible.builtin.copy:
+    dest: /etc/systemd/system/nftables.service.d/lxc.conf
+    mode: '0644'
+    content: |
+      [Service]
+      ProtectSystem=no
+      ProtectHome=no
+  register: nftables_lxc_override
+
+- name: Reload service definitions
+  ansible.builtin.systemd_service:
+    daemon_reload: true
+  when: nftables_lxc_override.changed
+
+- name: Create logind service override directory
+  ansible.builtin.file:
+    path: /etc/systemd/system/systemd-logind.service.d
+    state: directory
+    mode: '0755'
+
+- name: Avoid unsupported logind mount namespaces in this container
+  ansible.builtin.copy:
+    dest: /etc/systemd/system/systemd-logind.service.d/lxc.conf
+    mode: '0644'
+    content: |
+      [Service]
+      ProtectSystem=no
+      ProtectHome=no
+      PrivateTmp=no
+      ProtectKernelTunables=no
+      ProtectKernelModules=no
+      ProtectKernelLogs=no
+      ProtectControlGroups=no
+      ProtectClock=no
+      ProtectHostname=no
+      ReadWritePaths=
+  register: logind_lxc_override
+
+- name: Apply the container logind override
+  ansible.builtin.systemd_service:
+    name: systemd-logind
+    daemon_reload: true
+    state: restarted
+  when: logind_lxc_override.changed
+
+- name: Start library services
+  ansible.builtin.systemd_service:
+    name: '{{ item }}'
+    enabled: true
+    state: started
+  loop:
+    - nftables
+    - ssh
+    - nfs-ganesha
+
+- name: Apply configuration before readiness check
+  ansible.builtin.meta: flush_handlers
+
+- name: Verify NFSv4 listener
+  ansible.builtin.wait_for:
+    host: 127.0.0.1
+    port: 2049
+    timeout: 30

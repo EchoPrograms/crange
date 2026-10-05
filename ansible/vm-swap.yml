@@ -1,0 +1,7 @@
+---
+- name: Provide swap for managed Linux VMs
+  hosts: jumpboxes:scenario_vms
+  gather_facts: true
+  become: true
+  tasks:
+    - ansible.builtin.import_tasks: tasks/guest-swap.yml

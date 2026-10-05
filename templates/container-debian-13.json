@@ -1,0 +1,47 @@
+{
+  "schema_version": 1,
+  "template_id": 3000,
+  "node": "proxmox4",
+  "hostname": "crange-base-debian-13",
+  "kind": "container",
+  "archive": "debian-13-standard_13.6-1_amd64.tar.zst",
+  "archive_sha512": "4c0c27ca6ceab5ef0b84db57825a00f26157ef1854bafe97297813e1cbe8ecb8cc9c453cab6b3b0efe1ba193a50c47ece1e41d950e411b8730b835b71e9e754b",
+  "source": "http://download.proxmox.com/images/system/debian-13-standard_13.6-1_amd64.tar.zst",
+  "catalog_version": "13.6-1",
+  "builder_sha256": "6cdf6d840b87d461f766a456f6a620be4b100073213d437546ffe22bc6e63cc2",
+  "built_at": "2026-09-30T07:08:14.156873+00:00",
+  "status": "clone-verified",
+  "os_release": "PRETTY_NAME=\"Debian GNU/Linux 13 (trixie)\"\nNAME=\"Debian GNU/Linux\"\nVERSION_ID=\"13\"\nVERSION=\"13 (trixie)\"\nVERSION_CODENAME=trixie\nDEBIAN_VERSION_FULL=13.6\nID=debian\nHOME_URL=\"https://www.debian.org/\"\nSUPPORT_URL=\"https://www.debian.org/support\"\nBUG_REPORT_URL=\"https://bugs.debian.org/\"\n",
+  "clone_checks": [
+    {
+      "vmid": 3100,
+      "ip": "10.60.0.101",
+      "fingerprint": "256 SHA256:7dYJ6DKppsYCPln1MHh1+93AUnqEGKKP55jg098Vjd0 root@crange-verify-debian13-a (ED25519)",
+      "machine_id": "83f88748a6ff42c4b142dc1e754fafb9",
+      "controller_ssh": true,
+      "passwordless_sudo": true,
+      "hostname": "crange-verify-debian13-a",
+      "graceful_shutdown": true
+    },
+    {
+      "vmid": 3101,
+      "ip": "10.60.0.182",
+      "fingerprint": "256 SHA256:SLF/HgISWJfnrWbMReV7M9d7+xsbr6E43HOQx7N329g root@crange-verify-debian13-b (ED25519)",
+      "machine_id": "174e35b7b82b4356bdb8b0142c5c33c3",
+      "controller_ssh": true,
+      "passwordless_sudo": true,
+      "hostname": "crange-verify-debian13-b",
+      "graceful_shutdown": true
+    }
+  ],
+  "static_network_check": {
+    "address": "10.60.0.203",
+    "prefixlen": 24,
+    "gateway": "10.60.0.1",
+    "controller_ssh": true,
+    "passwordless_sudo": true,
+    "graceful_shutdown": true,
+    "verification_clone_removed": 3102
+  },
+  "validation_scope": "Fresh DHCP and static-address clones, distinct host identities, controller SSH/sudo, graceful shutdown. Release capture acceptance remains separate."
+}

@@ -5,6 +5,8 @@ variable "box" {
     network_id    = optional(number)
     network_vnet  = optional(string)
     jump_number   = number
+    datastore_id  = optional(string, "local-lvm")
+    image_id      = optional(string, "")
     node_name     = string
     template_id   = optional(number, 112)
     template_node = optional(string, "proxmox4")

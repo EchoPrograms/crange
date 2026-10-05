@@ -1,0 +1,30 @@
+---
+# Administrator only. Run after all five nodes pass NFS acceptance tests.
+- name: Register the verified library export
+  hosts: library_host
+  become: true
+  tasks:
+    - name: Inspect registered storage
+      ansible.builtin.command: pvesh get /storage --output-format json
+      register: registered_storage
+      changed_when: false
+
+    - name: Register one NFSv4 library storage
+      ansible.builtin.command:
+        argv:
+          - pvesm
+          - add
+          - nfs
+          - crange-library
+          - --server
+          - 10.0.0.249
+          - --export
+          - /crange-library
+          - --options
+          - vers=4.0,proto=tcp,port=2049,sec=sys,nosharecache
+          - --content
+          - images,rootdir,backup,iso,vztmpl,snippets
+          - --nodes
+          - proxmox1,proxmox2,proxmox3,proxmox4,proxmox5
+      when: "'crange-library' not in ((registered_storage.stdout | from_json) | map(attribute='storage') | list)"
+      # Reconcile an existing mismatched registration only after review.

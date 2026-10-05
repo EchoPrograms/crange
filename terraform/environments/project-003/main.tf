@@ -99,7 +99,7 @@ variable "custom_networks" {
         net.network_id == floor(net.network_id) && net.network_id >= 1 && net.network_id <= 253 &&
         !contains([for team in var.team_ids : tonumber(team)], net.network_id) &&
         net.uplink_last_octet == floor(net.uplink_last_octet) && net.uplink_last_octet >= 2 && net.uplink_last_octet <= 100 &&
-        contains(["proxmox1", "proxmox2", "proxmox3", "proxmox4", "proxmox5"], net.node_name)
+        contains(["proxmox1", "proxmox2", "proxmox3", "proxmox4", "proxmox5", "proxmox6"], net.node_name)
       ]) &&
       length(distinct([for net in values(var.custom_networks) : net.network_id])) == length(var.custom_networks) &&
       length(distinct([for net in values(var.custom_networks) : "${net.owner_team_id}.${net.uplink_last_octet}"])) == length(var.custom_networks)
@@ -112,6 +112,7 @@ variable "scenario_boxes" {
   description = "Project scenario VMs; Team 0 is network ID 254 and static addresses are .2-.100."
   type = map(object({
     team_id       = string
+    network_key   = optional(string, "")
     name          = string
     ip_last_octet = number
     template      = string
@@ -189,7 +190,7 @@ variable "scenario_containers" {
       can(regex("^[a-z][a-z0-9-]{0,23}$", box.name)) &&
       box.cores >= 1 && box.cores <= 16 && box.memory_mb >= 512 && box.memory_mb <= 65536 &&
       contains(["ssh", "rdp"], box.guac_protocol) &&
-      contains(["proxmox1", "proxmox2", "proxmox3", "proxmox4", "proxmox5"], box.node_name) &&
+      contains(["proxmox1", "proxmox2", "proxmox3", "proxmox4", "proxmox5", "proxmox6"], box.node_name) &&
       (box.network_key == "" || contains(keys(var.custom_networks), box.network_key))
     ])
     error_message = "Scenario CTs need a declared team or staging network, static IP .2-.100, safe name, approved node, 1-16 cores and 512-65536 MB."
@@ -206,7 +207,7 @@ variable "scenario_containers" {
 
   validation {
     condition = length(distinct(concat(
-      [for box in values(var.scenario_boxes) : "${box.team_id}.${box.ip_last_octet}"],
+      [for box in values(var.scenario_boxes) : "${box.network_key == "" ? box.team_id : tostring(var.custom_networks[box.network_key].network_id)}.${box.ip_last_octet}"],
       [for box in values(var.scenario_containers) : "${box.network_key == "" ? box.team_id : tostring(var.custom_networks[box.network_key].network_id)}.${box.ip_last_octet}"],
       [for box in values(var.jump_boxes) : "${box.network_key == "" ? box.team_id : tostring(var.custom_networks[box.network_key].network_id)}.${10 + box.jump_number}"],
       [for net in values(var.custom_networks) : "${net.owner_team_id}.${net.uplink_last_octet}"]
@@ -285,17 +286,23 @@ resource "proxmox_sdn_vnet" "custom" {
   depends_on = [proxmox_sdn_applier.finalizer]
 }
 
+# A single revision resource remains present when a for_each VNet set is empty.
+# Terraform cannot use an empty resource collection as a replacement trigger.
+resource "terraform_data" "sdn_revision" {
+  input = {
+    transit = proxmox_sdn_vnet.transit
+    teams   = proxmox_sdn_vnet.team
+    staging = proxmox_sdn_vnet.staging
+    custom  = proxmox_sdn_vnet.custom
+  }
+}
+
 resource "proxmox_sdn_applier" "apply" {
   on_create  = true
   on_destroy = false
 
   lifecycle {
-    replace_triggered_by = [
-      proxmox_sdn_vnet.transit,
-      proxmox_sdn_vnet.team,
-      proxmox_sdn_vnet.staging,
-      proxmox_sdn_vnet.custom
-    ]
+    replace_triggered_by = [terraform_data.sdn_revision]
   }
 
   depends_on = [
@@ -311,7 +318,7 @@ module "project_router" {
 
   ssh_public_key = local.ssh_public_key
 
-  router = {
+  router = merge({
     hostname           = "${local.project}-router"
     node_name          = var.router_node
     upstream_vnet      = "crtrans"
@@ -322,7 +329,9 @@ module "project_router" {
     dns_servers        = ["10.60.2.1"]
     template_file_id   = "local:vztmpl/debian-13-standard_13.6-1_amd64.tar.zst"
     tags               = [local.project]
-  }
+    }, { for field, value in try(var.resolved_placements["router:project"], {}) : field => value if value != null && field != "clone_mode" }, try(var.resolved_placements["router:project"].clone_mode, null) == null ? {} : {
+    full_clone = var.resolved_placements["router:project"].clone_mode == "full"
+  })
 
   depends_on = [proxmox_sdn_applier.apply]
 }
@@ -333,7 +342,7 @@ module "team_router" {
 
   ssh_public_key = local.ssh_public_key
 
-  router = {
+  router = merge({
     hostname           = format("%st%03d-router", local.project, each.value)
     node_name          = var.router_node
     upstream_vnet      = proxmox_sdn_vnet.transit.id
@@ -344,7 +353,9 @@ module "team_router" {
     dns_servers        = ["10.60.2.1"]
     template_file_id   = "local:vztmpl/debian-13-standard_13.6-1_amd64.tar.zst"
     tags               = [local.project, format("%st%03d", local.project, each.value)]
-  }
+    }, { for field, value in try(var.resolved_placements["router:team:${each.key}"], {}) : field => value if value != null && field != "clone_mode" }, try(var.resolved_placements["router:team:${each.key}"].clone_mode, null) == null ? {} : {
+    full_clone = var.resolved_placements["router:team:${each.key}"].clone_mode == "full"
+  })
 
   depends_on = [
     proxmox_sdn_applier.apply,
@@ -357,7 +368,7 @@ module "staging_router" {
 
   ssh_public_key = local.ssh_public_key
 
-  router = {
+  router = merge({
     hostname           = "${local.project}t254-router"
     node_name          = var.router_node
     upstream_vnet      = proxmox_sdn_vnet.transit.id
@@ -368,7 +379,9 @@ module "staging_router" {
     dns_servers        = ["10.60.2.1"]
     template_file_id   = "local:vztmpl/debian-13-standard_13.6-1_amd64.tar.zst"
     tags               = [local.project, local.staging_vnet]
-  }
+    }, { for field, value in try(var.resolved_placements["router:staging"], {}) : field => value if value != null && field != "clone_mode" }, try(var.resolved_placements["router:staging"].clone_mode, null) == null ? {} : {
+    full_clone = var.resolved_placements["router:staging"].clone_mode == "full"
+  })
 
   depends_on = [
     proxmox_sdn_applier.apply,
@@ -382,7 +395,7 @@ module "custom_router" {
 
   ssh_public_key = local.ssh_public_key
 
-  router = {
+  router = merge({
     hostname           = format("%s-custom-%s-router", local.project, each.key)
     node_name          = each.value.node_name
     upstream_vnet      = each.value.owner_team_id == "254" ? proxmox_sdn_vnet.staging.id : proxmox_sdn_vnet.team[each.value.owner_team_id].id
@@ -395,7 +408,9 @@ module "custom_router" {
     dns_servers        = ["10.60.2.1"]
     template_file_id   = "local:vztmpl/debian-13-standard_13.6-1_amd64.tar.zst"
     tags               = [local.project, proxmox_sdn_vnet.custom[each.key].id]
-  }
+    }, { for field, value in try(var.resolved_placements["router:custom:${each.key}"], {}) : field => value if value != null && field != "clone_mode" }, try(var.resolved_placements["router:custom:${each.key}"].clone_mode, null) == null ? {} : {
+    full_clone = var.resolved_placements["router:custom:${each.key}"].clone_mode == "full"
+  })
 
   depends_on = [
     proxmox_sdn_applier.apply,
@@ -410,7 +425,7 @@ module "jumpbox" {
 
   ssh_public_key = local.ssh_public_key
 
-  box = {
+  box = merge({
     project_id    = var.project_id
     team_id       = tonumber(each.value.team_id)
     jump_number   = each.value.jump_number
@@ -424,7 +439,9 @@ module "jumpbox" {
     memory_mb     = each.value.memory_mb
     started       = each.value.started
     dns_servers   = ["10.60.2.1"]
-  }
+    }, { for field, value in try(var.resolved_placements["jumpbox:${each.key}"], {}) : field => value if value != null && field != "clone_mode" }, try(var.resolved_placements["jumpbox:${each.key}"].clone_mode, null) == null ? {} : {
+    full_clone = var.resolved_placements["jumpbox:${each.key}"].clone_mode == "full"
+  })
 
   template_profile = local.template_profile
 
@@ -441,11 +458,13 @@ module "scenario_box" {
   source   = "../../modules/scenario-vm"
 
   ssh_public_key   = local.ssh_public_key
-  template_profile = local.template_profile
+  template_profile = merge(local.template_profile, try(local.approved_scenario_templates[each.value.template].profile, {}))
 
-  box = {
+  box = merge({
     project_id    = var.project_id
     team_id       = tonumber(each.value.team_id)
+    network_id    = each.value.network_key == "" ? tonumber(each.value.team_id) : var.custom_networks[each.value.network_key].network_id
+    network_vnet  = each.value.network_key == "" ? (each.value.team_id == "254" ? proxmox_sdn_vnet.staging.id : proxmox_sdn_vnet.team[each.value.team_id].id) : proxmox_sdn_vnet.custom[each.value.network_key].id
     name          = each.value.name
     ip_last_octet = each.value.ip_last_octet
     node_name     = each.value.node_name
@@ -455,12 +474,15 @@ module "scenario_box" {
     cores         = each.value.cores
     memory_mb     = each.value.memory_mb
     started       = each.value.started
-  }
+    }, { for field, value in try(var.resolved_placements["vm:${each.key}"], {}) : field => value if value != null && field != "clone_mode" }, try(var.resolved_placements["vm:${each.key}"].clone_mode, null) == null ? {} : {
+    full_clone = var.resolved_placements["vm:${each.key}"].clone_mode == "full"
+  })
 
   depends_on = [
     proxmox_sdn_applier.apply,
     module.team_router,
-    module.staging_router
+    module.staging_router,
+    module.custom_router
   ]
 }
 
@@ -468,20 +490,24 @@ module "scenario_container" {
   for_each = var.scenario_containers
   source   = "../../modules/scenario-container"
 
-  box = {
-    project_id    = var.project_id
-    team_id       = tonumber(each.value.team_id)
-    network_id    = each.value.network_key == "" ? tonumber(each.value.team_id) : var.custom_networks[each.value.network_key].network_id
-    network_vnet  = each.value.network_key == "" ? (each.value.team_id == "254" ? proxmox_sdn_vnet.staging.id : proxmox_sdn_vnet.team[each.value.team_id].id) : proxmox_sdn_vnet.custom[each.value.network_key].id
-    name          = each.value.name
-    ip_last_octet = each.value.ip_last_octet
-    node_name     = each.value.node_name
-    template_id   = local.approved_container_templates[each.value.template].template_id
-    template_node = local.approved_container_templates[each.value.template].template_node
-    cores         = each.value.cores
-    memory_mb     = each.value.memory_mb
-    started       = each.value.started
-  }
+  box = merge({
+    project_id       = var.project_id
+    team_id          = tonumber(each.value.team_id)
+    network_id       = each.value.network_key == "" ? tonumber(each.value.team_id) : var.custom_networks[each.value.network_key].network_id
+    network_vnet     = each.value.network_key == "" ? (each.value.team_id == "254" ? proxmox_sdn_vnet.staging.id : proxmox_sdn_vnet.team[each.value.team_id].id) : proxmox_sdn_vnet.custom[each.value.network_key].id
+    name             = each.value.name
+    ip_last_octet    = each.value.ip_last_octet
+    node_name        = each.value.node_name
+    template_id      = try(local.approved_container_templates[each.value.template].template_id, null)
+    template_node    = try(local.approved_container_templates[each.value.template].template_node, null)
+    template_file_id = try(local.approved_container_templates[each.value.template].template_file_id, null)
+    cores            = each.value.cores
+    memory_mb        = each.value.memory_mb
+    started          = each.value.started
+    }, { for field, value in try(var.resolved_placements["container:${each.key}"], {}) : field => value if value != null && field != "clone_mode" }, try(var.resolved_placements["container:${each.key}"].clone_mode, null) == null ? {} : {
+    full_clone           = var.resolved_placements["container:${each.key}"].clone_mode == "full"
+    verified_local_cache = try(var.resolved_placements["container:${each.key}"].verified_local_cache, false)
+  })
   depends_on = [proxmox_sdn_applier.apply, module.team_router, module.staging_router, module.custom_router]
 }
 
@@ -496,25 +522,29 @@ output "vnets" {
 output "routers" {
   value = {
     project = {
-      id      = module.project_router.container_id
-      address = module.project_router.management_address
+      placement = module.project_router.placement
+      id        = module.project_router.container_id
+      address   = module.project_router.management_address
     }
     teams = {
       for id, router in module.team_router :
       id => {
-        id      = router.container_id
-        address = router.management_address
-        lan     = "10.${var.project_id}.${id}.0/24"
+        placement = router.placement
+        id        = router.container_id
+        address   = router.management_address
+        lan       = "10.${var.project_id}.${id}.0/24"
       }
     }
     staging = {
-      id      = module.staging_router.container_id
-      address = module.staging_router.management_address
-      lan     = "10.${var.project_id}.254.0/24"
+      placement = module.staging_router.placement
+      id        = module.staging_router.container_id
+      address   = module.staging_router.management_address
+      lan       = "10.${var.project_id}.254.0/24"
     }
     custom_networks = {
       for key, net in var.custom_networks :
       key => {
+        placement        = module.custom_router[key].placement
         id               = module.custom_router[key].container_id
         address          = module.custom_router[key].management_address
         lan              = "10.${var.project_id}.${net.network_id}.0/24"
@@ -531,6 +561,7 @@ output "jump_boxes" {
   value = {
     for name, box in module.jumpbox :
     name => {
+      placement    = box.placement
       id           = box.vm_id
       address      = box.ip_address
       team_id      = var.jump_boxes[name].team_id
@@ -545,6 +576,7 @@ output "scenario_containers" {
   value = {
     for name, container in module.scenario_container :
     name => {
+      placement     = container.placement
       id            = container.container_id
       address       = container.ip_address
       team_id       = var.scenario_containers[name].team_id
@@ -580,11 +612,18 @@ output "scenario_boxes" {
   value = {
     for name, box in module.scenario_box :
     name => {
+      placement     = box.placement
       id            = box.vm_id
       address       = box.ip_address
       team_id       = var.scenario_boxes[name].team_id
-      network_id    = tonumber(var.scenario_boxes[name].team_id)
+      network_id    = var.scenario_boxes[name].network_key == "" ? tonumber(var.scenario_boxes[name].team_id) : var.custom_networks[var.scenario_boxes[name].network_key].network_id
       guac_protocol = var.scenario_boxes[name].guac_protocol
     }
   }
+}
+
+variable "release_rollouts" {
+  description = "Controller-owned release declaration, apply and health history."
+  type        = any
+  default     = {}
 }

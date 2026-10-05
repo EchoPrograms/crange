@@ -15,11 +15,12 @@ def unit_text(root, username, home, executable, *, role='web', job_db='/var/lib/
         raise ValueError('Invalid service account.')
     if any(c.isspace() for c in str(root)):
         raise ValueError('Service checkout path cannot contain whitespace.')
-    if role not in ('web', 'worker'):
+    if role not in ('web', 'worker', 'guac-broker', 'proxmox-compat'):
         raise ValueError('Invalid service role.')
     # The service is reachable through the controller's SSH tunnel and its
     # management interface. The standalone CLI server remains loopback-only.
-    action = 'serve --host 0.0.0.0 --port 8000' if role == 'web' else 'worker'
+    action = {'web': 'serve --host 0.0.0.0 --port 8000',
+              'worker': 'worker', 'guac-broker': 'guac-ticket-broker', 'proxmox-compat': ''}[role]
     return '\n'.join([
         '[Unit]', f'Description=CRANGE {role}', 'After=network-online.target',
         'Wants=network-online.target', 'StartLimitIntervalSec=60', 'StartLimitBurst=5',
@@ -28,10 +29,15 @@ def unit_text(root, username, home, executable, *, role='web', job_db='/var/lib/
         f'Environment={quote("HOME=" + str(home))}',
         'Environment=PYTHONUNBUFFERED=1',
         'Environment=CRANGE_SHARED_DB=1',
+        'Environment=CRANGE_DISTRIBUTION_DATA=/var/lib/crange-distribution',
         'Environment=CRANGE_AUTH_DB=/var/lib/crange-web/.local/share/crange/auth.sqlite3',
         f'Environment={quote("CRANGE_JOB_DB=" + job_db)}',
         *(['Environment=CRANGE_WORKER_EXTERNAL=1'] if role == 'web' else []),
-        f'ExecStart={quote(executable)} {quote(Path(root) / "scripts/crange.py")} {action}',
+        *(['Environment=CRANGE_GUAC_JSON_KEY=/home/crange/.config/crange/guacamole-json.secret',
+           'Environment=CRANGE_GUAC_TICKET_SOCKET=/run/crange-guac/ticket.sock',
+           'Environment=CRANGE_WEB_USER=crange-web', 'RuntimeDirectory=crange-guac',
+           'RuntimeDirectoryMode=0770'] if role == 'guac-broker' else []),
+        f'ExecStart={quote(executable)} {quote(Path(root) / ("scripts/crange_proxmox_compat.py" if role == "proxmox-compat" else "scripts/crange.py"))} {action}',
         'Restart=on-failure', 'RestartSec=5', 'TimeoutStopSec=30',
         'KillMode=control-group', 'UMask=0007', 'NoNewPrivileges=true',
         '', '[Install]', 'WantedBy=multi-user.target', '',
@@ -83,10 +89,47 @@ def install(username, root):
     job_db.touch(exist_ok=True)
     os.chown(job_db, web.pw_uid, group.gr_gid)
     os.chmod(job_db, 0o660)
+    distribution_dir = Path('/var/lib/crange-distribution')
+    distribution_dir.mkdir(parents=True, exist_ok=True)
+    os.chown(distribution_dir, account.pw_uid, group.gr_gid)
+    # Inherit the explicit shared group even when worker primary group differs.
+    # The web user can traverse this directory and read only mode-0640 snapshots;
+    # the ledger and cache journals retain owner-only permissions.
+    os.chmod(distribution_dir, 0o2710)
+    snapshot = distribution_dir / "cluster-inventory.json"
+    if snapshot.is_file():
+        os.chown(snapshot, account.pw_uid, group.gr_gid)
+        os.chmod(snapshot, 0o640)
+    ledger = distribution_dir / "reservations.sqlite3"
+    if ledger.is_file():
+        os.chown(ledger, account.pw_uid, group.gr_gid)
+        os.chmod(ledger, 0o600)
     services = {
         'crange.service': unit_text(root, web.pw_name, web_home, sys.executable, role='web', job_db=str(job_db)),
         'crange-worker.service': unit_text(root, username, account.pw_dir, sys.executable, role='worker', job_db=str(job_db)),
     }
+    compat_config = Path(account.pw_dir) / '.config/crange/proxmox-compat.json'
+    if compat_config.is_file():
+        from crange_proxmox_compat import load_config
+        config = load_config(compat_config, owner_uid=account.pw_uid)
+        if config['port'] != 18766:
+            raise ValueError('Installed compatibility service requires loopback port 18766.')
+        compat_unit = unit_text(root, username, account.pw_dir, sys.executable, role='proxmox-compat', job_db=str(job_db))
+        # Start the reviewed adapter before workers can resume queued jobs.
+        services = {'crange-proxmox-compat.service': compat_unit, **services}
+        services['crange-worker.service'] = services['crange-worker.service'].replace(
+            'After=network-online.target',
+            'After=network-online.target crange-proxmox-compat.service\nRequires=crange-proxmox-compat.service')
+    json_key = Path(account.pw_dir) / '.config/crange/guacamole-json.secret'
+    if json_key.is_file():
+        if json_key.stat().st_mode & 0o077:
+            raise ValueError('Guacamole JSON-auth key must not be accessible to group or other users.')
+        if subprocess.run([sys.executable, '-c', 'import cryptography'], capture_output=True).returncode:
+            raise ValueError('Install Python cryptography before enabling Guacamole launch tickets.')
+        services['crange-guac-broker.service'] = unit_text(
+            root, username, account.pw_dir, sys.executable, role='guac-broker', job_db=str(job_db))
+    else:
+        print('Guacamole launch tickets disabled; generate the protected shared key with crange guac-json-key.')
     for filename, content in services.items():
         destination = Path('/etc/systemd/system') / filename
         temporary = destination.with_suffix('.service.new')

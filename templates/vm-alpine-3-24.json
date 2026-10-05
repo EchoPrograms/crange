@@ -1,0 +1,61 @@
+{
+  "schema_version": 1,
+  "template_id": 3017,
+  "node": "proxmox4",
+  "kind": "vm",
+  "os": "alpine-3-24",
+  "source": "https://dl-cdn.alpinelinux.org/alpine/v3.24/releases/cloud/alpine-3.24.2-x86_64-cloudinit-r0.qcow2",
+  "source_checksum": "c9504d23613f304e0cfb6f5fec872e29e5a5a62e2bc64796daf19c14fdddaa87dc252912fd8bdd17f7b8ebf0cd03305e4075993d54de175e6028d6b50414c67f",
+  "checksum_algorithm": "sha512",
+  "builder_sha256": "1b7281c6dfa57b23dbf6e3a6acaaea4756214bb1f67dc42f0410268ca92d2ec7",
+  "built_at": "2026-10-01T01:42:26.733276+00:00",
+  "status": "clone-verified",
+  "customized_sha256": "ebd0363f5d12a371caaa53da21b17a903444d9ceed37e0dda3b7dc5c1e8a07df",
+  "hostname": "crange-base-alpine-3-24",
+  "clone_checks": [
+    {
+      "vmid": 3122,
+      "hostname": "crange-verify-alpine-v3-a",
+      "ip": "10.60.0.129",
+      "fingerprint": "256 SHA256:TjGCERcmipMBS5sCB0Ku5LDD8w80MH3LJk5AzrgOQpw root@crange-verify-alpine-v3-a (ED25519)",
+      "machine_id": "6607fdaed2b44a8691ddde9fec1c0d6a",
+      "guest_agent": true,
+      "cloud_init_advisories": {
+        "DEPRECATED": [
+          "'user' of type string is deprecated in 22.2 and scheduled to be removed in 27.2. Use 'users' list instead.",
+          "'user' of type string is deprecated in 22.2 and scheduled to be removed in 27.2. Use 'users' list instead."
+        ]
+      },
+      "controller_ssh": true,
+      "passwordless_sudo": true,
+      "graceful_shutdown": true
+    },
+    {
+      "vmid": 3123,
+      "hostname": "crange-verify-alpine-v3-b",
+      "ip": "10.60.0.114",
+      "fingerprint": "256 SHA256:npT+pkh/LXcS7yX8/xMix4hHY7rrK6rK4B8Jr1XCv6I root@crange-verify-alpine-v3-b (ED25519)",
+      "machine_id": "b364843366b5454ab005b6068a48db12",
+      "guest_agent": true,
+      "cloud_init_advisories": {
+        "DEPRECATED": [
+          "'user' of type string is deprecated in 22.2 and scheduled to be removed in 27.2. Use 'users' list instead.",
+          "'user' of type string is deprecated in 22.2 and scheduled to be removed in 27.2. Use 'users' list instead."
+        ]
+      },
+      "controller_ssh": true,
+      "passwordless_sudo": true,
+      "graceful_shutdown": true
+    }
+  ],
+  "static_network_check": {
+    "vmid": 3122,
+    "address": "10.60.0.129",
+    "reboot_persistence": true,
+    "host_key_persistence": true,
+    "password_login": true,
+    "graceful_shutdown": true,
+    "dns": true,
+    "https_egress": true
+  }
+}
