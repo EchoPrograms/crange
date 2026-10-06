@@ -121,7 +121,6 @@ def prepare_cache(*, project_id, image_id, node_name, datastore_id='local-lvm',
     """
     job_id = job_id or 'cache-' + uuid.uuid4().hex
     policy, _ = _settings()
-    bridge = select_probe_bridge(policy)
     api = ProxmoxAPI()
     journal = FileJournal(_root() / 'cache-journal')
     ledger = ReservationLedger(_root() / 'reservations.sqlite3')
@@ -144,6 +143,7 @@ def prepare_cache(*, project_id, image_id, node_name, datastore_id='local-lvm',
                         raise DistributionError('Existing cache changed; owned repair required.')
                     result.update(ready[0], reused=True)
                     return catalog
+                bridge = select_probe_bridge(policy)
                 for file in journal.directory.glob('*.json'):
                     previous = json.loads(file.read_text())
                     if ((previous.get('image_id'), previous.get('node'), previous.get('datastore_id')) ==
@@ -548,3 +548,133 @@ def reconcile_cache_job(job_id):
             pin.unlink(missing_ok=True)
             return {'job_id': job_id, 'state': 'released', 'template_id': record['template_id']}
     finally: ledger.close()
+
+
+def resume_cache_template(job_id):
+    """Resume one terminal archive restore after proving its exact owned template."""
+    if not re.fullmatch(r'cache-[a-zA-Z0-9-]{1,64}', job_id):
+        raise DistributionError('Invalid cache job identity.')
+    policy, catalog = _settings()
+    api = ProxmoxAPI()
+    journal = FileJournal(_root() / 'cache-journal')
+    ledger = ReservationLedger(_root() / 'reservations.sqlite3')
+    journal_path = journal.directory / (job_id + '.json')
+    pin_path = _root() / 'artifact-pins' / (job_id + '.json')
+    try:
+        with scheduling.node_locks(['proxmox2'], library=True), journal.allocation_lock():
+            record = json.loads(journal_path.read_text())
+            image_id = record.get('image_id')
+            image = catalog.get('images', {}).get(image_id)
+            if (record.get('job_id') != job_id or record.get('state') != 'converting-template' or
+                    record.get('node') != 'proxmox2' or record.get('allocation_node') != 'proxmox2' or
+                    record.get('datastore_id') != 'local-lvm' or record.get('kind') != 'qemu' or
+                    not isinstance(record.get('template_id'), int) or not image or
+                    record.get('artifact_sha256') != image.get('artifact_sha256')):
+                raise DistributionError('Cache journal is not the exact resumable P2 restore.')
+            artifact = image.get('artifact', {})
+            if (artifact.get('node') != record.get('source_node') or
+                    str(artifact.get('source_id')) != str(record.get('source_id')) or
+                    artifact.get('complete_capture') is not True or
+                    not artifact.get('volume_id', '').startswith('crange-library:backup/')):
+                raise DistributionError('Immutable source artifact does not match the cache journal.')
+            replicas = [r for r in image.get('replicas', [])
+                        if r.get('node') == 'proxmox2' and str(r.get('template_id')) == str(record['template_id'])]
+            if replicas:
+                raise DistributionError('Catalog already references the partial cache allocation.')
+            saved = ledger.get_job(job_id)
+            reservation = record.get('reservation')
+            if (saved.get('state') != 'running' or saved.get('allocations') != [reservation] or
+                    reservation.get('image') != image_id or
+                    reservation.get('artifact_sha256') != image['artifact_sha256'] or
+                    reservation.get('resolved', {}).get('node_name') != 'proxmox2' or
+                    reservation.get('resolved', {}).get('datastore_id') != 'local-lvm'):
+                raise DistributionError('Exact running cache reservation is missing or changed.')
+            if (not shared_reservation_validator(ledger, job_id, reservation, image_id,
+                                                 image['artifact_sha256'])(
+                    reservation, 'proxmox2', 'local-lvm', required_capacity(image))):
+                raise DistributionError('Cache reservation does not cover the reviewed image capacity.')
+            try:
+                pin = json.loads(pin_path.read_text())
+            except (OSError, ValueError) as exc:
+                raise DistributionError('Exact artifact pin is missing; retain reservation.') from exc
+            if pin != {'volume_id': artifact['volume_id'], 'artifact_sha256': image['artifact_sha256'],
+                       'job_id': job_id, 'state': 'active'}:
+                raise DistributionError('Artifact pin does not match this restored cache job.')
+            if not record.get('provider_tasks') or any(t.get('state') != 'confirmed-terminal'
+                                                       for t in record['provider_tasks']):
+                raise DistributionError('Restore task is not recorded as confirmed terminal.')
+            from urllib.parse import quote
+            for task in record['provider_tasks']:
+                task_node = task.get('node') or task.get('path', '').split('/')[2]
+                upid = str(task.get('upid', ''))
+                if (task_node != 'proxmox2' or
+                        f':qmrestore:{record["template_id"]}:' not in upid):
+                    raise DistributionError('Journal task is not the exact P2 VM restore operation.')
+                status = api.request('GET', f'/nodes/{task_node}/tasks/{quote(upid, safe="")}/status')
+                if status.get('status') != 'stopped' or status.get('exitstatus') != 'OK':
+                    raise DistributionError('Recorded restore task has not completed successfully.')
+            vmid = record['template_id']
+            resources = api.request('GET', '/cluster/resources', {'type': 'vm'})
+            matches = [r for r in resources if str(r.get('vmid')) == str(vmid)]
+            if (len(matches) != 1 or matches[0].get('type') != 'qemu' or
+                    matches[0].get('node') != 'proxmox2' or matches[0].get('pool') != 'crange-iac' or
+                    matches[0].get('status') != 'stopped'):
+                raise DistributionError('VMID is not the exact stopped P2 cache allocation in crange-iac.')
+            active = api.request('GET', '/nodes/proxmox2/tasks', {'source': 'active', 'limit': 1000})
+            if len(active) >= 1000 or any(str(t.get('id')) == str(vmid) for t in active):
+                raise DistributionError('A provider task for the restored cache VM is active or ambiguous.')
+            config = api.request('GET', f'/nodes/proxmox2/qemu/{vmid}/config')
+            marker = f'crange-job-{job_id}'
+            tags = set(str(config.get('tags', '')).split(';'))
+            scsi_parts = config.get('scsi0', '').split(',')
+            configured_disks = {k for k in config if re.fullmatch(r'(?:scsi|sata|virtio|ide)\d+', k)}
+            if ('crange-image' not in tags or marker not in tags or config.get('lock') or
+                    int(config.get('template', 0)) != 1 or
+                    configured_disks != {'scsi0', 'ide2'} or
+                    not scsi_parts or scsi_parts[0] != f'local-lvm:base-{vmid}-disk-0' or
+                    'size=20G' not in scsi_parts[1:] or
+                    config.get('ide2', '').split(',', 1)[0] != f'local-lvm:vm-{vmid}-cloudinit' or
+                    'bridge=' + select_probe_bridge(policy) not in config.get('net0', '') or
+                    'link_down=1' not in config.get('net0', '')):
+                raise DistributionError('Restored VM configuration does not match the owned stopped template.')
+            snapshots = api.request('GET', f'/nodes/proxmox2/qemu/{vmid}/snapshot')
+            if [s.get('name') for s in snapshots] != ['current']:
+                raise DistributionError('Unexpected snapshot state on the partial cache template.')
+            pool = api.request('GET', '/pools/crange-iac')
+            if not any(m.get('type') == 'qemu' and m.get('node') == 'proxmox2' and
+                       str(m.get('vmid')) == str(vmid) for m in pool.get('members', [])):
+                raise DistributionError('Exact restored template pool membership cannot be confirmed.')
+            if image.get('kind') != 'vm' or image.get('disk_gb') != 20:
+                raise DistributionError('Restored disk size does not match the reviewed P2 cache image.')
+            settings = policy.get('cache', policy)
+            bridge = select_probe_bridge(policy)
+            source_identity = image.get('source_identity') or image.get('verification', {}).get('source_identity')
+            if (not source_identity or not {'local-linked-vm', 'vm-archive-restore'}.issubset(
+                    settings.get('tested_paths', []))):
+                raise DistributionError('Reviewed identity and P2 clone/restore acceptance are required.')
+            verify = ProbeVerifier(bridge, settings.get('isolated_bridges', []),
+                source_identity,
+                ct_exec=SSHContainerExec(), init_system=image.get('init_system', 'systemd'))
+            allocation = reservation
+            validator = shared_reservation_validator(ledger, job_id, allocation,
+                                                       image_id, image['artifact_sha256'])
+            worker = ReplicaWorker(api, journal, verify,
+                approved_storage=[('proxmox2', 'local-lvm')],
+                tested_paths=settings.get('tested_paths', []),
+                allocation_lock=journal.allocation_lock,
+                reservation_validator=validator)
+            # The existing restore already created a template; resume only performs
+            # disposable identity verification, exact probe cleanup, then publish.
+            updated = worker.resume_template(catalog, image_id, record=record)
+            catalog_transaction(scheduling.CONFIG / 'image-catalog.json', lambda _catalog: updated)
+            inventory = scheduling.discover(api, policy)
+            actual = inventory['guests'].get(str(vmid))
+            if (not actual or actual.get('node_name') != 'proxmox2' or not actual.get('template') or
+                    str(record.get('probe_id')) in inventory['guests'] or record.get('state') != 'ready' or
+                    any(t.get('state') != 'confirmed-terminal' for t in record.get('provider_tasks', []))):
+                raise DistributionError('Resumed cache verification is incomplete; reservation retained.')
+            ledger.reconcile_job(job_id, operation_terminal=True, allocations_reconciled=True)
+            pin_path.unlink()
+            return {'job_id': job_id, 'state': 'ready', 'template_id': vmid}
+    finally:
+        ledger.close()

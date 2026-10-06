@@ -238,7 +238,9 @@ class ReplicaWorker:
         record['state'] = 'converting-template'
         self.journal(dict(record))
         if kind == 'qemu':
-            self._task(node, 'POST', f'/nodes/{node}/{kind}/{vmid}/template', {})
+            current = self._config(node, kind, vmid)
+            if int(current.get('template', 0)) != 1:
+                self._task(node, 'POST', f'/nodes/{node}/{kind}/{vmid}/template', {})
         else:
             import time
             upid = self.api.request('POST', f'/nodes/{node}/lxc/{vmid}/template', {})
@@ -254,6 +256,32 @@ class ReplicaWorker:
                     raise DistributionError('Container cache conversion is unconfirmed; reconcile journal.')
                 time.sleep(2)
 
+        return self._verify_and_publish(catalog, image_id, image, kind, node, datastore_id,
+                                        job_id, vmid, clone_mode, owned_tags, record)
+
+    def resume_template(self, catalog, image_id, *, record, clone_mode='linked'):
+        """Continue an exactly owned restored template through probe and publication."""
+        validate_catalog(catalog)
+        image = catalog['images'][image_id]
+        kind = 'qemu' if image['kind'] == 'vm' else 'lxc'
+        if (record.get('state') != 'converting-template' or record.get('image_id') != image_id or
+                record.get('kind') != kind or clone_mode not in ('linked', 'full')):
+            raise DistributionError('Cache journal is not an eligible restored-template resume.')
+        node, datastore_id, job_id, vmid = (record.get('node'), record.get('datastore_id'),
+                                            record.get('job_id'), record.get('template_id'))
+        if (not isinstance(vmid, int) or (node, datastore_id) not in self.approved_storage or
+                record.get('allocation_node') != node or
+                record.get('artifact_sha256') != image.get('artifact_sha256')):
+            raise DistributionError('Cache resume identity is incomplete or outside approved scope.')
+        self._active_record = record
+        source_tags = {'crange-image', f'crange-job-{job_id}'}
+        owned_tags = ';'.join(sorted(source_tags))
+        return self._verify_and_publish(catalog, image_id, image, kind, node, datastore_id,
+                                        job_id, vmid, clone_mode, owned_tags, record)
+
+    def _verify_and_publish(self, catalog, image_id, image, kind, node, datastore_id,
+                            job_id, vmid, clone_mode, owned_tags, record):
+        marker = f'crange-job-{job_id}'
         config = self._config(node, kind, vmid)
         _owned(config, marker)
         if int(config.get('template', 0)) != 1:

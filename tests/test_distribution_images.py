@@ -112,7 +112,30 @@ class ReplicaTests(unittest.TestCase):
         self.api.request.assert_any_call('POST', '/nodes/proxmox2/qemu',
             {'vmid': 200, 'storage': 'local-lvm', 'pool': 'crange-iac', 'unique': 1,
              'tags': 'crange-image;crange-job-archive', 'archive': volume, 'name': 'crange-replica-200'})
+        self.assertFalse(any(call.args[:2] == ('POST', '/nodes/proxmox2/qemu/200/template')
+                             for call in self.api.request.call_args_list))
         self.assertFalse(any('/nodes/proxmox1/' in c.args[1] for c in self.api.request.call_args_list))
+
+    def test_restored_stopped_template_resumes_without_reconversion(self):
+        self.ids = iter([201])
+        record = {'job_id': 'test', 'image_id': 'base-v1', 'node': 'proxmox2',
+            'allocation_node': 'proxmox2', 'datastore_id': 'local-lvm', 'kind': 'qemu',
+            'state': 'converting-template', 'template_id': 200,
+            'artifact_sha256': 'a'*64, 'provider_tasks': []}
+        result = self.worker.resume_template(self.catalog, 'base-v1', record=record)
+        self.assertEqual(result['images']['base-v1']['replicas'][-1]['template_id'], 200)
+        self.assertFalse(any(call.args[:2] == ('POST', '/nodes/proxmox2/qemu/200/template')
+                             for call in self.api.request.call_args_list))
+        self.api.request.assert_any_call('DELETE', '/nodes/proxmox2/qemu/201', {'purge': 1})
+
+    def test_resume_rejects_wrong_state_or_artifact_before_probe(self):
+        record = {'job_id': 'test', 'image_id': 'base-v1', 'node': 'proxmox2',
+            'allocation_node': 'proxmox2', 'datastore_id': 'local-lvm', 'kind': 'qemu',
+            'state': 'allocated', 'template_id': 200,
+            'artifact_sha256': 'b'*64, 'provider_tasks': []}
+        with self.assertRaisesRegex(DistributionError, 'eligible restored-template'):
+            self.worker.resume_template(self.catalog, 'base-v1', record=record)
+        self.assertFalse(any(call.args[0] != 'GET' for call in self.api.request.call_args_list))
 
     def test_unverified_cross_node_path_has_no_mutations(self):
         self.worker.tested_paths.clear()

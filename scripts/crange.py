@@ -2644,6 +2644,12 @@ def cmd_cache_reconcile(args):
     print('Cache operation reconciled: ' + json.dumps(result, sort_keys=True))
 
 
+def cmd_cache_resume(args):
+    from crange_cache_jobs import resume_cache_template
+    result = resume_cache_template(args.job_id)
+    print('Cache operation resumed: ' + json.dumps(result, sort_keys=True))
+
+
 
 def make_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(prog="crange", description="Manage CRANGE teams, jump boxes, and reviewed Terraform/Ansible workflows.")
@@ -2663,6 +2669,8 @@ def make_parser() -> argparse.ArgumentParser:
     q.add_argument('plan_id',type=lambda v:v if re.fullmatch(r'[0-9a-f]{32}',v) else (_ for _ in ()).throw(argparse.ArgumentTypeError('Invalid cache GC plan ID'))); q.set_defaults(func=cmd_cache_gc_apply)
     q = sub.add_parser('cache-reconcile', help='Admin: reconcile one exact cache preparation journal and reservation')
     q.add_argument('job_id',type=lambda v:v if re.fullmatch(r'[a-zA-Z0-9-]{1,64}',v) else (_ for _ in ()).throw(argparse.ArgumentTypeError('Invalid cache job ID'))); q.set_defaults(func=cmd_cache_reconcile)
+    q = sub.add_parser('cache-resume', help='Admin: resume one exact restored cache template through probe verification')
+    q.add_argument('job_id',type=lambda v:v if re.fullmatch(r'cache-[a-zA-Z0-9-]{1,64}',v) else (_ for _ in ()).throw(argparse.ArgumentTypeError('Invalid cache job ID'))); q.set_defaults(func=cmd_cache_resume)
     q = sub.add_parser('serve', help='Serve dashboard and API on port 8000')
     q.add_argument('--host', default='127.0.0.1')
     q.add_argument('--port', type=int, default=8000)
