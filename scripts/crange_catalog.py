@@ -42,6 +42,22 @@ def validate_probe_resources(profile):
     return profile
 
 
+def validate_approved_projects(scope):
+    if not isinstance(scope, list) or not scope:
+        raise CatalogError('approval scope must be a non-empty project list')
+    if '*' in scope:
+        if scope != ['*']:
+            raise CatalogError('universal approval cannot be mixed with project approvals')
+        return scope
+    seen = set()
+    for project in scope:
+        if (type(project) is not int or not 1 <= project <= 255 or project in (60, 61)
+                or project in seen):
+            raise CatalogError('approval scope contains an invalid or duplicate project')
+        seen.add(project)
+    return scope
+
+
 def validate_catalog(catalog):
     if catalog.get('schema_version') != 1 or not isinstance(catalog.get('images'), dict):
         raise CatalogError('catalog requires schema_version 1 and images mapping')
@@ -56,8 +72,10 @@ def validate_catalog(catalog):
             raise CatalogError(f'{image_id}: published artifact SHA256 required')
         if not image.get('source_revision') or not image.get('verified'):
             raise CatalogError(f'{image_id}: verified publication and source revision required')
-        if not isinstance(image.get('approved_projects'), list):
-            raise CatalogError(f'{image_id}: approval scope required')
+        try:
+            validate_approved_projects(image.get('approved_projects'))
+        except CatalogError as exc:
+            raise CatalogError(f'{image_id}: invalid approval scope: {exc}') from exc
         if 'source_identity' in image:
             validate_source_identity(image['source_identity'])
         if 'probe_resources' in image:

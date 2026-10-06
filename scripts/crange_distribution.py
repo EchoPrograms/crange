@@ -677,13 +677,13 @@ def main(argv=None):
     publish.add_argument('--image-id', required=True)
     publish.add_argument('--architecture', default='amd64')
     publish.add_argument('--source-revision', required=True)
-    publish.add_argument('--project', action='append', required=True)
+    _add_project_approval_arguments(publish)
     publish.add_argument('--datastore-id', required=True)
     stock = commands.add_parser('publish-stock')
     for field in ('image-id', 'node', 'template-file-id', 'source-revision', 'sha256'):
         stock.add_argument('--' + field, required=True)
     stock.add_argument('--architecture', default='amd64')
-    stock.add_argument('--project', action='append', required=True)
+    _add_project_approval_arguments(stock)
     stock.add_argument('--disk-gb', type=float, required=True)
     stock.add_argument('--verification', type=Path, required=True)
     replica = commands.add_parser('replica')
@@ -716,7 +716,7 @@ def main(argv=None):
         verification = json.loads(args.verification.read_text())
         catalog_transaction(args.catalog, lambda catalog: publish_exported_image(
             catalog, args.image_id, export_record, architecture=args.architecture,
-            source_revision=args.source_revision, approved_projects=args.project,
+            source_revision=args.source_revision, approved_projects=_project_approval_scope(args),
             datastore_id=args.datastore_id, verification=verification))
         print('Published immutable image ' + args.image_id)
     elif args.action == 'publish-stock':
@@ -725,7 +725,7 @@ def main(argv=None):
             catalog_transaction(args.catalog, lambda catalog: publish_stock_archive(
                 catalog, args.image_id, node=args.node, template_file_id=args.template_file_id,
                 architecture=args.architecture, source_revision=args.source_revision,
-                approved_projects=args.project, disk_gb=args.disk_gb, expected_sha256=args.sha256,
+                approved_projects=_project_approval_scope(args), disk_gb=args.disk_gb, expected_sha256=args.sha256,
                 hash_volume=SSHVolumeHasher(), verification=verification))
         print('Published immutable stock archive ' + args.image_id)
     else:
@@ -745,7 +745,23 @@ def main(argv=None):
 
 
 
+def _add_project_approval_arguments(command):
+    scope = command.add_mutually_exclusive_group(required=True)
+    scope.add_argument('--project', action='append',
+                       help='Approve for one project; repeat for multiple projects.')
+    scope.add_argument('--all-projects', action='store_true',
+                       help='Administrator-only: approve for all present and future projects.')
+
+
+def _project_approval_scope(args):
+    return ['*'] if args.all_projects else args.project
+
+
 def normalize_projects(projects):
+    if not isinstance(projects, (list, tuple)) or not projects:
+        raise DistributionError('At least one image project approval is required.')
+    if '*' in projects and list(projects) != ['*']:
+        raise DistributionError('Universal image approval cannot be mixed with project approvals.')
     result = []
     for project in projects:
         if project == '*':

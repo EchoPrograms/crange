@@ -3,9 +3,16 @@ import sys
 import unittest
 import hashlib
 import tempfile
+import argparse
+import contextlib
+import io
 from unittest.mock import Mock
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'scripts'))
-from crange_distribution import ReplicaWorker, DistributionError, publish_artifact, ProbeVerifier, SSHContainerExec, normalize_projects, publish_stock_archive, publish_exported_image, required_capacity
+from crange_catalog import CatalogError, validate_catalog
+from crange_distribution import (ReplicaWorker, DistributionError, publish_artifact,
+    ProbeVerifier, SSHContainerExec, normalize_projects, publish_stock_archive,
+    publish_exported_image, required_capacity, _add_project_approval_arguments,
+    _project_approval_scope, main as distribution_main)
 
 
 class ReplicaTests(unittest.TestCase):
@@ -134,9 +141,49 @@ class ReplicaTests(unittest.TestCase):
 
 class PublicationTests(unittest.TestCase):
     def test_projects_normalized_and_invalid_scope_rejected(self):
-        self.assertEqual(normalize_projects(['3', '*', 3]), [3, '*'])
+        self.assertEqual(normalize_projects(['3', 3]), [3])
+        self.assertEqual(normalize_projects(['*']), ['*'])
+        for bad_scope in (['3', '*'], ['*', 3], ['*', '*']):
+            with self.subTest(scope=bad_scope), self.assertRaisesRegex(
+                    DistributionError, 'cannot be mixed'):
+                normalize_projects(bad_scope)
         for bad in ('60', '61', '0', '256', 'evil', True):
             with self.assertRaises(DistributionError): normalize_projects([bad])
+
+    def test_catalog_accepts_universal_scope_and_rejects_mixed_or_malformed_scope(self):
+        image = {'kind': 'vm', 'architecture': 'amd64', 'artifact_sha256': 'a'*64,
+                 'source_revision': 'revision', 'verified': True, 'replicas': []}
+        catalog = {'schema_version': 1, 'images': {'base-v1': {**image, 'approved_projects': ['*']}}}
+        self.assertIs(validate_catalog(catalog), catalog)
+        for scope in (['*', 3], [3, '*'], ['*', '*'], [True], [60], ['3']):
+            invalid = {'schema_version': 1, 'images': {'base-v1': {**image, 'approved_projects': scope}}}
+            with self.subTest(scope=scope), self.assertRaisesRegex(CatalogError, 'approval scope'):
+                validate_catalog(invalid)
+
+    def test_publication_cli_scope_flag_is_exclusive_and_maps_to_existing_wildcard(self):
+        parser = argparse.ArgumentParser()
+        _add_project_approval_arguments(parser)
+        self.assertEqual(_project_approval_scope(parser.parse_args(['--all-projects'])), ['*'])
+        self.assertEqual(_project_approval_scope(parser.parse_args(['--project', '3', '--project', '4'])), ['3', '4'])
+        with contextlib.redirect_stderr(io.StringIO()), self.assertRaises(SystemExit) as error:
+            parser.parse_args(['--all-projects', '--project', '3'])
+        self.assertEqual(error.exception.code, 2)
+
+    def test_both_publication_commands_reject_mixed_cli_scopes(self):
+        common = ['--catalog', '/tmp/catalog.json', '--journal-dir', '/tmp/journal',
+                  '--policy', '/tmp/policy.json']
+        commands = [
+            ['publish', '--export-record', '/tmp/export.json', '--verification', '/tmp/verification.json',
+             '--image-id', 'base-v1', '--source-revision', 'revision', '--datastore-id', 'local'],
+            ['publish-stock', '--image-id', 'base-v1', '--node', 'proxmox1',
+             '--template-file-id', 'local:vztmpl/base.tar.zst', '--source-revision', 'revision',
+             '--sha256', 'a'*64, '--disk-gb', '8', '--verification', '/tmp/verification.json'],
+        ]
+        for command in commands:
+            with self.subTest(command=command[0]), contextlib.redirect_stderr(io.StringIO()), \
+                    self.assertRaises(SystemExit) as error:
+                distribution_main(common + command + ['--project', '3', '--all-projects'])
+            self.assertEqual(error.exception.code, 2)
 
     def test_stock_archive_checksum_and_multinode_replicas(self):
         arguments = dict(template_file_id='local:vztmpl/base.tar.zst', architecture='amd64',
@@ -154,6 +201,14 @@ class PublicationTests(unittest.TestCase):
         with self.assertRaisesRegex(DistributionError, 'checksum'):
             publish_stock_archive(catalog, 'base-v2', node='proxmox3', **arguments)
 
+    def test_stock_archive_can_be_published_for_all_projects(self):
+        catalog = publish_stock_archive({'schema_version': 1, 'images': {}}, 'base-universal',
+            node='proxmox1', template_file_id='local:vztmpl/base.tar.zst', architecture='amd64',
+            source_revision='revision', approved_projects=['*'], disk_gb=8,
+            expected_sha256='a'*64, hash_volume=Mock(return_value='a'*64),
+            verification={'passed': True, 'evidence': 'reviewed clone test'})
+        self.assertEqual(catalog['images']['base-universal']['approved_projects'], ['*'])
+
     def test_export_publication_keeps_virtual_size(self):
         record = dict(state='exported', complete_capture=True, kind='vm', node='proxmox1',
                       source_id=100, artifact_sha256='a'*64, volume_id='local:backup/export', disk_gb=32)
@@ -168,6 +223,9 @@ class PublicationTests(unittest.TestCase):
         catalog = publish_exported_image({'schema_version': 1, 'images': {}}, 'vm-v1', record, **arguments)
         self.assertEqual(catalog['images']['vm-v1']['disk_gb'], 32)
         self.assertEqual(catalog['images']['vm-v1']['source_identity'],record['source_identity'])
+        universal = publish_exported_image({'schema_version': 1, 'images': {}}, 'vm-universal', record,
+            **{**arguments, 'approved_projects': ['*']})
+        self.assertEqual(universal['images']['vm-universal']['approved_projects'], ['*'])
         del record['disk_gb']
         with self.assertRaisesRegex(DistributionError, 'disk size'):
             publish_exported_image({'schema_version': 1, 'images': {}}, 'vm-v2', record, **arguments)

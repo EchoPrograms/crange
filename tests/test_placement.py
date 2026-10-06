@@ -21,6 +21,18 @@ def fixtures():
 
 
 class PlacementTests(unittest.TestCase):
+    def test_universal_image_scope_still_uses_project_scoped_scheduler_check(self):
+        r, inv, cat, pol = fixtures()
+        cat['images']['base-v1']['approved_projects'] = ['*']
+        for project_id in (3, 42):
+            r['project_id'] = project_id
+            self.assertEqual(schedule_batch([r], inv, cat, pol, now=100)[0]['project_id'], project_id)
+
+        cat['images']['base-v1']['approved_projects'] = [3]
+        r['project_id'] = 42
+        with self.assertRaisesRegex(PlacementError, 'not approved for project'):
+            schedule_batch([r], inv, cat, pol, now=100)
+
     def test_soft_preference_and_hard_pin(self):
         r, inv, cat, pol = fixtures()
         r['placement'] = {'preferred_node': 'n2'}
