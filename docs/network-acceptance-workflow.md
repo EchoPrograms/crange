@@ -129,7 +129,7 @@ reserves resources, gates the exact create plan on an administrator-reviewed
 SHA-256, applies the saved plan, installs only the scoped controller/Guac TCP/22
 rule specification, dispatches six fixed check names with a 60-second deadline,
 and attempts independent rule/probe cleanup even after partial create or test
-failure. Destroy also requires an exact reviewed saved-plan digest. Only
+failure. Destroy also requires an exact saved-plan digest after the fixed worker validates that it deletes only the owned probe. Only
 confirmed guest/state/rule absence permits reservation release; only complete
 valid evidence after cleanup permits a receipt. Provider exception text is not
 persisted. All retries with an existing journal are rejected.
@@ -230,9 +230,10 @@ Create that root-owned directory with restrictive permissions, then retain
 
 Canonical decoded-plan hashes use `crange_network_runner.plan_digest` (sorted
 JSON keys, compact separators, UTF-8). Plan outputs can contain secrets; retain
-them locally with restrictive permissions. A destroy plan only exists after
-creation, so exact destroy approval and recovery are separate administrator
-phases. Never fabricate its approval before inspecting the actual plan.
+them locally with restrictive permissions. A destroy plan only exists after creation. The fixed controller may generate it,
+inspect the exact one-delete ownership boundary, persist both hashes, and apply
+that same saved plan. This programmatic inspection is the review; it requires
+no separate human approval.
 
 These adapters are tested with fake process/API responses and are not yet a
 complete production `ProbeBackend`. Missing integration includes shared-ledger
@@ -242,3 +243,45 @@ artifact capture/publishing, and cooperative queue cancellation/recovery. The
 five QGA diagnostics deliberately do not generate acceptance receipts: a
 successful MTU read, DNS lookup or HTTPS download cannot prove all six gates.
 No live dry-run bundle or router mutation has been performed by this increment.
+
+
+## Owned reconcile and actual management origins
+
+The root-only adapter CLI now also supports:
+
+```sh
+sudo python3 scripts/crange_network_adapters.py network-<32-hex-job-id> reconcile
+```
+
+This is a mutation command, unlike `create`/`delete` inspection. It requires the
+protected manifest, matching `journal.json` ownership/rule scope, and desired
+router addresses under `review.json.routers.project_router` and
+`review.json.routers.team_router`. It locks the exact job, queries cluster VMID
+identity and live tags/VNet/static initialization address, removes only the
+recorded management rules, generates a destroy plan, asserts exactly one delete
+of the owned probe, persists plan hashes and phases durably, and applies that
+exact saved plan. It then confirms actual guest absence, empty standalone state
+and rule absence. Cleanup uncertainty remains journaled and never causes blind
+creation. A live-absent guest with retained Terraform state is deliberately not
+forgotten: outstanding provider tasks/state need independent reconciliation.
+The command leaves the shared reservation retained, reporting
+`cleanup_verified_reservation_pending`; its release path still needs ledger
+integration. It never emits acceptance evidence or widens placement policy.
+
+`FixedManagementChecks` now implements checks from the actual origins. A
+protected manifest must bind controller CT114 at `10.60.0.20` and Guac VM110 at
+`10.60.0.10`, with their actual cluster nodes and types. The controller check
+validates CT114's address then binds a local TCP socket to `.20`; this therefore
+runs inside the controller rather than simulating that source elsewhere. The
+Guac check confirms VM110's cluster identity and QGA-reported `.10`, then runs a
+bounded SSH handshake from its QGA with source binding and every authentication
+method disabled. Expected final authentication failure counts only when SSH
+connection and protocol negotiation are established. Neither check accepts a
+user-selected origin ID, source address or command string.
+
+These paths have fake transport/process tests, including partial cleanup,
+wrong-owner rejection, generated destroy-plan boundaries, explicit controller
+source binding, exact Guac QGA origin and authentication-disabled handshake.
+They have not yet been executed against live infrastructure. Cross-node MTU,
+firewall-backed isolation, reservation integration and complete receipts remain
+required before publishing automatic-placement network attestations.

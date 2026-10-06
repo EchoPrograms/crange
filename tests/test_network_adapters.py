@@ -99,6 +99,14 @@ class AdapterTests(unittest.TestCase):
 
 class RouterAdapterTests(unittest.TestCase):
     def setUp(self):
+        temporary=tempfile.TemporaryDirectory()
+        self.addCleanup(temporary.cleanup)
+        key=pathlib.Path(temporary.name)/'key'
+        key.write_text('test-only-placeholder')
+        key.chmod(0o600)
+        patcher=patch.object(adapters.FixedRouterUFW,'KEY',key)
+        patcher.start()
+        self.addCleanup(patcher.stop)
         fixture=evidence_test.NetworkAcceptanceTests()
         fixture.setUp()
         self.target=fixture.scope
@@ -144,3 +152,205 @@ class RouterAdapterTests(unittest.TestCase):
         with patch.object(adapters,'protected',side_effect=lambda p,**_:pathlib.Path(p)):
             with self.assertRaises(ValueError):
                 adapters.FixedRouterUFW(self.target,project_router='10.60.2.240',team_router='10.3.0.4')
+
+
+class ReconcileTests(unittest.TestCase):
+    def setUp(self):
+        fixture=evidence_test.NetworkAcceptanceTests()
+        fixture.setUp()
+        self.fixture=fixture
+        temporary=tempfile.TemporaryDirectory()
+        self.addCleanup(temporary.cleanup)
+        self.root=pathlib.Path(temporary.name)
+        self.rule={'owner':fixture.scope['job_id'],'sources':['10.60.0.20','10.60.0.10'],
+                   'destination':'10.240.254.98/32','protocol':'tcp','port':22}
+        self.journal={'scope':fixture.scope,'state':'create_pending','rule':self.rule}
+        (self.root/'journal.json').write_text(json.dumps(self.journal))
+        outer=self
+        class API:
+            present=True
+            owner=fixture.scope['job_id']
+            def request(self,method,path,fields=None):
+                if path=='/cluster/resources':
+                    return [{'vmid':9911,'node':'proxmox2','type':'qemu'}] if self.present else []
+                return {'tags':'crange-network-probe;'+self.owner,'net0':'virtio=x,bridge=p240t254',
+                        'ipconfig0':'ip=10.240.254.98/24,gw=10.240.254.1'}
+        self.api=API()
+        class Backend:
+            root=outer.root
+            target=fixture.scope
+            addresses=[adapters.PROBE_ADDRESS]
+            generated=False
+            applied=False
+            fail=False
+            def state_addresses(self):return self.addresses
+            def generate_delete_plan(self):
+                self.generated=True
+                return fixture.delete
+            def apply_saved_plan(self,target,operation,digest,timeout):
+                assert operation=='delete'
+                assert digest==plan_digest(fixture.delete)
+                self.applied=True
+                if self.fail:raise TimeoutError('private-detail')
+                outer.api.present=False
+                self.addresses=[]
+        self.backend=Backend()
+        class Router:
+            removed=False
+            fail=False
+            def remove_management_rule(self,target,rule):
+                assert rule==outer.rule
+                self.removed=True
+                if self.fail:raise ValueError('private-detail')
+            def temporary_rules_absent(self,target):return not self.fail
+        self.router=Router()
+
+    def reconcile(self):
+        with patch.object(adapters,'protected',side_effect=lambda p,**_:pathlib.Path(p)):
+            return adapters.reconcile_owned_probe(self.backend,self.api,self.router)
+
+    def record(self):return json.loads((self.root/'journal.json').read_text())
+
+    def test_machine_review_owned_destroy_finishes_without_human_approval(self):
+        result=self.reconcile()
+        self.assertTrue(self.backend.generated)
+        self.assertTrue(self.backend.applied)
+        self.assertTrue(self.router.removed)
+        self.assertEqual(self.record()['state'],'cleanup_verified_reservation_pending')
+        self.assertFalse(result['reservation_released'])
+        self.assertFalse(result['policy_changed'])
+
+    def test_wrong_live_owner_blocks_all_cleanup_mutations(self):
+        self.api.owner='other-job'
+        with self.assertRaises(ValueError):self.reconcile()
+        self.assertFalse(self.router.removed)
+        self.assertFalse(self.backend.generated)
+
+    def test_router_cleanup_failure_still_destroys_probe_and_keeps_uncertain(self):
+        self.router.fail=True
+        with self.assertRaises(ValueError):self.reconcile()
+        self.assertTrue(self.backend.applied)
+        self.assertFalse(self.api.present)
+        self.assertEqual(self.record()['state'],'cleanup_uncertain')
+
+    def test_absent_guest_with_retained_state_never_blindly_drops_state(self):
+        self.api.present=False
+        with self.assertRaises(ValueError):self.reconcile()
+        self.assertFalse(self.backend.generated)
+        self.assertIn('absent_guest_retained_state',self.record()['cleanup_errors'])
+
+    def test_destroy_timeout_does_not_claim_cleanup(self):
+        self.backend.fail=True
+        with self.assertRaises(ValueError):self.reconcile()
+        self.assertTrue(self.api.present)
+        self.assertEqual(self.record()['state'],'cleanup_uncertain')
+        self.assertNotIn('private-detail',(self.root/'journal.json').read_text())
+
+
+class ManagementOriginTests(unittest.TestCase):
+    def setUp(self):
+        fixture=evidence_test.NetworkAcceptanceTests()
+        fixture.setUp()
+        self.target=fixture.scope
+        self.origins={'controller':{'node':'proxmox1','vmid':114,'address':'10.60.0.20','kind':'lxc'},
+                      'guacamole':{'node':'proxmox1','vmid':110,'address':'10.60.0.10','kind':'qemu'}}
+        outer=self
+        class Transport:
+            guac_ip='10.60.0.10'
+            calls=[]
+            def request(self,method,path,fields,deadline):
+                self.calls.append((method,path,fields))
+                if path=='/cluster/resources':return [
+                    {'vmid':9911,'node':'proxmox2','type':'qemu'},
+                    {'vmid':110,'node':'proxmox1','type':'qemu'},
+                    {'vmid':114,'node':'proxmox1','type':'lxc'}]
+                if path.endswith('/9911/config'):return {
+                    'tags':'crange-network-probe;'+outer.target['job_id'],
+                    'net0':'virtio=x,bridge=p240t254','ipconfig0':'ip=10.240.254.98/24,gw=10.240.254.1'}
+                if path.endswith('/114/config'):return {'net0':'ip=10.60.0.20/24,bridge=craccess'}
+                if path.endswith('/status/current'):return {'status':'running'}
+                if path.endswith('/agent/network-get-interfaces'):
+                    return {'result':[{'ip-addresses':[{'ip-address':self.guac_ip,'ip-address-type':'ipv4'}]}]}
+                if path.endswith('/agent/exec'):return {'pid':55}
+                if path.endswith('/agent/exec-status'):return {'exited':True,'exitcode':255,
+                    'err-data':'debug1: Connection established.\ndebug1: Remote protocol version 2.0\nPermission denied'}
+                raise AssertionError(path)
+        self.transport=Transport()
+        self.transport.calls=[]
+
+    def test_controller_test_binds_actual_controller_source(self):
+        class Socket:
+            def __enter__(self):return self
+            def __exit__(self,*args):pass
+            def settimeout(self,value):self.timeout=value
+            def bind(self,address):self.source=address
+            def connect(self,address):self.destination=address
+            def recv(self,count):return b'SSH-2.0-OpenSSH_test\r\n'
+        client=Socket()
+        checker=adapters.FixedManagementChecks(self.transport,self.origins,connect_socket=lambda *args:client)
+        result=checker.run(self.target,'controller')
+        self.assertTrue(result['passed'])
+        self.assertEqual(client.source,('10.60.0.20',0))
+        self.assertEqual(client.destination,('10.240.254.98',22))
+        self.assertFalse(any(call[0]=='POST' for call in self.transport.calls))
+
+    def test_guac_test_uses_vm110_qga_source_bind_and_disables_credentials(self):
+        checker=adapters.FixedManagementChecks(self.transport,self.origins,sleep=lambda _:None)
+        result=checker.run(self.target,'guacamole')
+        self.assertTrue(result['passed'])
+        execute=[call for call in self.transport.calls if call[0]=='POST'][0]
+        self.assertEqual(execute[1],'/nodes/proxmox1/qemu/110/agent/exec')
+        command=execute[2]['command']
+        self.assertIn('10.60.0.10',command)
+        self.assertIn('PreferredAuthentications=none',command)
+        self.assertIn('PubkeyAuthentication=no',command)
+        self.assertEqual(command[-1],'root@10.240.254.98')
+
+    def test_unexpected_guac_source_is_rejected_before_exec(self):
+        self.transport.guac_ip='10.60.0.11'
+        checker=adapters.FixedManagementChecks(self.transport,self.origins)
+        with self.assertRaises(ValueError):checker.run(self.target,'guacamole')
+        self.assertFalse(any(call[0]=='POST' for call in self.transport.calls))
+
+    def test_origin_ids_cannot_be_substituted(self):
+        self.origins['guacamole']['vmid']=125
+        with self.assertRaises(ValueError):adapters.FixedManagementChecks(self.transport,self.origins)
+
+
+class GeneratedDestroyPlanTests(unittest.TestCase):
+    def test_programmatic_review_rejects_extra_mutation_before_recording_approval(self):
+        fixture=evidence_test.NetworkAcceptanceTests()
+        fixture.setUp()
+        for extra in (False,True):
+            with self.subTest(extra=extra),tempfile.TemporaryDirectory() as directory:
+                root=pathlib.Path(directory)
+                backend=adapters.SavedTerraformProbe.__new__(adapters.SavedTerraformProbe)
+                backend.root=root
+                backend.target=fixture.scope
+                backend.manifest={'scope':fixture.scope}
+                backend._check_inputs=lambda:None
+                backend.state_addresses=lambda:[adapters.PROBE_ADDRESS]
+                backend._env=lambda:{}
+                plan=json.loads(json.dumps(fixture.delete))
+                if extra:plan['resource_changes'].append(plan['resource_changes'][0])
+                calls=[]
+                def run(argv,**kwargs):
+                    calls.append(argv)
+                    if argv[1]=='plan':
+                        (root/'delete.tfplan').write_bytes(b'fixed generated saved plan')
+                        return subprocess.CompletedProcess(argv,0,'','')
+                    return subprocess.CompletedProcess(argv,0,json.dumps(plan),'')
+                backend.run=run
+                with patch.object(adapters,'protected',side_effect=lambda p,**_:pathlib.Path(p)):
+                    if extra:
+                        with self.assertRaises(ValueError):backend.generate_delete_plan()
+                        self.assertNotIn('plans',backend.manifest)
+                    else:
+                        result=backend.generate_delete_plan()
+                        self.assertEqual(result,fixture.delete)
+                        self.assertEqual(backend.manifest['plans']['delete']['json_sha256'],plan_digest(result))
+                        self.assertEqual(backend.manifest['plans']['delete']['review'],'fixed-owned-probe-delete')
+                        self.assertTrue((root/'delete-plan.json').exists())
+                        self.assertTrue((root/'review.json').exists())
+                self.assertEqual(calls[0][1:4],['plan','-destroy','-no-color'])
+                self.assertFalse(any(argv[1]=='apply' for argv in calls))
