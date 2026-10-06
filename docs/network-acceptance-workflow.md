@@ -173,3 +173,72 @@ rule cleanup/destroy pending, cleanup uncertainty, confirmed cleanup with pendin
 reservation release, and terminal failed/accepted cleanup. A crash at any
 nonterminal phase therefore blocks blind reallocation and identifies the exact
 owned guest/rule to reconcile.
+
+## Concrete adapter increment
+
+`scripts/crange_network_adapters.py` supplies three concrete building blocks:
+
+- `SavedTerraformProbe` inspects root-owned saved plans against reviewed binary
+  and decoded-JSON hashes and exact probe identity. Its internal apply method
+  applies only the same saved plan using parsed protected API credentials and
+  a fixed environment; inherited Terraform CLI overrides are excluded. Only
+  `main.tf` and the pinned provider lockfile are permitted as configuration.
+- `BoundedPVE` caps each API call at ten seconds and the remaining overall
+  deadline. `OwnedQGADiagnostics` verifies live job tags, one exact VNet NIC,
+  static initialization address, running status, and no template/lock before
+  dispatching one of five fixed BusyBox diagnostics. It retains one QGA PID
+  across polling responses and never accepts a command string.
+- `FixedRouterUFW` adds/removes only two job-tagged source-specific TCP/22
+  forwarding rules to the exact probe `/32`, through the desired-state project
+  and team routers using SSH with host-key checking. It verifies matching rule
+  status before deleting by exact specification, never a mutable rule number.
+  It requires already-active UFW and never operates on OPNsense. Provision a
+  dedicated root-owned `/etc/crange/network-probe-ssh-key` and pinned SSH host
+  keys before considering production use.
+
+The controller administrator dry-run entrypoint is:
+
+```sh
+sudo python3 scripts/crange_network_adapters.py network-<32-hex-job-id> create
+```
+
+It only validates and reports scope/digest; it cannot apply or execute a guest.
+The protected job directory is `/var/lib/crange-network-probes/<job-id>/`.
+Create that root-owned directory with restrictive permissions, then retain
+`main.tf`, `.terraform.lock.hcl`, the saved `create.tfplan`/`delete.tfplan`, and
+`review.json`. Review JSON has this shape:
+
+```json
+{
+  "scope": "same scope object as the evidence receipt",
+  "input_sha256": {
+    "main.tf": "<SHA-256 of reviewed main.tf>",
+    ".terraform.lock.hcl": "<SHA-256 of reviewed provider lockfile>"
+  },
+  "plans": {
+    "create": {
+      "binary_sha256": "<SHA-256 of saved create.tfplan>",
+      "json_sha256": "<SHA-256 of canonical decoded plan>"
+    },
+    "delete": {
+      "binary_sha256": "<SHA-256 of saved delete.tfplan>",
+      "json_sha256": "<SHA-256 of canonical decoded plan>"
+    }
+  }
+}
+```
+
+Canonical decoded-plan hashes use `crange_network_runner.plan_digest` (sorted
+JSON keys, compact separators, UTF-8). Plan outputs can contain secrets; retain
+them locally with restrictive permissions. A destroy plan only exists after
+creation, so exact destroy approval and recovery are separate administrator
+phases. Never fabricate its approval before inspecting the actual plan.
+
+These adapters are tested with fake process/API responses and are not yet a
+complete production `ProbeBackend`. Missing integration includes shared-ledger
+network probe reservations, immutable approved-image/resource validation,
+controller/Guac path tests, cross-node MTU and firewall-backed isolation tests,
+artifact capture/publishing, and cooperative queue cancellation/recovery. The
+five QGA diagnostics deliberately do not generate acceptance receipts: a
+successful MTU read, DNS lookup or HTTPS download cannot prove all six gates.
+No live dry-run bundle or router mutation has been performed by this increment.
