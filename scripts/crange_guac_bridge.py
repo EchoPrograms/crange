@@ -15,6 +15,8 @@ import re
 import threading
 import time
 
+from crange_guac_ticket import TicketError
+
 
 class BridgeError(ValueError):
     pass
@@ -169,7 +171,13 @@ def handle(username: str, request: dict, *, auth, jobs, root: Path, rows_provide
         for path in sorted(ENVS.glob('project-[0-9][0-9][0-9]')):
             if not (root / 'guacamole/access' / f'{path.name}.applied.json').is_file():
                 continue
-            rows.extend(rows_provider(auth, root, int(path.name[-3:]), username))
+            try:
+                rows.extend(rows_provider(auth, root, int(path.name[-3:]), username))
+            except (OSError, ValueError, TicketError) as exc:
+                # A stale or unreadable legacy project must not take down the
+                # global Guacamole inventory. Project-specific operations still
+                # fail closed below when that project is selected explicitly.
+                print(f'crange: skipping unreadable Guacamole project {path.name}: {exc}', flush=True)
         with jobs.connect() as db:
             recent = db.execute("SELECT id,project,options,status,output FROM jobs "
                                 "WHERE actor=? AND operation IN ('guac-box-control','guac-snapshot') "
