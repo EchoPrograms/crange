@@ -78,6 +78,7 @@ def dispatch(value, config, peer_uid, run=subprocess.run):
         raise ValueError('Unapproved cluster SSH address.')
     result = run(['ssh', '-o', 'BatchMode=yes', '-o', 'ConnectTimeout=5',
                   '-o', 'StrictHostKeyChecking=yes', '-o', 'HostKeyAlias=' + node,
+                  '-o', 'UserKnownHostsFile=/etc/pve/nodes/' + node + '/ssh_known_hosts',
                   'root@' + target, shlex.join(['python3', '-c', program])],
                  capture_output=True, text=True, timeout=60, check=True)
     response = json.loads(result.stdout)
