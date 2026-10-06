@@ -1,0 +1,51 @@
+{
+  "alpine-3-24": {
+    "display_name": "Alpine3.24-VM",
+    "image_id": "alpine-3-24-20261005",
+    "profile": {
+      "agent_enabled": true,
+      "bios": "seabios",
+      "machine": "q35",
+      "os_type": "l26",
+      "scsi_hardware": "virtio-scsi-single",
+      "upgrade_packages": false
+    },
+    "template_id": 8820,
+    "template_node": "proxmox1"
+  },
+  "approved-base": {
+    "display_name": "ParrotOS-Jumpbox",
+    "template_id": 112,
+    "template_node": "proxmox4"
+  },
+  "debian-13": {
+    "display_name": "Debian13-VM",
+    "profile": {
+      "agent_enabled": true,
+      "bios": "seabios",
+      "machine": "q35",
+      "os_type": "l26",
+      "scsi_hardware": "virtio-scsi-single",
+      "upgrade_packages": false
+    },
+    "template_id": 3015,
+    "template_node": "proxmox4"
+  },
+  "p003-image-97e84625da58": {
+    "template_id": 116,
+    "template_node": "proxmox4"
+  },
+  "ubuntu-server-24-04": {
+    "display_name": "UbuntuServer24.04-VM",
+    "profile": {
+      "agent_enabled": true,
+      "bios": "seabios",
+      "machine": "q35",
+      "os_type": "l26",
+      "scsi_hardware": "virtio-scsi-single",
+      "upgrade_packages": false
+    },
+    "template_id": 3014,
+    "template_node": "proxmox4"
+  }
+}

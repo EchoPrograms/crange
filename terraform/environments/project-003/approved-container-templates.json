@@ -1,0 +1,22 @@
+{
+  "approved-ct-base": {
+    "template_id": 3000,
+    "template_node": "proxmox4",
+    "display_name": "Debian13-Container"
+  },
+  "debian-13": {
+    "template_id": 3000,
+    "template_node": "proxmox4",
+    "display_name": "Debian13-Container"
+  },
+  "ubuntu-server-24-04": {
+    "template_id": 3001,
+    "template_node": "proxmox4",
+    "display_name": "UbuntuServer24.04-Container"
+  },
+  "alpine-3-24": {
+    "template_id": 3002,
+    "template_node": "proxmox4",
+    "display_name": "Alpine3.24-Container"
+  }
+}
