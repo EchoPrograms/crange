@@ -35,10 +35,19 @@ class SchedulingTests(unittest.TestCase):
         self.assertEqual(node['verified_networks'],[])
 
     def test_container_capability_requires_pinned_provider_acceptance(self):
-        policy=dict(scheduling.DEFAULT_POLICY,allowed_nodes=['proxmox2'])
+        policy=dict(scheduling.DEFAULT_POLICY,allowed_nodes=['proxmox2'],provider_version='0.104.0')
         self.assertNotIn('container',scheduling.discover(API(),policy)['nodes']['proxmox2']['guest_types'])
         policy['nodes']={'proxmox2':{'provider_container_verified':True}}
+        self.assertNotIn('container',scheduling.discover(API(),policy)['nodes']['proxmox2']['guest_types'])
+        policy['nodes']={'proxmox2':{'provider_container_acceptance':{
+            'provider_version':'0.104.0','node':'proxmox2','node_version':'pve-manager/9.0.3/build',
+            'disposable_terraform_ct':True,'network_config_verified':True,'job_id':'ct-accept-20261006'}}}
         self.assertIn('container',scheduling.discover(API(),policy)['nodes']['proxmox2']['guest_types'])
+        policy['nodes']['proxmox2']['provider_container_acceptance']['node']='proxmox3'
+        self.assertNotIn('container',scheduling.discover(API(),policy)['nodes']['proxmox2']['guest_types'])
+        policy['nodes']['proxmox2']['provider_container_acceptance']['node']='proxmox2'
+        policy['provider_version']='0.105.0'
+        self.assertNotIn('container',scheduling.discover(API(),policy)['nodes']['proxmox2']['guest_types'])
 
     def test_attestation_admits_only_networks_actually_tested_on_node(self):
         policy=dict(scheduling.DEFAULT_POLICY,allowed_nodes=['proxmox2'])

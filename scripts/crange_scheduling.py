@@ -97,6 +97,28 @@ def _api_flag(value):
     return value in (True, 1, '1')
 
 
+def provider_container_placement_verified(policy, node_name):
+    """Require both pinned-provider and node-specific disposable CT acceptance.
+
+    A linked-cache proof only covers storage/backing semantics. It cannot prove
+    Terraform's CT create/config network options work on the destination node.
+    Keep the legacy boolean insufficient; admission needs a structured record
+    tied to provider version, node API version, and exact acceptance job.
+    """
+    if policy.get('provider_version') != '0.104.0':
+        return False
+    proof = policy.get('nodes', {}).get(node_name, {}).get('provider_container_acceptance')
+    if not isinstance(proof, dict):
+        return False
+    return (proof.get('provider_version') == '0.104.0'
+            and proof.get('node') == node_name
+            and isinstance(proof.get('node_version'), str)
+            and proof['node_version'].startswith('pve-manager/')
+            and proof.get('disposable_terraform_ct') is True
+            and proof.get('network_config_verified') is True
+            and isinstance(proof.get('job_id'), str) and bool(proof['job_id']))
+
+
 def discover(api, policy, planned_networks=()):
     """Account every visible guest, including stopped guests and non-range guests.
 
@@ -176,7 +198,7 @@ def discover(api, policy, planned_networks=()):
                 'observed_memory_mb': status['memory']['used']/2**20,
                 'load': float(status.get('loadavg', [0])[0])/cpu,
                 'observed_cpu_cores': float(status['cpu']) * cpu if status.get('cpu') is not None else None,
-                'architectures': ['amd64'], 'guest_types': ['vm'] + (['container'] if policy.get('nodes', {}).get(name, {}).get('provider_container_verified') is True else []),
+                'architectures': ['amd64'], 'guest_types': ['vm'] + (['container'] if provider_container_placement_verified(policy, name) else []),
                 'features': policy.get('nodes', {}).get(name, {}).get('verified_features', []),
                 'networks': sorted(networks), 'verified_networks': sorted(verified_networks),
                 'management_verified': fresh and attestation.get('management_verified') is True,
