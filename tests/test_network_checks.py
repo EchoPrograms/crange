@@ -15,6 +15,7 @@ class FixedNetworkChecksTests(unittest.TestCase):
             iputils=True
             lease='10.240.254.101'
             nc_success=False
+            dns_failure=False
             def request(self,method,path,fields,deadline):
                 if path=='/cluster/resources':return [{'vmid':9911,'node':'proxmox2','type':'qemu'}]
                 if path.endswith('/config'):return {'tags':'crange-network-probe;'+outer.target['job_id'],
@@ -32,6 +33,8 @@ class FixedNetworkChecksTests(unittest.TestCase):
                         result['out-data']='ping from iputils' if self.iputils else 'BusyBox ping'
                     if '1423' in command:result.update(exitcode=1,**{'err-data':'ping: local error: message too long, mtu=1450'})
                     if 'nslookup' in command:result['out-data']='Name: example.com\nAddress: 93.184.215.14'
+                    if 'nslookup' in command and self.dns_failure:
+                        result.update(exitcode=1,**{'err-data':'private guest detail'})
                     if 'udhcpc' in command:result['err-data']='udhcpc: lease of '+self.lease+' obtained, lease time 43200'
                     if 'nc' in command:result['exitcode']=0 if self.nc_success else 124
                     return result
@@ -73,9 +76,16 @@ class FixedNetworkChecksTests(unittest.TestCase):
 
     def test_bad_dhcp_pool_still_restores_static_address_and_route(self):
         self.transport.lease='10.240.254.50'
-        with self.assertRaises(ValueError):self.checker.run(self.target,'dns')
+        with self.assertRaises(ValueError) as caught:self.checker.run(self.target,'dns')
+        self.assertEqual(caught.exception.safe_cause,'dns_dhcp_lease_outside_pool')
         self.assertTrue(any(command[1:4]==['ip','address','replace'] for command in self.transport.calls))
         self.assertTrue(any(command[1:4]==['ip','route','replace'] for command in self.transport.calls))
+
+    def test_dns_resolution_failure_has_fixed_safe_category(self):
+        self.transport.dns_failure=True
+        with self.assertRaises(ValueError) as caught:self.checker.run(self.target,'dns')
+        self.assertEqual(caught.exception.safe_cause,'dns_resolution_failed')
+        self.assertNotIn('private guest detail',str(caught.exception))
 
     def test_isolation_requires_public_positive_control_and_four_counter_increments(self):
         result=self.checker.run(self.target,'team_isolation')

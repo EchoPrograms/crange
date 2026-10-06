@@ -33,6 +33,14 @@ def safe_failure_cause(error):
     return f'{type(error).__name__.lower()}_detail_redacted'
 
 
+def require_diagnostic(condition, cause):
+    """Raise a fixed categorical failure without retaining guest/provider text."""
+    if not condition:
+        error=ValueError('Fixed network diagnostic failed.')
+        error.safe_cause=cause
+        raise error
+
+
 def plan_digest(plan):
     return hashlib.sha256(json.dumps(plan, sort_keys=True, separators=(',', ':'), allow_nan=False).encode()).hexdigest()
 
@@ -128,13 +136,14 @@ class NetworkProbeRunner:
             self.backend.install_management_rule(target, rule)
             save('testing')
             for check in sorted(CHECKS):
+                save('testing', active_check=check)
                 started = self.clock()
                 result = self.backend.run_check(target, check, timeout=60)
                 elapsed = self.clock() - started
                 if not isinstance(result, dict) or result.get('passed') is not True or not 0 < elapsed <= 60:
                     raise ValueError('Fixed network check failed or exceeded deadline: ' + check)
                 checks[check] = dict(result, duration_seconds=elapsed)
-                save('testing', completed_checks=sorted(checks))
+                save('testing', completed_checks=sorted(checks), active_check=None)
         except Exception as error:
             # Do not persist exception text: provider errors can contain secrets.
             failure = type(error).__name__

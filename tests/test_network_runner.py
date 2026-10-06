@@ -101,6 +101,21 @@ class NetworkRunnerTests(unittest.TestCase):
         self.assertEqual(self.record()['cause'],'valueerror_detail_redacted')
         self.assertNotIn('private provider detail',self.journal.read_text())
 
+    def test_failed_check_name_and_safe_category_survive_cleanup(self):
+        from crange_network_runner import require_diagnostic
+        original=self.backend.run_check
+        def run_check(target,check,timeout):
+            if check=='dns':require_diagnostic(False,'dns_dhcp_dora_failed')
+            return original(target,check,timeout)
+        self.backend.run_check=run_check
+        with self.assertRaises(ValueError):self.run_probe()
+        record=self.record()
+        self.assertEqual(record['active_check'],'dns')
+        self.assertEqual(record['completed_checks'],['controller'])
+        self.assertEqual(record['cause'],'dns_dhcp_dora_failed')
+        self.assertEqual(record['state'],'failed_cleaned')
+        self.assertTrue(self.backend.released)
+
     def test_rule_cleanup_failure_does_not_skip_destroy_and_retains_reservation(self):
         self.backend.failure='rule_remove'
         with self.assertRaises(ValueError): self.run_probe()
