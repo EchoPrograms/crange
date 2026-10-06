@@ -157,6 +157,14 @@ jump_boxes = {
             crange.cmd_release_capture(SimpleNamespace(project="3",version="3.0",boot_order=["web,db","db,web"]))
         release = crange.load_release(3, "3.0")
         self.assertEqual(release["scenario"]["boot_order_permutations"], [["web", "db"], ["db", "web"]])
+        with patch.object(crange, "output_json", return_value=outputs), patch.object(crange,"check_endpoint"), patch.object(crange,"ProxmoxAPI",return_value=API()), patch.object(crange,"run",return_value=SimpleNamespace(stdout="rev\n")), patch('crange_capture.capture_policy'), patch('crange_capture.capture_vm', return_value=(315, {'export_job': 'export2', 'probe_job': 'probe2'})) as worker, patch.object(crange, 'cmd_release_publish'):
+            crange.cmd_release_capture(SimpleNamespace(project="3", version="3.1", machine=['t254-web']))
+        selected = crange.load_release(3, "3.1")
+        self.assertEqual([b['key'] for b in selected['scenario']['boxes']], ['t254-web'])
+        self.assertEqual(selected['scenario']['boot_order_permutations'], [['web']])
+        worker.assert_called_once()
+        with self.assertRaisesRegex(crange.CrangeError, 'distinct applied Team 0'):
+            crange.cmd_release_capture(SimpleNamespace(project="3", version="3.2", machine=['missing']))
 
     def test_release_clones_keep_guacamole_protocol_and_default_legacy_to_ssh(self):
         vm = {"name": "desktop", "ip_last_octet": 20, "template": "approved-base",
