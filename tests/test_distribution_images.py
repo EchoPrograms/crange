@@ -1,4 +1,5 @@
 from pathlib import Path
+import copy
 import sys
 import unittest
 import hashlib
@@ -212,18 +213,25 @@ class PublicationTests(unittest.TestCase):
 
     def test_export_publication_keeps_virtual_size(self):
         record = dict(state='exported', complete_capture=True, kind='vm', node='proxmox1',
-                      source_id=100, artifact_sha256='a'*64, volume_id='local:backup/export', disk_gb=32)
+                      source_id=100, artifact_sha256='a'*64, volume_id='local:backup/export', disk_gb=32,
+                      init_system='openrc')
         arguments = dict(architecture='amd64', source_revision='revision', approved_projects=['3'],
                          datastore_id='local-lvm', verification={'passed': True, 'evidence': 'clone test'})
         import base64, struct
         key = base64.b64encode(struct.pack('>I',11)+b'ssh-ed25519'+struct.pack('>I',32)+b'a'*32).decode()
         record['source_identity']={'machine_id':'a'*32,'ssh_host_key':'ssh-ed25519 '+key}
         record['identity_capture']={'state':'identity-captured','job_id':'capture-1','node':'proxmox1',
-            'kind':'vm','source_id':100,'source_config_sha256':'c'*64,'source_identity':record['source_identity']}
+            'kind':'vm','source_id':100,'source_config_sha256':'c'*64,'source_identity':record['source_identity'],
+            'init_system':'openrc','readiness':'default'}
 
         catalog = publish_exported_image({'schema_version': 1, 'images': {}}, 'vm-v1', record, **arguments)
         self.assertEqual(catalog['images']['vm-v1']['disk_gb'], 32)
         self.assertEqual(catalog['images']['vm-v1']['source_identity'],record['source_identity'])
+        self.assertEqual(catalog['images']['vm-v1']['init_system'],'openrc')
+        self.assertEqual(catalog['images']['vm-v1']['identity_capture']['init_system'],'openrc')
+        invalid=copy.deepcopy(catalog);invalid['images']['vm-v1']['init_system']='openrc-ish'
+        with self.assertRaisesRegex(CatalogError,'init_system'):
+            validate_catalog(invalid)
         universal = publish_exported_image({'schema_version': 1, 'images': {}}, 'vm-universal', record,
             **{**arguments, 'approved_projects': ['*']})
         self.assertEqual(universal['images']['vm-universal']['approved_projects'], ['*'])

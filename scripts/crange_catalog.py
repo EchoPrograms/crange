@@ -76,8 +76,18 @@ def validate_catalog(catalog):
             validate_approved_projects(image.get('approved_projects'))
         except CatalogError as exc:
             raise CatalogError(f'{image_id}: invalid approval scope: {exc}') from exc
+        if 'init_system' in image and image['init_system'] not in ('systemd', 'openrc'):
+            raise CatalogError(f'{image_id}: init_system must be systemd or openrc')
         if 'source_identity' in image:
             validate_source_identity(image['source_identity'])
+        if 'identity_capture' in image:
+            capture = image['identity_capture']
+            if not isinstance(capture, dict):
+                raise CatalogError(f'{image_id}: identity capture provenance must be an object')
+            if ('init_system' in capture or 'init_system' in image) and (
+                    capture.get('init_system') not in ('systemd', 'openrc')
+                    or capture.get('init_system') != image.get('init_system')):
+                raise CatalogError(f'{image_id}: identity capture init_system is invalid or inconsistent')
         if 'probe_resources' in image:
             validate_probe_resources(image['probe_resources'])
         for replica in image.get('replicas', []):

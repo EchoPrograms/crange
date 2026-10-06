@@ -414,7 +414,8 @@ def capture_source_identity(api, *, node, kind, vmid, job_id, journal, ct_exec=N
         raise DistributionError('Source changed during identity capture; repeat capture.')
     record = {'state': 'identity-captured', 'job_id': job_id, 'node': node, 'kind': kind,
               'source_id': vmid, 'source_config_sha256': _source_config_identity(config),
-              'source_identity': identity, 'readiness': readiness, 'captured_at': datetime.now(timezone.utc).isoformat()}
+              'source_identity': identity, 'init_system': init_system, 'readiness': readiness,
+              'captured_at': datetime.now(timezone.utc).isoformat()}
     journal(record)
     return record
 
@@ -454,7 +455,9 @@ def export_image(api, *, node, kind, vmid, storage, job_id, journal,
     from crange_catalog import validate_source_identity
     if (not isinstance(identity_record, dict) or identity_record.get('state') != 'identity-captured'
             or (identity_record.get('node'), identity_record.get('kind'), identity_record.get('source_id')) != (node, kind, vmid)
-            or identity_record.get('source_config_sha256') != _source_config_identity(config)):
+            or identity_record.get('source_config_sha256') != _source_config_identity(config)
+            or identity_record.get('init_system') not in ('systemd', 'openrc')
+            or identity_record.get('readiness') != ('running' if identity_record['init_system'] == 'systemd' else 'default')):
         raise DistributionError('Matching worker-captured source identity is required before export.')
     validate_source_identity(identity_record.get('source_identity'))
     content_path = f'/nodes/{node}/storage/{storage}/content'
@@ -462,6 +465,7 @@ def export_image(api, *, node, kind, vmid, storage, job_id, journal,
     record = dict(job_id=job_id, node=node, kind=kind, source_id=vmid,
                   storage=storage, state='exporting', disk_gb=disk_gb,
                   source_identity=dict(identity_record['source_identity']), identity_capture=dict(identity_record),
+                  init_system=identity_record['init_system'],
                   memory_mb=int(config.get('memory', 0)), cpu_cores=int(config.get('cores', 0)))
     journal(record)
     upid = api.request('POST', f'/nodes/{node}/vzdump',
@@ -537,6 +541,9 @@ def publish_exported_image(catalog, image_id, export, *, architecture,
     capture = export.get('identity_capture', {})
     if (capture.get('state') != 'identity-captured' or not capture.get('job_id')
             or capture.get('source_identity') != export['source_identity']
+            or capture.get('init_system') not in ('systemd', 'openrc')
+            or export.get('init_system') != capture['init_system']
+            or capture.get('readiness') != ('running' if capture['init_system'] == 'systemd' else 'default')
             or (capture.get('node'), capture.get('kind'), capture.get('source_id')) != (export['node'], export['kind'], export['source_id'])
             or not re.fullmatch(r'[a-f0-9]{64}', capture.get('source_config_sha256', ''))):
         raise DistributionError('Export is missing bound source identity capture provenance.')
@@ -548,6 +555,7 @@ def publish_exported_image(catalog, image_id, export, *, architecture,
         'kind': export['kind'], 'architecture': architecture, 'disk_gb': disk_gb,
         'memory_mb': export.get('memory_mb'), 'cpu_cores': export.get('cpu_cores'),
         'source_identity': dict(export['source_identity']), 'identity_capture': dict(capture),
+        'init_system': capture['init_system'],
         'artifact_sha256': export['artifact_sha256'],
         'artifact': {'volume_id': export['volume_id'], 'node': export['node'],
                      'format': 'vzdump', 'complete_capture': True, 'source_id': export['source_id']},

@@ -42,13 +42,15 @@ class CaptureTests(unittest.TestCase):
                         raise FileNotFoundError(command[0])
                     return 'default' if 'rc-status' in command[0] else ('a'*32 if command[-1]=='/etc/machine-id' else KEY)
                 execute.side_effect=read
-                capture_source_identity(api,node='proxmox2',kind='container',vmid=100,job_id='capture-1',
+                record=capture_source_identity(api,node='proxmox2',kind='container',vmid=100,job_id='capture-1',
                     journal=Mock(),ct_exec=execute,init_system='openrc')
+                self.assertEqual(execute.call_args_list[-3].args[2], [expected_path,'--runlevel'])
                 commands=[call.args[2] for call in execute.call_args_list]
                 self.assertEqual(commands[0],['/bin/rc-status','--runlevel'])
                 if expected_path == '/sbin/rc-status':
                     self.assertEqual(commands[1],[expected_path,'--runlevel'])
                 self.assertIn(['/bin/cat','/etc/machine-id'],commands)
+                self.assertEqual(record['init_system'], 'openrc')
 
     def test_source_outside_probe_pool_has_no_execution(self):
         for members in ([],[{'type':'lxc','node':'proxmox3','vmid':100}],
@@ -96,7 +98,8 @@ class CaptureTests(unittest.TestCase):
 
     def test_successful_export_carries_identity_and_capture_provenance(self):
         api,config,execute=self.fixture()
-        record=capture_source_identity(api,node='proxmox2',kind='container',vmid=100,job_id='capture-1',journal=Mock(),ct_exec=execute)
+        execute.side_effect=['default','a'*32,KEY]
+        record=capture_source_identity(api,node='proxmox2',kind='container',vmid=100,job_id='capture-1',journal=Mock(),ct_exec=execute,init_system='openrc')
         config['template']=1
         listings=iter([[],[{'volid':'library:backup/image','content':'backup','vmid':100}]])
         def request(method,path,fields=None):
@@ -109,6 +112,7 @@ class CaptureTests(unittest.TestCase):
         exported=export_image(api,node='proxmox2',kind='container',vmid=100,storage='library',job_id='export-1',journal=Mock(),hash_volume=Mock(return_value='a'*64),approved_backup_storage=[('proxmox2','library')],identity_record=record)
         self.assertEqual(exported['source_identity'],record['source_identity'])
         self.assertEqual(exported['identity_capture'],record)
+        self.assertEqual(exported['init_system'],'openrc')
 
     def test_source_public_key_and_machine_id_are_validated(self):
         validate_source_identity({'machine_id':'a'*32,'ssh_host_key':KEY})
