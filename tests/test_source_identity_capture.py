@@ -4,7 +4,7 @@ import pathlib
 import struct
 import sys
 import unittest
-from unittest.mock import Mock
+from unittest.mock import Mock, call
 sys.path.insert(0,str(pathlib.Path(__file__).resolve().parents[1]/'scripts'))
 from crange_distribution import capture_source_identity, export_image, DistributionError
 from crange_catalog import validate_source_identity, CatalogError
@@ -31,6 +31,24 @@ class CaptureTests(unittest.TestCase):
             ['/usr/bin/systemctl','is-system-running'],['/bin/cat','/etc/machine-id'],['/bin/cat','/etc/ssh/ssh_host_ed25519_key.pub']])
         journal.assert_called_once_with(record)
         self.assertTrue(all(call.args[0]=='GET' for call in api.request.call_args_list))
+
+    def test_openrc_capture_uses_bin_path_with_fixed_sbin_fallback(self):
+        for first_path, expected_path in (('/bin/rc-status', '/bin/rc-status'),
+                                          ('/sbin/rc-status', '/sbin/rc-status')):
+            with self.subTest(path=expected_path):
+                api,config,execute=self.fixture()
+                def read(node,vmid,command):
+                    if command[0] == '/bin/rc-status' and first_path == '/sbin/rc-status':
+                        raise FileNotFoundError(command[0])
+                    return 'default' if 'rc-status' in command[0] else ('a'*32 if command[-1]=='/etc/machine-id' else KEY)
+                execute.side_effect=read
+                capture_source_identity(api,node='proxmox2',kind='container',vmid=100,job_id='capture-1',
+                    journal=Mock(),ct_exec=execute,init_system='openrc')
+                commands=[call.args[2] for call in execute.call_args_list]
+                self.assertEqual(commands[0],['/bin/rc-status','--runlevel'])
+                if expected_path == '/sbin/rc-status':
+                    self.assertEqual(commands[1],[expected_path,'--runlevel'])
+                self.assertIn(['/bin/cat','/etc/machine-id'],commands)
 
     def test_source_outside_probe_pool_has_no_execution(self):
         for members in ([],[{'type':'lxc','node':'proxmox3','vmid':100}],

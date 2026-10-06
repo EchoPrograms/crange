@@ -371,6 +371,20 @@ def _fixed_guest_read(api, node, guest_type, vmid, command, ct_exec, timeout):
     raise DistributionError('Source identity guest-agent check timed out.')
 
 
+def _guest_readiness(read, init_system):
+    if init_system == 'systemd':
+        return read(['/usr/bin/systemctl', 'is-system-running'])
+    # OpenRC installations differ on whether rc-status is linked into /bin or
+    # /sbin. Try only these fixed executable paths; never invoke a shell.
+    failure = None
+    for command in (['/bin/rc-status', '--runlevel'], ['/sbin/rc-status', '--runlevel']):
+        try:
+            return read(command)
+        except Exception as exc:
+            failure = exc
+    raise DistributionError('OpenRC readiness command failed.') from failure
+
+
 def capture_source_identity(api, *, node, kind, vmid, job_id, journal, ct_exec=None, timeout=60, init_system='systemd'):
     """Read fixed identity commands before reviewed stop/template conversion.
 
@@ -390,7 +404,7 @@ def capture_source_identity(api, *, node, kind, vmid, job_id, journal, ct_exec=N
     if int(config.get('template', 0)) or api.request('GET', base + '/status/current').get('status') != 'running':
         raise DistributionError('Identity capture requires an owned running guest before template conversion.')
     read = lambda command: _fixed_guest_read(api, node, guest_type, vmid, command, ct_exec, timeout)
-    readiness = read(['/usr/bin/systemctl', 'is-system-running'] if init_system == 'systemd' else ['/sbin/rc-status', '--runlevel'])
+    readiness = _guest_readiness(read, init_system)
     if readiness != ('running' if init_system == 'systemd' else 'default'):
         raise DistributionError('Source guest is not ready for identity capture.')
     identity = {'machine_id': read(['/bin/cat', '/etc/machine-id']),
@@ -603,8 +617,7 @@ class ProbeVerifier:
         readiness = ''
         while time.monotonic() < deadline:
             try:
-                command = ['/usr/bin/systemctl', 'is-system-running'] if self.init_system == 'systemd' else ['/sbin/rc-status', '--runlevel']
-                readiness = read(command)
+                readiness = _guest_readiness(read, self.init_system)
                 if readiness == ('running' if self.init_system == 'systemd' else 'default'): break
             except Exception:
                 # Guest-agent initialization may lag behind host task completion.
@@ -631,7 +644,8 @@ class SSHContainerExec:
     def __init__(self, run=None): self.run = run or subprocess.run
 
     def __call__(self, node, vmid, command):
-        allowed = [['/usr/bin/systemctl', 'is-system-running'], ['/sbin/rc-status', '--runlevel'],
+        allowed = [['/usr/bin/systemctl', 'is-system-running'], ['/bin/rc-status', '--runlevel'],
+                   ['/sbin/rc-status', '--runlevel'],
                    ['/bin/cat', '/etc/machine-id'],
                    ['/bin/cat', '/etc/ssh/ssh_host_ed25519_key.pub']]
         if command not in allowed or node not in {f'proxmox{i}' for i in range(1, 7)} or int(vmid) < 100:
