@@ -86,6 +86,28 @@ class FileJournalTests(unittest.TestCase):
             with self.assertRaisesRegex(DistributionError, 'state transition'):
                 journal({**terminal, 'state': 'failed-verification'})
 
+    def test_task_free_allocation_reconciliation_allows_safe_job_retry(self):
+        with tempfile.TemporaryDirectory() as directory:
+            journal = FileJournal(Path(directory))
+            initial = {'job_id': 'source-probe-1', 'state': 'allocated',
+                       'node': 'proxmox1', 'image_id': 'source:proxmox1:qemu:8830',
+                       'datastore_id': 'local-lvm'}
+            journal(initial)
+            reconciled = {**initial, 'state': 'reconciled-absent',
+                          'absence_verified': True}
+            journal(reconciled)
+            retry = {**initial, 'job_id': 'source-probe-2'}
+            journal(retry)
+
+    def test_absent_reconciliation_requires_no_provider_tasks_and_evidence(self):
+        with tempfile.TemporaryDirectory() as directory:
+            journal = FileJournal(Path(directory))
+            initial = {'job_id': 'source-probe-1', 'state': 'allocated',
+                       'node': 'proxmox1', 'provider_tasks': [{'upid': UPID, 'state': 'running'}]}
+            journal(initial)
+            with self.assertRaisesRegex(DistributionError, 'task-free'):
+                journal({**initial, 'state': 'reconciled-absent', 'absence_verified': True})
+
     def test_job_state_cannot_move_backwards(self):
         with tempfile.TemporaryDirectory() as directory:
             journal = FileJournal(Path(directory))

@@ -136,21 +136,22 @@ class ReplicaTests(unittest.TestCase):
                   'cores': 2, 'sockets': 1,
                   'scsi0': 'local-lvm:base-8830-disk-0,size=12G'}
         probe = {'tags': 'crange-image', 'template': 0, 'memory': 1024,
-                 'cores': 2, 'scsi0': 'local-lvm:vm-990-disk-0,size=12G'}
+                 'cores': 2, 'scsi0': 'local-lvm:vm-20000-disk-0,size=12G'}
         def request(method, path, fields=None):
+            if path == '/cluster/resources': return []
             if path.endswith('/status/current'):
                 return {'status': 'stopped'}
             if path == '/cluster/nextid':
-                return 990
+                return fields['vmid']
             if path == '/pools/crange-probes':
                 return {'members': [{'type': 'qemu', 'node': 'proxmox1', 'vmid': 8830},
-                                    {'type': 'qemu', 'node': 'proxmox1', 'vmid': 990}]}
-            if method == 'PUT' and path.endswith('/990/config'):
+                                    {'type': 'qemu', 'node': 'proxmox1', 'vmid': 20000}]}
+            if method == 'PUT' and path.endswith('/20000/config'):
                 probe['tags'] = fields['tags']
                 return None
             if path.endswith('/config'):
                 return source if '/8830/' in path else probe
-            return 'UPID:proxmox1:00000001:00000001:00000001:qmclone:990:root@pam:'
+            return 'UPID:proxmox1:00000001:00000001:00000001:qmclone:20000:root@pam:'
         api.request.side_effect = request
         api.task.return_value = None
         capture = {'job_id': 'capture-8830', 'source_config_sha256':
@@ -167,13 +168,14 @@ class ReplicaTests(unittest.TestCase):
             datastore_id='local-lvm', job_id='source-probe-1', capture=capture,
             reservation=reservation)
         api.request.assert_any_call('POST', '/nodes/proxmox1/qemu/8830/clone', {
-            'newid': 990, 'full': 1, 'storage': 'local-lvm', 'pool': 'crange-probes',
-            'name': 'crange-source-probe-990',
+            'newid': 20000, 'full': 1, 'storage': 'local-lvm', 'pool': 'crange-probes',
+            'name': 'crange-source-probe-20000',
             'description': 'CRANGE source verification source-probe-1'})
-        api.request.assert_any_call('DELETE', '/nodes/proxmox1/qemu/990', {'purge': 1})
+        api.request.assert_any_call('GET', '/cluster/nextid', {'vmid': 20000})
+        api.request.assert_any_call('DELETE', '/nodes/proxmox1/qemu/20000', {'purge': 1})
         self.assertEqual(result['state'], 'source-probed')
         self.assertTrue(all(t['state'] == 'confirmed-terminal' for t in result['provider_tasks']))
-        self.assertEqual(verify.call_args.args[1:], ('proxmox1', 'qemu', 990))
+        self.assertEqual(verify.call_args.args[1:], ('proxmox1', 'qemu', 20000))
 
     def test_probe_requires_exact_captured_source_before_mutation(self):
         api = Mock()
@@ -200,6 +202,73 @@ class ReplicaTests(unittest.TestCase):
             {'memory_mb': 512, 'cpu_cores': 2, 'disk_gb': 11.0})
         with self.assertRaisesRegex(DistributionError, 'disk size'):
             _qemu_capacity({'memory': 512, 'cores': 2, 'scsi0': 'local-lvm:vm-8830-disk-0'})
+
+    def test_resume_reconciles_exact_terminal_clone_before_verifying_and_deleting(self):
+        from crange_distribution import FileJournal
+        with tempfile.TemporaryDirectory() as directory:
+            api = Mock()
+            source = {'tags': 'crange-image', 'template': 1, 'memory': 512,
+                      'cores': 1, 'scsi0': 'local-lvm:base-8830-disk-0,size=20G'}
+            probe = {'tags': 'crange-image;crange-job-capture', 'template': 0,
+                     'name': 'crange-source-probe-20000',
+                     'description': 'CRANGE source verification resume-1',
+                     'net0': 'virtio=aa:bb:cc:dd:ee:ff,bridge=crprobe1450,link_down=1'}
+            tasks = iter([
+                'UPID:proxmox1:00000001:00000001:00000001:qmstart:20000:root@pam:',
+                'UPID:proxmox1:00000002:00000002:00000002:qmstop:20000:root@pam:',
+                'UPID:proxmox1:00000003:00000003:00000003:qmdelete:20000:root@pam:'])
+            def request(method, path, fields=None):
+                if path == '/pools/crange-probes':
+                    return {'members': [{'type': 'qemu', 'node': 'proxmox1', 'vmid': 8830},
+                                        {'type': 'qemu', 'node': 'proxmox1', 'vmid': 20000}]}
+                if path.endswith('/status/current'):
+                    return {'status': 'stopped'}
+                if path.endswith('/config'):
+                    if method == 'PUT':
+                        probe['tags'] = fields['tags']
+                        return None
+                    return source if '/8830/' in path else probe
+                return next(tasks)
+            api.request.side_effect = request
+            api.task.return_value = None
+            capture = {'job_id': 'capture-8830', 'source_config_sha256':
+                       _source_config_identity(source, 8830),
+                       'source_identity': {'machine_id': 'a' * 32,
+                                           'ssh_host_key': 'ssh-ed25519 key source'}}
+            reservation = {'image': 'source:proxmox1:qemu:8830',
+                           'artifact_sha256': capture['source_config_sha256']}
+            job = 'resume-1'
+            journal = FileJournal(Path(directory))
+            journal({'job_id': job, 'image_id': 'source:proxmox1:qemu:8830',
+                'node': 'proxmox1', 'source_node': 'proxmox1', 'source_id': 8830,
+                'source_config_sha256': capture['source_config_sha256'],
+                'source_capture_job_id': capture['job_id'], 'datastore_id': 'local-lvm',
+                'state': 'allocated', 'kind': 'vm', 'probe_id': 20000,
+                'probe_pool': 'crange-probes', 'probe_marker': f'crange-job-{job}',
+                'reservation': reservation})
+            result = {'passed': True, 'identity_unique': True,
+                      'evidence': {'isolated_bridge': 'crprobe1450'}}
+            verify = Mock(return_value=result)
+            verify.bridge = 'crprobe1450'
+            worker = SourceProbeWorker(api, journal, verify, lambda *args: True)
+            completed = worker.resume(source_node='proxmox1', source_id=8830,
+                datastore_id='local-lvm', job_id=job, capture=capture,
+                reservation=reservation,
+                task_upid='UPID:proxmox1:00000004:00000004:00000004:qmclone:20000:root@pam:')
+            self.assertEqual(completed['state'], 'source-probed')
+            self.assertEqual(completed['provider_tasks'][0]['state'], 'confirmed-terminal')
+            api.request.assert_any_call('DELETE', '/nodes/proxmox1/qemu/20000', {'purge': 1})
+
+    def test_clone_task_finder_requires_unique_terminal_source_target_log(self):
+        from crange_distribution import find_source_clone_task
+        api = Mock()
+        upid = 'UPID:proxmox1:00000004:00000004:00000004:qmclone:20000:root@pam:'
+        api.request.side_effect = [
+            [{'type': 'qmclone', 'id': '8830', 'upid': upid, 'status': 'OK'}],
+            [{'t': 'create full clone of drive scsi0 (local-lvm:base-8830-disk-0)'},
+             {'t': 'Logical volume vm-20000-disk-0 created.'}]]
+        self.assertEqual(find_source_clone_task(api, 'proxmox1', 8830, 20000), upid)
+        api.task.assert_called_once_with('proxmox1', upid, timeout=120)
 
     def test_ct_cross_node_requires_complete_capture_archive(self):
         self.catalog['images']['base-v1']['kind'] = 'container'
