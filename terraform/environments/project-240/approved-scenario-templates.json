@@ -1,0 +1,76 @@
+{
+  "approved-base": {
+    "template_id": 112,
+    "template_node": "proxmox4"
+  },
+  "debian-13": {
+    "display_name": "Debian13-VM",
+    "profile": {
+      "agent_enabled": true,
+      "bios": "seabios",
+      "machine": "q35",
+      "os_type": "l26",
+      "scsi_hardware": "virtio-scsi-single",
+      "upgrade_packages": false
+    },
+    "template_id": 3015,
+    "template_node": "proxmox4"
+  },
+  "p240-image-723127f1b70e": {
+    "profile": {
+      "agent_enabled": false,
+      "bios": "seabios",
+      "machine": null,
+      "os_type": "l26",
+      "scsi_hardware": "virtio-scsi-single",
+      "upgrade_packages": false
+    },
+    "template_id": 141,
+    "template_node": "proxmox4"
+  },
+  "p240-image-7adf01307663": {
+    "template_id": 131,
+    "template_node": "proxmox4"
+  },
+  "p240-image-d97b4fcd18d2": {
+    "template_id": 136,
+    "template_node": "proxmox4"
+  },
+  "p240-image-e932a432204b": {
+    "profile": {
+      "agent_enabled": true,
+      "bios": "seabios",
+      "machine": "q35",
+      "os_type": "l26",
+      "scsi_hardware": "virtio-scsi-single",
+      "upgrade_packages": false
+    },
+    "template_id": 140,
+    "template_node": "proxmox4"
+  },
+  "p240-image-ff2a82178988": {
+    "profile": {
+      "agent_enabled": true,
+      "bios": "seabios",
+      "machine": "q35",
+      "os_type": "l26",
+      "scsi_hardware": "virtio-scsi-single",
+      "upgrade_packages": false
+    },
+    "template_id": 142,
+    "template_node": "proxmox4"
+  },
+  "ubuntu-server-24-04": {
+    "display_name": "UbuntuServer24.04-VM",
+    "profile": {
+      "agent_enabled": true,
+      "bios": "seabios",
+      "machine": "q35",
+      "os_type": "l26",
+      "scsi_hardware": "virtio-scsi-single",
+      "upgrade_packages": false
+    },
+    "template_id": 3014,
+    "template_node": "proxmox4"
+  }
+}

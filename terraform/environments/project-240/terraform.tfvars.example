@@ -1,0 +1,3 @@
+project_id = 240
+transit_address = "10.60.2.240/24"
+team_ids = ["1"]

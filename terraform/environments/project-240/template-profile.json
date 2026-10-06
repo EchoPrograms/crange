@@ -1,0 +1,6 @@
+{
+  "bios": "seabios",
+  "machine": null,
+  "scsi_hardware": "virtio-scsi-single",
+  "os_type": "l26"
+}

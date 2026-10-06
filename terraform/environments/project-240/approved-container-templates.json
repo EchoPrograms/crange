@@ -1,0 +1,34 @@
+{
+  "alpine-3-24": {
+    "display_name": "Alpine3.24-Container",
+    "template_id": 3002,
+    "template_node": "proxmox4"
+  },
+  "approved-ct-base": {
+    "display_name": "Debian13-Container",
+    "template_id": 3000,
+    "template_node": "proxmox4"
+  },
+  "debian-13": {
+    "display_name": "Debian13-Container",
+    "template_id": 3000,
+    "template_node": "proxmox4"
+  },
+  "p240-image-3dc4c2883dfe": {
+    "template_id": 132,
+    "template_node": "proxmox4"
+  },
+  "p240-image-bcafe6db8a94": {
+    "template_id": 143,
+    "template_node": "proxmox4"
+  },
+  "p240-image-d89fcdf95651": {
+    "template_id": 137,
+    "template_node": "proxmox4"
+  },
+  "ubuntu-server-24-04": {
+    "display_name": "UbuntuServer24.04-Container",
+    "template_id": 3001,
+    "template_node": "proxmox4"
+  }
+}
