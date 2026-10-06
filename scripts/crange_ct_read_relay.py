@@ -99,7 +99,24 @@ def serve(config_path):
     if socket_path.exists():
         raise ValueError('Relay socket already exists; reconcile the service.')
     listener = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
-    listener.bind(str(socket_path)); os.chown(socket_path, config['peer_uid'], config['peer_uid']); os.chmod(socket_path, 0o600)
+    # CT /run is owned by its user namespace: create as the mapped worker
+    # filesystem UID while retaining the host service's real/effective UID.
+    import ctypes
+    libc = ctypes.CDLL(None)
+    libc.setfsuid.argtypes = [ctypes.c_uint]
+    libc.setfsuid.restype = ctypes.c_uint
+    cwd_fd = os.open('.', os.O_RDONLY | os.O_DIRECTORY)
+    run_fd = os.open(str(root / 'run'), os.O_RDONLY | os.O_DIRECTORY)
+    previous_fsuid = libc.setfsuid(config['peer_uid'])
+    try:
+        if libc.setfsuid(0xFFFFFFFF) != config['peer_uid']:
+            raise ValueError('Mapped service filesystem UID unavailable.')
+        os.fchdir(run_fd)
+        listener.bind('crange-host-read.sock')
+        os.chmod('crange-host-read.sock', 0o600)
+    finally:
+        libc.setfsuid(previous_fsuid)
+        os.fchdir(cwd_fd); os.close(cwd_fd); os.close(run_fd)
     listener.listen(4)
     import signal
     def stop(signum, frame):
