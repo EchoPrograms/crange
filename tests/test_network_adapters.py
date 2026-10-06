@@ -133,7 +133,7 @@ class RouterAdapterTests(unittest.TestCase):
             if command[1:]==['status','numbered']:
                 lines=['Status: active']
                 for owner,source in active.items():
-                    lines.append('[ 1] 10.240.254.98 22/tcp ALLOW FWD '+source+' # '+owner)
+                    lines.append('[ 1] 10.240.254.98 22/tcp           ALLOW FWD   '+source+'                 # '+owner)
                 return subprocess.CompletedProcess(argv,0,'\n'.join(lines),'')
             owner=command[-1]
             source=command[command.index('from')+1]
@@ -148,7 +148,37 @@ class RouterAdapterTests(unittest.TestCase):
         self.assertEqual(active,{})
         self.assertTrue(backend.temporary_rules_absent(self.target))
         self.assertEqual(sum('delete' in command for command in calls),2)
+        self.assertTrue(all(command[1:5]==['--force','route','delete','allow']
+                            for command in calls if 'delete' in command))
         self.assertTrue(all(command[0]=='/usr/sbin/ufw' for command in calls))
+
+    def test_padded_status_accepts_host_masks_but_rejects_owned_rule_drift(self):
+        owner=self.target['job_id']+'-0'
+        valid='[11] 10.240.254.98/32 22/tcp   ALLOW   FWD   10.60.0.20/32   # '+owner
+        for line in (valid,valid.replace('22/tcp','22/udp'),
+                     valid.replace('10.60.0.20/32','10.60.0.0/24'),
+                     valid.replace('ALLOW','DENY'),valid.replace(' FWD',' IN FWD'),
+                     valid+' unrelated',valid.replace('10.240.254.98/32','10.240.254.99')):
+            with self.subTest(line=line):
+                active=[line]
+                deleted=[]
+                def run(argv,**kwargs):
+                    import shlex
+                    command=shlex.split(argv[-1])
+                    if command[1:]==['status','numbered']:
+                        return subprocess.CompletedProcess(argv,0,'Status: active\n'+'\n'.join(active),'')
+                    deleted.append(command)
+                    active.clear()
+                    return subprocess.CompletedProcess(argv,0,'Rules updated','')
+                backend=adapters.FixedRouterUFW(self.target,project_router='10.60.2.240',team_router='10.240.0.4',run=run)
+                if line==valid:
+                    backend.remove_management_rule(self.target,self.rule)
+                    self.assertEqual(len(deleted),1)
+                    self.assertIn('comment',deleted[0])
+                    self.assertEqual(deleted[0][-1],owner)
+                else:
+                    with self.assertRaises(ValueError):backend.remove_management_rule(self.target,self.rule)
+                    self.assertEqual(deleted,[])
 
     def test_rule_parameters_cannot_expand_source_or_ports(self):
         calls=[]
@@ -248,6 +278,17 @@ class ReconcileTests(unittest.TestCase):
         with self.assertRaises(ValueError):self.reconcile()
         self.assertFalse(self.backend.generated)
         self.assertIn('absent_guest_retained_state',self.record()['cleanup_errors'])
+
+    def test_absent_guest_and_empty_state_can_reconcile_remaining_rule(self):
+        self.api.present=False
+        self.backend.addresses=[]
+        result=self.reconcile()
+        self.assertTrue(self.router.removed)
+        self.assertFalse(self.backend.generated)
+        self.assertFalse(self.backend.applied)
+        self.assertTrue(result['rules_absent'])
+        self.assertFalse(result['reservation_released'])
+        self.assertEqual(self.record()['state'],'cleanup_verified_reservation_pending')
 
     def test_destroy_timeout_does_not_claim_cleanup(self):
         self.backend.fail=True

@@ -317,11 +317,16 @@ class FixedRouterUFW:
             owner=rule['owner']+'-'+str(index)
             lines=[line for line in self._status().splitlines() if owner in line]
             if not lines: continue
-            require(len(lines) == 1 and source in lines[0].split()
-                    and rule['destination'].split('/')[0] in lines[0].split() and '22/tcp' in lines[0].split()
-                    and lines[0].split()[-1] == owner
-                    and 'ALLOW FWD' in lines[0], 'Owned router rule differs; require manual reconciliation.')
-            self._execute(['--force','delete','route','allow','from',source,'to',rule['destination'],
+            # UFW pads status columns, including multiple spaces between ALLOW
+            # and FWD. Match the entire fixed rule with flexible whitespace;
+            # do not weaken ownership or delete by the mutable row number.
+            destination=rule['destination'].split('/')[0]
+            pattern=(r'\s*\[\s*\d+\]\s+'+re.escape(destination)+r'(?:/32)?\s+'
+                     r'22/tcp\s+ALLOW\s+FWD\s+'+re.escape(source)+r'(?:/32)?\s+'
+                     r'#\s+'+re.escape(owner)+r'\s*')
+            require(len(lines) == 1 and re.fullmatch(pattern,lines[0]) is not None,
+                    'Owned router rule differs; require manual reconciliation.')
+            self._execute(['--force','route','delete','allow','from',source,'to',rule['destination'],
                            'port','22','proto','tcp','comment',owner])
         require(rule['owner'] not in self._status(), 'Temporary router rules still present.')
 
