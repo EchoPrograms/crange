@@ -105,7 +105,7 @@ def capture_vm(api, *, project, node, source_id, name, description, slug, profil
             while True:
                 try:
                     identity = capture_source_identity(api, node=node, kind='vm', vmid=vmid,
-                        job_id=identity_job, journal=journal)
+                        job_id=identity_job, journal=journal, init_system=profile.get('init_system', 'systemd'))
                     break
                 except (DistributionError, RuntimeError):
                     if time.monotonic() >= deadline:

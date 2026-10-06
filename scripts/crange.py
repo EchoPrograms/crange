@@ -1961,6 +1961,13 @@ def cmd_release_capture(args: argparse.Namespace) -> None:
                 for key, net in cfg.get('custom_networks', {}).items() if str(net['owner_team_id']) == '254'}
     boxes = [{**box, "key": key, "kind": "vm"} for key, box in sorted(scenario_boxes(cfg).items()) if str(box["team_id"]) == "254"]
     boxes += [{**box, "key": key, "kind": "container"} for key, box in sorted(scenario_containers(cfg).items()) if str(box["team_id"]) == "254"]
+    selected = getattr(args, 'machine', [])
+    if selected:
+        if len(selected) != len(set(selected)) or not set(selected) <= {box['key'] for box in boxes}:
+            raise CrangeError('Each --machine must select one distinct applied Team 0 scenario key.')
+        boxes = [box for box in boxes if box['key'] in selected]
+        used_networks = {box.get('network_key') for box in boxes if box.get('network_key')}
+        networks = {key: value for key, value in networks.items() if key in used_networks}
     if not boxes:
         raise CrangeError("Team 0 has no scenario VMs or containers to capture.")
     for box in boxes:
@@ -2006,17 +2013,22 @@ def cmd_release_capture(args: argparse.Namespace) -> None:
         if any(box['kind'] != 'vm' for box in boxes):
             raise CrangeError('Reproducible release capture currently supports QGA-enabled VMs only; CT capture remains gated.')
         capture_profiles = {}
+        from crange_scheduling import read_settings
+        _, source_catalog = read_settings()
         for box in boxes:
             try:
                 profile = {'agent_enabled': False, 'upgrade_packages': True,
                            **json.loads((path / 'template-profile.json').read_text())}
                 profile.update(approvals[box['template']].get('profile', {}))
-                capture_policy(applied['vm'][box['key']].get('node_name', box['node_name']), profile)
+                image_id = box.get('image') or approvals[box['template']].get('image_id')
+                catalog_image = source_catalog.get('images', {}).get(image_id, {})
+                profile['init_system'] = catalog_image.get('init_system', 'systemd')
+                capture_policy(applied['vm'][box['key']].get('node_name') or applied['vm'][box['key']].get('placement', {}).get('node_name') or box['node_name'], profile)
                 capture_profiles[box['key']] = profile
             except (OSError, ValueError, TypeError) as exc:
                 raise CrangeError(str(exc)) from exc
         for box in boxes:
-            node = applied[box["kind"]][box["key"]].get("node_name", box["node_name"])
+            node = applied[box["kind"]][box["key"]].get("node_name") or applied[box["kind"]][box["key"]].get("placement", {}).get("node_name") or box["node_name"]
             vmid = int(applied[box["kind"]][box["key"]]["id"])
             actual = api.vm(node, vmid) if box["kind"] == "vm" else api.container(node, vmid)
             vnet = f"p{project:03d}c{box['network_id']:03d}" if box.get("network_key") else f"p{project:03d}t254"
@@ -2031,7 +2043,7 @@ def cmd_release_capture(args: argparse.Namespace) -> None:
         dirty = bool(run(["git", "status", "--porcelain"], cwd=ROOT, capture=True).stdout.strip())
         try:
             for box in boxes:
-                node = applied[box["kind"]][box["key"]].get("node_name", box["node_name"])
+                node = applied[box["kind"]][box["key"]].get("node_name") or applied[box["kind"]][box["key"]].get("placement", {}).get("node_name") or box["node_name"]
                 vmid = int(applied[box["kind"]][box["key"]]["id"])
                 slug = hashlib.sha256(f"{project}:{args.version}:{box['key']}".encode()).hexdigest()[:12]
                 alias = f"p{project:03d}-image-{slug}"
@@ -2897,7 +2909,7 @@ def make_parser() -> argparse.ArgumentParser:
     q = sub.add_parser("container-remove"); q.add_argument("project"); q.add_argument("name"); q.set_defaults(func=cmd_container_remove)
     q = sub.add_parser("container-health"); q.add_argument("project"); q.add_argument("name", nargs="?"); q.set_defaults(func=cmd_container_health)
     q = sub.add_parser("scenario-health"); q.add_argument("project"); q.add_argument("name", nargs="?"); q.set_defaults(func=cmd_scenario_health)
-    q = sub.add_parser("release-capture"); q.add_argument("project"); q.add_argument("version"); q.add_argument("--boot-order", action="append", default=[], help="Comma-separated staging VM start order; repeat to record permutations"); q.set_defaults(func=cmd_release_capture)
+    q = sub.add_parser("release-capture"); q.add_argument("project"); q.add_argument("version"); q.add_argument("--machine", action="append", default=[], help="Capture only these explicit staging scenario keys; repeat for multiple machines"); q.add_argument("--boot-order", action="append", default=[], help="Comma-separated staging VM start order; repeat to record permutations"); q.set_defaults(func=cmd_release_capture)
     q = sub.add_parser('release-publish', help='Publish a captured release image from completed protected distribution journals')
     q.add_argument('project'); q.add_argument('version'); q.add_argument('template')
     q.add_argument('--export-job', required=True); q.add_argument('--probe-job', required=True)

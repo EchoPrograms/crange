@@ -53,9 +53,10 @@ class CaptureTests(unittest.TestCase):
 
     def tearDown(self): self.tmp.cleanup()
 
-    def invoke(self, ledger=None, identity=None):
+    def invoke(self, ledger=None, identity=None, init_system="systemd"):
         def default_identity(api, **kwargs):
             self.events.append(('identity', api.running))
+            self.events.append(('init_system', kwargs['init_system']))
             return {'source_config_sha256': _source_config_identity(self.config, 201)}
         def export(api, **kwargs):
             self.events.append(('export', api.running, self.config['template']))
@@ -69,7 +70,7 @@ class CaptureTests(unittest.TestCase):
              patch.object(capture, 'export_image', side_effect=export), \
              patch('crange_distribution.main', side_effect=lambda args: self.events.append(('probe', args))):
             return capture.capture_vm(self.api, project=3, node='proxmox4', source_id=115,
-                name='release', description='release', slug='abc', profile={'agent_enabled': True})
+                name='release', description='release', slug='abc', profile={'agent_enabled': True, 'init_system': init_system})
 
     def test_reserves_before_clone_and_isolates_before_boot_then_publishes_evidence(self):
         vmid, evidence = self.invoke()
@@ -84,6 +85,10 @@ class CaptureTests(unittest.TestCase):
         receipt = json.loads((Path(self.tmp.name) / 'capture-journal/capture-p003-abc.json').read_text())
         self.assertEqual(receipt['state'], 'verified')
         self.assertTrue(all(t['state'] == 'confirmed-terminal' for t in receipt['provider_tasks']))
+
+    def test_openrc_profile_uses_reviewed_openrc_identity_checks(self):
+        self.invoke(init_system='openrc')
+        self.assertIn(('init_system', 'openrc'), self.events)
 
     def test_capacity_failure_never_clones(self):
         class FailedLedger(self.ledger):
