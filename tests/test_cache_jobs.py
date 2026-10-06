@@ -24,14 +24,54 @@ class CacheJobTests(unittest.TestCase):
                     'cache_local': True, 'clone_modes_verified': ['linked'], 'job_id': 'prepare'}]}}}
             (root / 'image-catalog.json').write_text(json.dumps(catalog))
             api = Mock()
-            api.request.return_value = {'template': 1, 'tags': 'crange-image;crange-job-prepare'}
+            api.request.side_effect = lambda method, path, fields=None: (
+                {'template': 1, 'tags': 'crange-image;crange-job-prepare'}
+                if path.endswith('/config') else {'status': 'stopped'})
             with patch.object(jobs.scheduling, 'DATA', root), patch.object(jobs.scheduling, 'CONFIG', root), \
                  patch.object(jobs, '_settings', return_value=({'enabled': True}, catalog)), \
                  patch.object(jobs, 'ProxmoxAPI', return_value=api):
                 result = jobs.prepare_cache(project_id=3, image_id='base-v1', node_name='proxmox2')
             self.assertTrue(result['reused'])
             self.assertEqual(result['template_id'], 200)
-            self.assertEqual(api.request.call_count, 1)
+            self.assertEqual(api.request.call_count, 2)
+
+    def test_ready_cache_with_drifted_image_metadata_is_not_reused(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            catalog = {'schema_version': 1, 'images': {'base-v1': {
+                'kind': 'vm', 'architecture': 'amd64', 'artifact_sha256': 'a'*64,
+                'source_revision': 'rev', 'verified': True, 'approved_projects': [3], 'disk_gb': 8,
+                'replicas': [{'node': 'proxmox2', 'template_id': 200, 'datastore_id': 'local-lvm',
+                    'state': 'ready', 'verified_at': 'now', 'artifact_sha256': 'b'*64,
+                    'cache_local': True, 'clone_modes_verified': ['linked'], 'job_id': 'prepare'}]}}}
+            (root / 'image-catalog.json').write_text(json.dumps(catalog))
+            with patch.object(jobs.scheduling, 'DATA', root), patch.object(jobs.scheduling, 'CONFIG', root), \
+                 patch.object(jobs, '_settings', return_value=({'enabled': True}, catalog)), \
+                 patch.object(jobs, 'ProxmoxAPI', return_value=Mock()) as api:
+                with self.assertRaisesRegex(DistributionError, 'metadata'):
+                    jobs.prepare_cache(project_id=3, image_id='base-v1', node_name='proxmox2')
+            api.return_value.request.assert_not_called()
+
+    def test_running_ready_cache_is_not_reused(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            catalog = {'schema_version': 1, 'images': {'base-v1': {
+                'kind': 'vm', 'architecture': 'amd64', 'artifact_sha256': 'a'*64,
+                'source_revision': 'rev', 'verified': True, 'approved_projects': [3], 'disk_gb': 8,
+                'replicas': [{'node': 'proxmox2', 'template_id': 200, 'datastore_id': 'local-lvm',
+                    'state': 'ready', 'verified_at': 'now', 'artifact_sha256': 'a'*64,
+                    'cache_local': True, 'clone_modes_verified': ['linked'], 'job_id': 'prepare'}]}}}
+            (root / 'image-catalog.json').write_text(json.dumps(catalog))
+            api = Mock()
+            api.request.side_effect = lambda method, path, fields=None: (
+                {'template': 1, 'tags': 'crange-image;crange-job-prepare'}
+                if path.endswith('/config') else {'status': 'running'})
+            with patch.object(jobs.scheduling, 'DATA', root), patch.object(jobs.scheduling, 'CONFIG', root), \
+                 patch.object(jobs, '_settings', return_value=({'enabled': True}, catalog)), \
+                 patch.object(jobs, 'ProxmoxAPI', return_value=api):
+                with self.assertRaisesRegex(DistributionError, 'not stopped'):
+                    jobs.prepare_cache(project_id=3, image_id='base-v1', node_name='proxmox2')
+            self.assertEqual(api.request.call_count, 2)
 
     def test_cache_preparation_uses_shared_capacity_and_reconciles_only_success(self):
         with tempfile.TemporaryDirectory() as directory:

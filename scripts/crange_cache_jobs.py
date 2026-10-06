@@ -157,13 +157,20 @@ def prepare_cache(*, project_id, image_id, node_name, datastore_id='local-lvm',
                 ready = _ready(image, node_name, datastore_id)
                 if ready:
                     if len(ready) != 1: raise DistributionError('Ambiguous cache generation; reconcile.')
+                    replica = ready[0]
+                    if (replica.get('artifact_sha256') != image.get('artifact_sha256') or
+                            'linked' not in replica.get('clone_modes_verified', [])):
+                        raise DistributionError('Existing cache metadata no longer matches the approved image; owned repair required.')
                     kind = 'qemu' if image['kind'] == 'vm' else 'lxc'
-                    config = api.request('GET', f'/nodes/{node_name}/{kind}/{ready[0]["template_id"]}/config')
+                    config = api.request('GET', f'/nodes/{node_name}/{kind}/{replica["template_id"]}/config')
                     if int(config.get('template', 0)) != 1 or config.get('lock') or (
-                            f'crange-job-{ready[0]["job_id"]}' not in str(config.get('tags', '')).split(';') or
+                            f'crange-job-{replica["job_id"]}' not in str(config.get('tags', '')).split(';') or
                             'crange-image' not in str(config.get('tags', '')).split(';')):
                         raise DistributionError('Existing cache changed; owned repair required.')
-                    result.update(ready[0], reused=True)
+                    status = api.request('GET', f'/nodes/{node_name}/{kind}/{replica["template_id"]}/status/current')
+                    if status.get('status') != 'stopped':
+                        raise DistributionError('Existing cache is not stopped; owned repair required.')
+                    result.update(replica, reused=True)
                     return catalog
                 bridge = select_probe_bridge(policy)
                 for file in journal.directory.glob('*.json'):
