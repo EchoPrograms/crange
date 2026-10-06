@@ -16,6 +16,7 @@ import shlex
 import os
 import tempfile
 import re
+import stat
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -992,6 +993,10 @@ def catalog_transaction(path, update):
         os.chmod(lock.name, 0o600)
         fcntl.flock(lock, fcntl.LOCK_EX)
         catalog = json.loads(path.read_text()) if path.exists() else {'schema_version': 1, 'images': {}}
+        try:
+            previous_stat = path.stat()
+        except FileNotFoundError:
+            previous_stat = None
         result = update(catalog)
         validate_catalog(result)
         fd, temporary = tempfile.mkstemp(dir=path.parent)
@@ -1001,7 +1006,11 @@ def catalog_transaction(path, update):
                 output.write('\n')
                 output.flush()
                 os.fsync(output.fileno())
-            os.chmod(temporary, 0o600)
+            if previous_stat is None:
+                os.chmod(temporary, 0o600)
+            else:
+                os.chown(temporary, previous_stat.st_uid, previous_stat.st_gid)
+                os.chmod(temporary, stat.S_IMODE(previous_stat.st_mode))
             os.replace(temporary, path)
         finally: Path(temporary).unlink(missing_ok=True)
         return result

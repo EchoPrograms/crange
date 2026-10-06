@@ -8,6 +8,8 @@ import argparse
 import contextlib
 import io
 import json
+import os
+import stat
 import base64
 import struct
 from unittest.mock import Mock, patch
@@ -17,7 +19,8 @@ from crange_distribution import (ReplicaWorker, DistributionError, publish_artif
     ProbeVerifier, SSHContainerExec, normalize_projects, publish_stock_archive,
     publish_exported_image, required_capacity, _add_project_approval_arguments,
     _project_approval_scope, shared_reservation_validator, SourceProbeWorker,
-    _qemu_capacity, _source_config_identity, main as distribution_main)
+    _qemu_capacity, _source_config_identity, catalog_transaction,
+    main as distribution_main)
 
 
 class ReplicaTests(unittest.TestCase):
@@ -387,6 +390,28 @@ class ReplicaTests(unittest.TestCase):
                 allocation, 'proxmox1', 'local-lvm', required_capacity(catalog['images']['base-v1'])))
 
 class PublicationTests(unittest.TestCase):
+    def test_catalog_transaction_preserves_existing_owner_group_and_mode(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / 'catalog.json'
+            path.write_text(json.dumps({'schema_version': 1, 'images': {}}))
+            path.chmod(0o640)
+            original = path.stat()
+            real_chown = os.chown
+            calls = []
+
+            def record_chown(target, uid, gid):
+                calls.append((uid, gid))
+                real_chown(target, uid, gid)
+
+            with patch('crange_distribution.os.chown', side_effect=record_chown):
+                catalog_transaction(path, lambda catalog: catalog)
+
+            replaced = path.stat()
+            self.assertEqual(calls, [(original.st_uid, original.st_gid)])
+            self.assertEqual((replaced.st_uid, replaced.st_gid),
+                             (original.st_uid, original.st_gid))
+            self.assertEqual(stat.S_IMODE(replaced.st_mode), 0o640)
+
     def test_projects_normalized_and_invalid_scope_rejected(self):
         self.assertEqual(normalize_projects(['3', 3]), [3])
         self.assertEqual(normalize_projects(['*']), ['*'])
