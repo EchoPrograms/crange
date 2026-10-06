@@ -1043,7 +1043,7 @@ class SSHContainerExec:
                    ['/bin/cat', '/etc/ssh/ssh_host_ed25519_key.pub']]
         if command not in allowed or node not in {f'proxmox{i}' for i in range(1, 7)} or int(vmid) < 100:
             raise DistributionError('Unsupported CT verification command.')
-        relay = Path('/run/crange-host-read.sock')
+        relay = Path('/run/crange-ct-read/socket')
         if relay.exists():
             import socket
             from crange_ct_read_relay import COMMANDS

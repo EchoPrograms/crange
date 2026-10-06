@@ -95,7 +95,9 @@ def serve(config_path):
         raise ValueError('Exact unprivileged service UID required.')
     pid = int(subprocess.check_output(['lxc-info', '-n', '114', '-pH'], text=True).strip())
     root = Path(f'/proc/{pid}/root')
-    socket_path = root / 'run/crange-host-read.sock'
+    subprocess.run(['pct', 'exec', '114', '--', 'install', '-d', '-m', '0700',
+                    '-o', 'crange', '-g', 'crange', '/run/crange-ct-read'], check=True, timeout=15)
+    socket_path = root / 'run/crange-ct-read/socket'
     if socket_path.exists():
         raise ValueError('Relay socket already exists; reconcile the service.')
     listener = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
@@ -105,17 +107,21 @@ def serve(config_path):
     libc = ctypes.CDLL(None)
     libc.setfsuid.argtypes = [ctypes.c_uint]
     libc.setfsuid.restype = ctypes.c_uint
+    libc.setfsgid.argtypes = [ctypes.c_uint]
+    libc.setfsgid.restype = ctypes.c_uint
     cwd_fd = os.open('.', os.O_RDONLY | os.O_DIRECTORY)
-    run_fd = os.open(str(root / 'run'), os.O_RDONLY | os.O_DIRECTORY)
+    run_fd = os.open(str(root / 'run/crange-ct-read'), os.O_RDONLY | os.O_DIRECTORY)
+    previous_fsgid = libc.setfsgid(config['peer_uid'])
     previous_fsuid = libc.setfsuid(config['peer_uid'])
     try:
         if libc.setfsuid(0xFFFFFFFF) != config['peer_uid']:
             raise ValueError('Mapped service filesystem UID unavailable.')
         os.fchdir(run_fd)
-        listener.bind('crange-host-read.sock')
-        os.chmod('crange-host-read.sock', 0o600)
+        listener.bind('socket')
+        os.chmod('socket', 0o600)
     finally:
         libc.setfsuid(previous_fsuid)
+        libc.setfsgid(previous_fsgid)
         os.fchdir(cwd_fd); os.close(cwd_fd); os.close(run_fd)
     listener.listen(4)
     import signal
