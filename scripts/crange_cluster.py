@@ -120,9 +120,31 @@ def _refresh_inventory_snapshot(*, api=None):
     if not any(n['eligibility']['eligible'] for n in nodes): global_blockers.append('No node passes current admission gates')
     ready_images = [image_id for image_id, image in catalog['images'].items() if image.get('approved_projects') and
         any(r.get('state') == 'ready' and (r.get('template_file_id') or 'linked' in r.get('clone_modes_verified', [])) for r in image.get('replicas', []))]
+    image_distribution = []
+    for image_id, image in sorted(catalog['images'].items()):
+        locations = []
+        for node_name in sorted(raw['nodes']):
+            replicas_on_node = []
+            for replica in image.get('replicas', []):
+                if replica.get('node') != node_name:
+                    continue
+                template_id = replica.get('template_id')
+                observed = raw['guests'].get(str(template_id), {}) if template_id is not None else {}
+                replicas_on_node.append({
+                    'state': replica.get('state'), 'datastore_id': replica.get('datastore_id'),
+                    'template_id': template_id, 'cache_local': bool(replica.get('cache_local')),
+                    'observed': bool(observed.get('template') and observed.get('node_name') == node_name),
+                    'clone_modes': replica.get('clone_modes_verified', []),
+                })
+            locations.append({'node': node_name, 'replicas': replicas_on_node})
+        image_distribution.append({'image_id': image_id, 'kind': image.get('kind'),
+            'disk_gb': image.get('disk_gb'), 'approved_projects': image.get('approved_projects', []),
+            'archived': bool(image.get('artifact', {}).get('complete_capture')),
+            'locations': locations})
     if not ready_images: global_blockers.append('No approved image version has a verified ready archive or local cache')
     snapshot = {'schema_version': 1, 'captured_at': raw['captured_at'], 'policy_revision': policy['revision'],
         'max_inventory_age_seconds': policy.get('max_inventory_age_seconds', 120), 'nodes': nodes, 'guests': guests,
+        'images': image_distribution,
         'automatic': {'enabled': bool(policy.get('enabled')), 'policy_enabled': bool(policy.get('enabled')),
                       'operational_ready': not global_blockers, 'ready_image_versions': ready_images, 'blockers': global_blockers},
         'stale': False, 'freshness': {'stale': False, 'age_seconds': 0}}

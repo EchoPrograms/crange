@@ -15,16 +15,17 @@ def unit_text(root, username, home, executable, *, role='web', job_db='/var/lib/
         raise ValueError('Invalid service account.')
     if any(c.isspace() for c in str(root)):
         raise ValueError('Service checkout path cannot contain whitespace.')
-    if role not in ('web', 'worker', 'guac-broker', 'proxmox-compat'):
+    if role not in ('web', 'worker', 'guac-broker', 'proxmox-compat', 'cluster-refresh'):
         raise ValueError('Invalid service role.')
     # The service is reachable through the controller's SSH tunnel and its
     # management interface. The standalone CLI server remains loopback-only.
     action = {'web': 'serve --host 0.0.0.0 --port 8000',
-              'worker': 'worker', 'guac-broker': 'guac-ticket-broker', 'proxmox-compat': ''}[role]
+              'worker': 'worker', 'guac-broker': 'guac-ticket-broker',
+              'proxmox-compat': '', 'cluster-refresh': 'cluster-refresh'}[role]
     return '\n'.join([
         '[Unit]', f'Description=CRANGE {role}', 'After=network-online.target',
         'Wants=network-online.target', 'StartLimitIntervalSec=60', 'StartLimitBurst=5',
-        '', '[Service]', 'Type=simple', f'User={username}',
+        '', '[Service]', f'Type={"oneshot" if role == "cluster-refresh" else "simple"}', f'User={username}',
         f'WorkingDirectory={root}',
         f'Environment={quote("HOME=" + str(home))}',
         'Environment=PYTHONUNBUFFERED=1',
@@ -38,9 +39,21 @@ def unit_text(root, username, home, executable, *, role='web', job_db='/var/lib/
            'Environment=CRANGE_WEB_USER=crange-web', 'RuntimeDirectory=crange-guac',
            'RuntimeDirectoryMode=0770'] if role == 'guac-broker' else []),
         f'ExecStart={quote(executable)} {quote(Path(root) / ("scripts/crange_proxmox_compat.py" if role == "proxmox-compat" else "scripts/crange.py"))} {action}',
-        'Restart=on-failure', 'RestartSec=5', 'TimeoutStopSec=30',
+        *(['TimeoutStartSec=600'] if role == 'cluster-refresh' else
+          ['Restart=on-failure', 'RestartSec=5', 'TimeoutStopSec=30']),
         'KillMode=control-group', 'UMask=0007', 'NoNewPrivileges=true',
         '', '[Install]', 'WantedBy=multi-user.target', '',
+    ])
+
+
+def cluster_refresh_timer_text():
+    # OnUnitInactiveSec waits until the prior refresh has finished, so a slow
+    # full-cluster scan cannot overlap the next one.
+    return '\n'.join([
+        '[Unit]', 'Description=Refresh CRANGE cluster capacity inventory',
+        '', '[Timer]', 'OnBootSec=90s', 'OnUnitInactiveSec=60s',
+        'AccuracySec=15s', 'Unit=crange-cluster-refresh.service',
+        '', '[Install]', 'WantedBy=timers.target', '',
     ])
 
 
@@ -107,6 +120,8 @@ def install(username, root):
     services = {
         'crange.service': unit_text(root, web.pw_name, web_home, sys.executable, role='web', job_db=str(job_db)),
         'crange-worker.service': unit_text(root, username, account.pw_dir, sys.executable, role='worker', job_db=str(job_db)),
+        'crange-cluster-refresh.service': unit_text(root, username, account.pw_dir, sys.executable,
+                                                   role='cluster-refresh', job_db=str(job_db)),
     }
     compat_config = Path(account.pw_dir) / '.config/crange/proxmox-compat.json'
     if compat_config.is_file():
@@ -136,9 +151,17 @@ def install(username, root):
         temporary.write_text(content)
         temporary.chmod(0o644)
         temporary.replace(destination)
+    timer = Path('/etc/systemd/system/crange-cluster-refresh.timer')
+    temporary_timer = timer.with_suffix('.timer.new')
+    temporary_timer.write_text(cluster_refresh_timer_text())
+    temporary_timer.chmod(0o644)
+    temporary_timer.replace(timer)
     subprocess.run(['systemctl', 'daemon-reload'], check=True)
     for filename in services:
+        if filename == 'crange-cluster-refresh.service':
+            continue
         subprocess.run(['systemctl', 'enable', '--now', filename], check=True)
         subprocess.run(['systemctl', 'restart', filename], check=True)
         subprocess.run(['systemctl', 'is-active', '--quiet', filename], check=True)
+    subprocess.run(['systemctl', 'enable', '--now', timer.name], check=True)
     print('Dashboard and worker enabled; dashboard listening on loopback port 8000.')

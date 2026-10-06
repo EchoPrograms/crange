@@ -294,3 +294,20 @@ configuration remains unchanged, deletes the exact owned disposable clone and
 releases its reservation only after confirmed terminal tasks and refreshed
 absence. This does not enable `provider_container_verified`: each node still
 requires separate pinned Terraform provider acceptance before CT placement.
+
+### Automatic cluster inventory and image distribution view
+
+The administrator Cluster view reloads its sanitized snapshot every 30 seconds while
+open. A controller timer also runs the fixed `cluster-refresh` worker after boot
+and 60 seconds after each completed refresh, so a slow scan never overlaps itself.
+The refresh process uses the worker account's existing API environment and publishes
+only capacity, workload, image approval, archive, and replica status fields. A failed
+refresh retains the last successful snapshot and marks it stale.
+
+The image distribution matrix shows each approved image at every cluster node. An
+administrator can queue **Prepare local cache** for a missing replica when the
+selected project is approved, the central capture is complete, and the node and
+local datastore pass current placement gates. The fixed worker reserves capacity,
+prepares the replica, and verifies it before discovery reports it as ready. Staging
+uses the same fixed preparation path when a required cache is missing. No images are
+copied by browsing or refreshing the view.

@@ -28,8 +28,11 @@ class ClusterTests(unittest.TestCase):
                 'template': True, 'memory_mb': 512, 'cpu_cores': 1, 'disks': {'local-lvm': 8},
                 'token': 'never-publish-this', 'tags': 'private'}}}
         policy = {'revision': 'v1', 'enabled': True, 'allowed_storages': ['local-lvm']}
-        catalog = {'images': {'base-v1': {'replicas': [{'template_id': 200, 'cache_local': True,
-                                                      'clone_modes_verified': ['linked']}]}}}
+        catalog = {'images': {'base-v1': {'kind': 'vm', 'disk_gb': 8,
+            'approved_projects': [3], 'artifact': {'complete_capture': True},
+            'replicas': [{'node': 'proxmox4', 'datastore_id': 'local-lvm', 'template_id': 200,
+                          'state': 'ready', 'cache_local': True,
+                          'clone_modes_verified': ['linked']}]}}}
         reservation = {'node_name': 'proxmox4', 'datastore_id': 'local-lvm', 'memory_mb': 1024,
                        'cpu_cores': 1, 'disk_gb': 10}
         ledger = Mock(active_reservations=Mock(return_value=[reservation]))
@@ -43,6 +46,11 @@ class ClusterTests(unittest.TestCase):
             self.assertEqual(node['capacity']['storages'][0]['available_gb'], 100)
             self.assertEqual(node['guests'][0]['status'], 'stopped')
             self.assertTrue(node['guests'][0]['cache'])
+            self.assertEqual(result['images'][0]['locations'][0]['replicas'][0]['template_id'], 200)
+            self.assertTrue(result['images'][0]['locations'][0]['replicas'][0]['observed'])
+            self.assertEqual(result['images'][0]['approved_projects'], [3])
+            self.assertTrue(result['images'][0]['archived'])
+            self.assertEqual(result['images'][0]['locations'][0]['node'], 'proxmox4')
             self.assertNotIn('never-publish-this', json.dumps(result))
             path = Path(directory) / 'cluster-inventory.json'
             self.assertEqual(path.stat().st_mode & 0o777, 0o640)

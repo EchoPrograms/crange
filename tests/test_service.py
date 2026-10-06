@@ -3,7 +3,7 @@ from pathlib import Path
 import unittest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'scripts'))
-from crange_service import unit_text
+from crange_service import unit_text, cluster_refresh_timer_text
 
 
 class ServiceTests(unittest.TestCase):
@@ -44,3 +44,16 @@ class ServiceTests(unittest.TestCase):
         self.assertIn('RuntimeDirectoryMode=0770', broker)
         self.assertIn('scripts/crange.py" guac-ticket-broker', broker)
         self.assertNotIn('GUACAMOLE_PASSWORD', broker)
+
+    def test_cluster_refresh_is_serialized_and_uses_worker_credentials(self):
+        service = unit_text('/home/crange/crange', 'crange', '/home/crange',
+                            '/usr/bin/python3', role='cluster-refresh')
+        timer = cluster_refresh_timer_text()
+        self.assertIn('Type=oneshot', service)
+        self.assertIn('User=crange\n', service)
+        self.assertIn('scripts/crange.py" cluster-refresh', service)
+        self.assertIn('CRANGE_DISTRIBUTION_DATA=/var/lib/crange-distribution', service)
+        self.assertNotIn('Restart=on-failure', service)
+        self.assertIn('OnUnitInactiveSec=60s', timer)
+        self.assertIn('OnBootSec=90s', timer)
+        self.assertIn('Unit=crange-cluster-refresh.service', timer)

@@ -1,6 +1,7 @@
 "use strict";
 const $=id=>document.getElementById(id);let user=null,projects=[],jobs=[],directory=[],guacDirectory=[],audit=[],connector={},view="overview",activeOperation="",teamFocus=null,activeJobId=null,actionValues={};const openJobs=new Set();let clusterSnapshot=null,clusterLoading=false,clusterError="";
 async function refreshCluster(){if(!user?.admin)return;clusterLoading=true;clusterError="";try{clusterSnapshot=await api("cluster")}catch(e){clusterError=e.message}finally{clusterLoading=false;if(view==="cluster")render()}}
+setInterval(()=>{if(view==="cluster"&&user?.admin&&!clusterLoading)refreshCluster()},30000);
 async function api(path,body){const r=await fetch("/api/"+path,{method:body?"POST":"GET",headers:body?{"Content-Type":"application/json","X-CSRF-Token":user?.csrf||""}:{},body:body?JSON.stringify(body):undefined});const d=await r.json();if(!r.ok)throw Error(d.error||"Request failed");return d;}
 function el(tag,text,cls){const n=document.createElement(tag);if(text!==undefined)n.textContent=String(text);if(cls)n.className=cls;return n;}
 function templateDisplay(key){return project()?.template_labels?.[key]||({"approved-base":"ParrotOS Jump Box","approved-ct-base":"Debian 13 · CRANGE base container","debian-13":"Debian 13 · Proxmox system template","ubuntu-server-24-04":"Ubuntu Server 24.04 container","alpine-3-24":"Alpine 3.24 container"})[key]||key}
@@ -64,6 +65,22 @@ function renderCluster(c){
   const storages=Array.isArray(capacity.storages)?capacity.storages:Object.entries(capacity.storages||{}).map(([id,value])=>({datastore_id:id,...value}));
   card.append(el("h4","Datastores"),table(["Storage","Capacity GB","Free GB","Commitment limit GB","Committed GB","Reserved GB","Available GB","Capabilities"],storages.map(storage=>[storage.datastore_id||storage.storage,clusterValue(storage.total_gb),clusterValue(storage.free_gb??(typeof storage.used_gb==="number"?storage.total_gb-storage.used_gb:undefined)),clusterValue(storage.commitment_limit_gb),clusterValue(storage.committed_gb),clusterValue(storage.reserved_gb),clusterValue(storage.available_gb),`${storage.eligibility?.eligible?"Eligible":(storage.eligibility?.blockers||["Unavailable"]).join("; ")} · ${storage.shared?"Shared":"Local"} · ${(storage.clone_modes||[]).join(", ")}`])));
   card.append(el("h4","Workload and template distribution"),table(["Name","Kind","VM / CT ID","State","Role","Memory GB","CPU","Image"],(node.guests||[]).map(guest=>[guest.name,guest.kind||guest.type,guest.vmid||guest.guest_id,guest.status,guest.cache?"Local image cache":guest.template?"Template":"Workload",clusterGB(guest.memory_mb),clusterValue(guest.cpu_cores),guest.image_id||"—"])));c.append(card)
+ }
+ if(snapshot.images?.length){
+  c.append(el("h3","Image distribution"),el("p","Approved immutable images stay archived centrally. Staging prepares a missing local cache automatically; administrators can prepare one ahead of time here.","muted"));
+  for(const image of snapshot.images){
+   const card=el("section",undefined,"card"),approved=image.approved_projects||[],selected=Number($("project").value),allowed=approved.includes("*")||approved.some(x=>Number(x)===selected);
+   card.append(el("h4",`${image.image_id} · ${image.kind||"image"} · ${clusterValue(image.disk_gb," GB")}`));
+   card.append(el("p",`Archive: ${image.archived?"Captured":"No verified captured artifact"} · Approved projects: ${approved.join(", ")||"none"}`,"muted"));
+   card.append(table(["Node","Local replica","Status","Action"],(image.locations||[]).map(location=>{
+    const node=(snapshot.nodes||[]).find(item=>item.node===location.node),replicas=location.replicas||[],ready=replicas.some(replica=>replica.state==="ready"&&replica.observed),storage=(node?.capacity?.storages||[]).find(item=>item.datastore_id==="local-lvm"),supported=node?.eligibility?.guest_types?.[image.kind]?.eligible===true;
+    const button=fixedAction("Prepare local cache","template-distribution-prepare",{image:image.image_id,node:location.node,storage:"local-lvm"});
+    button.disabled=ready||!image.archived||!allowed||!supported||!storage?.eligibility?.eligible||stale;
+    button.title=ready?"A verified local replica is already present.":!allowed?"Select a project approved for this image.":!image.archived?"A complete central archive is required.":!supported?"This node or guest type has not passed placement acceptance.":!storage?.eligibility?.eligible?"Local datastore is not eligible.":stale?"Refresh the cluster inventory before preparing.":"Reserve capacity and verify a local linked-clone cache for the selected project.";
+    return [location.node,replicas.map(replica=>`${replica.template_id||"archive"} on ${replica.datastore_id||"storage"}`).join(", ")||"—",ready?"Ready":replicas.length?"Needs reconciliation":"Missing",button]
+   })));
+   c.append(card)
+  }
  }
 }
 function render(){const p=project(),c=$("content");if(view==="jobs")c.querySelectorAll("details.job").forEach(d=>d.open?openJobs.add(d.dataset.jobId):openJobs.delete(d.dataset.jobId));c.replaceChildren();$("project-nav").hidden=!p;if(p)$("project-name").textContent=`Project ${p.project_id}`;
