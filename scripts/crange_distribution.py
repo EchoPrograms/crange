@@ -520,6 +520,55 @@ def find_source_clone_task(api, node, source_id, target_id, kind='qemu'):
     return matches[0][1]
 
 
+def reconcile_source_probe(api, journal, ledger, job_id):
+    """Release a task-free allocation only with fresh exact absence evidence."""
+    if not re.fullmatch(r'[a-zA-Z0-9-]{1,64}', job_id):
+        raise DistributionError('Invalid source-probe reconciliation job.')
+    path = journal.directory / (job_id + '.json')
+    record = json.loads(path.read_text())
+    reservation = record.get('reservation')
+    saved = ledger.get_job(job_id)
+    node, source_id, probe_id = record.get('node'), record.get('source_id'), record.get('probe_id')
+    kind = _source_guest_type(record)
+    source_ref = f'source:{node}:{kind}:{source_id}'
+    if (record.get('job_id') != job_id or record.get('state') not in ('allocated', 'reconciled-absent') or
+            record.get('provider_tasks') or record.get('upid') or
+            node not in {f'proxmox{i}' for i in range(1, 6)} or record.get('source_node') != node or
+            type(probe_id) is not int or not 20000 <= probe_id < 20100 or type(source_id) is not int or
+            saved.get('owner') != 'cli' or saved.get('state') not in ('running', 'released') or
+            saved.get('allocations') != [reservation] or not isinstance(reservation, dict) or
+            reservation.get('operation') != 'source_probe' or reservation.get('image') != source_ref or
+            reservation.get('project_id') != saved.get('project_id') or record.get('image_id') != source_ref or
+            reservation.get('artifact_sha256') != record.get('source_config_sha256') or
+            reservation.get('resolved', {}).get('node_name') != node or
+            reservation.get('resolved', {}).get('datastore_id') != record.get('datastore_id')):
+        raise DistributionError('Exact task-free source-probe ledger and journal ownership required.')
+    if saved['state'] == 'released':
+        if record.get('state') != 'reconciled-absent' or record.get('absence_verified') is not True:
+            raise DistributionError('Released source-probe lacks an exact absence receipt.')
+        return record
+    _require_probe_pool(api, node, kind, source_id)
+    config = api.request('GET', f'/nodes/{node}/{kind}/{source_id}/config')
+    _owned(config)
+    if int(config.get('template', 0)) != 1 or _source_config_identity(config, source_id) != record.get('source_config_sha256'):
+        raise DistributionError('Captured source changed; retain reservation.')
+    from crange_cache_jobs import _prove_absent_cache_allocation
+    created_at = float(record.get('created_at', path.stat().st_mtime))
+    evidence = _prove_absent_cache_allocation(api, node, probe_id, created_at)
+    # Clone task IDs refer to the source, so a target-only task scan is insufficient.
+    for source in ('active', 'all'):
+        tasks = api.request('GET', f'/nodes/{node}/tasks', {'source': source, 'limit': 1000})
+        if len(tasks) >= 1000 or any(str(t.get('id')) == str(source_id) and
+                t.get('type') in ('qmclone', 'vzclone') and
+                (source == 'active' or float(t.get('starttime', 0)) >= created_at - 1) for t in tasks):
+            raise DistributionError('Source clone task exists or history is incomplete; retain reservation.')
+    evidence['source_clone_task_scan_complete'] = True
+    record.update(state='reconciled-absent', absence_verified=True, absence_evidence=evidence)
+    journal(record)
+    ledger.reconcile_job(job_id, operation_terminal=True, allocations_reconciled=True)
+    return record
+
+
 def _source_guest_type(capture):
     kind = capture.get('kind', 'vm')
     if kind not in ('vm', 'container'):
@@ -668,7 +717,8 @@ class FileJournal:
                     evidence.get('active_task_scan_complete') is not True or
                     evidence.get('history_scan_complete') is not True or
                     evidence.get('node') != incoming.get('node') or
-                    evidence.get('template_id') != incoming.get('template_id') or
+                    evidence.get('template_id') != incoming.get('probe_id' if incoming.get('reservation', {}).get('operation') == 'source_probe' else 'template_id') or
+                    (incoming.get('reservation', {}).get('operation') == 'source_probe' and evidence.get('source_clone_task_scan_complete') is not True) or
                     not re.fullmatch(r'[a-f0-9]{64}', str(evidence.get('cluster_guest_inventory_sha256', '')))):
                 raise DistributionError('Absent allocation reconciliation requires task-free allocation evidence.')
         if new_state == 'source-probed':
@@ -1200,6 +1250,8 @@ def main(argv=None):
     source_probe.add_argument('--source-id', type=int, required=True)
     source_probe.add_argument('--identity-record', type=Path, required=True)
     source_probe.add_argument('--clone-mode', choices=['full', 'linked'], default='full')
+    reconcile_probe = commands.add_parser('source-probe-reconcile')
+    reconcile_probe.add_argument('--job-id', required=True)
     resume_probe = commands.add_parser('source-probe-resume')
     for field in ('source-node', 'job-id', 'isolated-bridge'):
         resume_probe.add_argument('--' + field, required=True)
@@ -1242,6 +1294,19 @@ def main(argv=None):
                 approved_projects=_project_approval_scope(args), disk_gb=args.disk_gb, expected_sha256=args.sha256,
                 hash_volume=SSHVolumeHasher(), verification=verification))
         print('Published immutable stock archive ' + args.image_id)
+    elif args.action == 'source-probe-reconcile':
+        from crange_placement import ReservationLedger
+        import crange_scheduling as scheduling
+        if not re.fullmatch(r'[a-zA-Z0-9-]{1,64}', args.job_id):
+            raise DistributionError('Invalid reconciliation job ID.')
+        record = json.loads((args.journal_dir / (args.job_id + '.json')).read_text())
+        ledger = ReservationLedger(scheduling.DATA / 'reservations.sqlite3')
+        try:
+            with node_locks([record['node']]), journal.allocation_lock():
+                result = reconcile_source_probe(api, journal, ledger, args.job_id)
+            print('Reconciled absent source probe ' + args.job_id)
+        finally:
+            ledger.close()
     elif args.action == 'source-probe':
         if not policy.get('enabled'):
             raise DistributionError('Image distribution is disabled by administrator policy.')

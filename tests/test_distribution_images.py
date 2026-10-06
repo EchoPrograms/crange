@@ -460,6 +460,44 @@ class ReplicaTests(unittest.TestCase):
             self.assertEqual(completed['provider_tasks'][0]['state'], 'confirmed-terminal')
             api.request.assert_any_call('DELETE', '/nodes/proxmox1/lxc/20000', {'purge': 1})
 
+    def test_source_probe_absence_reconcile_requires_exact_ledger_and_source_task_absence(self):
+        from crange_distribution import reconcile_source_probe, FileJournal
+        source = {'tags': 'crange-image', 'template': 1, 'memory': 512, 'cores': 1,
+                  'unprivileged': 1, 'rootfs': 'local-lvm:base-8840-disk-0,size=4G'}
+        checksum = _source_config_identity(source, 8840)
+        reservation = {'operation': 'source_probe', 'image': 'source:proxmox2:lxc:8840',
+            'project_id': 3, 'artifact_sha256': checksum,
+            'resolved': {'node_name': 'proxmox2', 'datastore_id': 'local-lvm'}}
+        record = {'job_id': 'absent-ct', 'state': 'allocated', 'kind': 'container',
+            'node': 'proxmox2', 'source_node': 'proxmox2', 'source_id': 8840, 'probe_id': 20000,
+            'image_id': reservation['image'], 'source_config_sha256': checksum,
+            'datastore_id': 'local-lvm', 'reservation': reservation, 'created_at': 100}
+        ledger = Mock(); ledger.get_job.return_value = {'owner': 'cli', 'state': 'running',
+            'project_id': 3, 'allocations': [reservation]}
+        present = []; tasks = []
+        def request(method, path, fields=None):
+            if path == '/nodes': return [{'node': 'proxmox'+str(i), 'status': 'online'} for i in range(1,6)]
+            if path == '/cluster/resources': return present
+            if path == '/pools/crange-probes': return {'members': [{'type': 'lxc', 'node': 'proxmox2', 'vmid': 8840}]}
+            if path.endswith('/config'): return source
+            if path.endswith('/tasks'): return tasks
+            self.fail('Unexpected API call')
+        api = Mock(); api.request.side_effect = request
+        with tempfile.TemporaryDirectory() as directory:
+            journal = FileJournal(Path(directory)); journal(record)
+            for task in [{'type': 'vzclone', 'id': 8840, 'starttime': 101},
+                         {'type': 'vzclone', 'id': 20000, 'starttime': 101}]:
+                tasks[:] = [task]
+                with self.assertRaises(DistributionError): reconcile_source_probe(api, journal, ledger, 'absent-ct')
+                ledger.reconcile_job.assert_not_called()
+            tasks[:] = []; present[:] = [{'node': 'proxmox1', 'vmid': 20000, 'type': 'qemu'}]
+            with self.assertRaises(DistributionError): reconcile_source_probe(api, journal, ledger, 'absent-ct')
+            ledger.reconcile_job.assert_not_called(); present[:] = []
+            result = reconcile_source_probe(api, journal, ledger, 'absent-ct')
+            self.assertEqual(result['state'], 'reconciled-absent')
+            self.assertTrue(result['absence_evidence']['source_clone_task_scan_complete'])
+            ledger.reconcile_job.assert_called_once_with('absent-ct', operation_terminal=True, allocations_reconciled=True)
+
     def test_clone_task_finder_requires_unique_terminal_source_target_log(self):
         from crange_distribution import find_source_clone_task
         api = Mock()
