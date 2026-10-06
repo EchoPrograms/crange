@@ -243,8 +243,12 @@ class FixedRouterUFW:
                 and 2 <= int(str(team).split('.')[-1]) <= 254, 'Team router must use project transit.')
         worker_file(self.KEY,private=True)
         worker_file('/home/crange/.ssh/known_hosts')
+        proxy=shlex.join(['ssh','-o','BatchMode=yes','-o','StrictHostKeyChecking=yes',
+                         '-o','ConnectTimeout=5','-o','UserKnownHostsFile=/home/crange/.ssh/known_hosts',
+                         '-i',str(self.KEY),'-W','%h:%p','root@'+str(project)])
         self.prefix=['ssh','-o','BatchMode=yes','-o','StrictHostKeyChecking=yes',
-                     '-o','ConnectTimeout=5','-o','UserKnownHostsFile=/home/crange/.ssh/known_hosts','-i',str(self.KEY),'-J','root@'+str(project),'root@'+str(team)]
+                     '-o','ConnectTimeout=5','-o','UserKnownHostsFile=/home/crange/.ssh/known_hosts',
+                     '-i',str(self.KEY),'-o','ProxyCommand='+proxy,'root@'+str(team)]
         self.run=run
 
     def _rule(self, target, rule):

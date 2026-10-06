@@ -13,7 +13,7 @@ from datetime import datetime, timezone
 from crange_network_acceptance import require, probe_from_plan, validate_bundle
 from crange_network_adapters import (SavedTerraformProbe, BoundedPVE, FixedRouterUFW,
     FixedManagementChecks, cluster_probe, durable_json, protected, reconcile_owned_probe)
-from crange_network_checks import FixedGuestNetworkChecks
+from crange_network_checks import FixedGuestNetworkChecks, drop_counter
 from crange_network_runner import NetworkProbeRunner, plan_digest
 from crange_placement import ReservationLedger
 import crange_scheduling as scheduling
@@ -232,7 +232,10 @@ def main():
                 require(backend.vmid_absent(saved.target),'Requested probe VMID is in use.')
                 require(backend.saved.state_addresses()==[],'Standalone probe state is not empty.')
                 require(saved.target['address'].split('/')[0] not in backend._live_addresses(),'Requested probe IP is allocated.')
+                backend.router._status()
+                counter=drop_counter(backend.router.observe('firewall_counters'))
                 print(json.dumps({'scope':saved.target,'capacity':backend.capacity,'routers':backend.routers,
+                                  'router_drop_counter':counter,
                                   'mutated':False,'policy_changed':False},sort_keys=True))
             elif args.operation=='run':
                 require(re.fullmatch(r'[a-f0-9]{40}',saved.manifest.get('source_revision','')),'Bind exact reviewed source revision.')
