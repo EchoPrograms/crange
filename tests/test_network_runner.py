@@ -19,7 +19,9 @@ class Backend:
         self.released=False
 
     def vmid_absent(self, target): return not self.exists
-    def reserve(self, target): self.calls.append('reserve')
+    def reserve(self, target):
+        self.calls.append('reserve')
+        if self.failure=='reserve': raise ValueError('private provider detail')
     def create_plan(self, target): return self.fixture.create
     def reviewed_plan(self, target, operation, digest):
         self.calls.append(('review',operation,digest))
@@ -90,6 +92,14 @@ class NetworkRunnerTests(unittest.TestCase):
                 self.assertFalse(self.backend.exists)
                 self.assertFalse(self.backend.rules)
                 self.assertNotIn('private provider detail',self.journal.read_text())
+                self.assertEqual(self.record()['cause'],'timeout_detail_redacted' if failure=='create' else 'runtimeerror_detail_redacted')
+
+    def test_reservation_error_is_bounded_in_owned_journal(self):
+        self.backend.failure='reserve'
+        with self.assertRaises(ValueError):self.run_probe()
+        self.assertEqual(self.record()['state'],'reservation_uncertain')
+        self.assertEqual(self.record()['cause'],'valueerror_detail_redacted')
+        self.assertNotIn('private provider detail',self.journal.read_text())
 
     def test_rule_cleanup_failure_does_not_skip_destroy_and_retains_reservation(self):
         self.backend.failure='rule_remove'

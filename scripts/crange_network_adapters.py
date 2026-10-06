@@ -13,6 +13,7 @@ import json
 import os
 import pwd
 from pathlib import Path
+import re
 import shlex
 import socket
 import stat
@@ -48,6 +49,27 @@ def worker_file(path, *, private=False):
     require(info.st_uid in trusted and not info.st_mode & (0o077 if private else 0o022),
             'Worker input ownership/permissions are unsafe.')
     return path
+
+
+def safe_terraform_apply_cause(output, returncode):
+    """Classify provider failures without journaling raw CLI diagnostics."""
+    text = str(output).lower()
+    if re.search(r'\b403\b', text) or 'permission denied' in text or 'not authorized' in text:
+        return 'proxmox_http_403_authorization'
+    if re.search(r'\b401\b', text) or 'unauthorized' in text:
+        return 'proxmox_http_401_authentication'
+    if 'parameter verification failed' in text or re.search(r'\b400\b', text):
+        return 'proxmox_http_400_validation'
+    if re.search(r'\b409\b', text) or 'already exists' in text:
+        return 'proxmox_http_409_conflict'
+    if re.search(r'\b5\d\d\b', text):
+        return 'proxmox_http_5xx'
+    if 'timeout' in text or 'timed out' in text or 'deadline exceeded' in text:
+        return 'proxmox_request_timeout'
+    if any(term in text for term in ('connection reset', 'connection refused', 'no route to host', 'connection failed')):
+        return 'proxmox_transport_error'
+    code = returncode if type(returncode) is int and 0 <= returncode <= 255 else 255
+    return f'terraform_apply_exit_{code}_detail_redacted'
 
 
 class SavedTerraformProbe:
@@ -112,7 +134,10 @@ class SavedTerraformProbe:
         require(plan_digest(plan) == digest, 'Caller plan digest mismatch.')
         result = self.run(['terraform','apply','-no-color','-input=false',str(self.root/(operation+'.tfplan'))],
                           cwd=self.root,env=self._env(),capture_output=True,text=True,timeout=timeout,check=False)
-        require(result.returncode == 0, 'Reviewed probe plan apply failed; reconcile owned resources.')
+        if result.returncode != 0:
+            error = ValueError('Reviewed probe plan apply failed; reconcile owned resources.')
+            error.safe_cause = safe_terraform_apply_cause(result.stdout + '\n' + result.stderr, result.returncode)
+            raise error
         return {'operation':operation,'plan_sha256':digest}
 
     def state_addresses(self):

@@ -50,6 +50,13 @@ class AdapterTests(unittest.TestCase):
         polls=[call for call in transport.calls if call[1].endswith('/agent/exec-status')]
         self.assertEqual([call[2]['pid'] for call in polls],[77,77])
 
+    def test_terraform_apply_failure_is_classified_without_persisting_raw_output(self):
+        output='Error: HTTP 400 Parameter verification failed; Authorization: PVEAPIToken=private-secret'
+        cause=adapters.safe_terraform_apply_cause(output,1)
+        self.assertEqual(cause,'proxmox_http_400_validation')
+        self.assertNotIn('private-secret',cause)
+        self.assertNotIn('Authorization',cause)
+
     def test_wrong_owner_vnet_and_extra_nic_reject_before_guest_execution(self):
         for mutation in ('owner','vnet','nic'):
             transport=Transport(self.fixture.scope)

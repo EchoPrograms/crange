@@ -11,11 +11,26 @@ import hashlib
 import json
 import os
 from pathlib import Path
+import re
 import time
 from typing import Protocol
 
 from crange_network_acceptance import CHECKS, probe_from_plan, scope, validate_receipt
 from crange_scheduling import atomic_json
+
+
+def safe_failure_cause(error):
+    """Return a bounded diagnostic label; never persist exception text."""
+    cause = getattr(error, 'safe_cause', None)
+    if isinstance(cause, str) and re.fullmatch(r'[a-z0-9_]{1,80}', cause):
+        return cause
+    if isinstance(error, TimeoutError):
+        return 'timeout_detail_redacted'
+    if isinstance(error, ConnectionError):
+        return 'connection_detail_redacted'
+    if isinstance(error, PermissionError):
+        return 'permission_detail_redacted'
+    return f'{type(error).__name__.lower()}_detail_redacted'
 
 
 def plan_digest(plan):
@@ -84,7 +99,12 @@ class NetworkProbeRunner:
             os.close(parent_fd)
         # Journal before every possible mutation; uncertain reservations are kept.
         save('reserving')
-        self.backend.reserve(target)
+        try:
+            self.backend.reserve(target)
+        except Exception as error:
+            save('reservation_uncertain', failure=type(error).__name__,
+                 cause=safe_failure_cause(error))
+            raise
         save('reserved')
         created = False
         rule_attempted = False
@@ -118,6 +138,7 @@ class NetworkProbeRunner:
         except Exception as error:
             # Do not persist exception text: provider errors can contain secrets.
             failure = type(error).__name__
+            cause = safe_failure_cause(error)
         finally:
             if rule_attempted:
                 save('rule_cleanup_pending')
@@ -152,13 +173,14 @@ class NetworkProbeRunner:
             cleanup_errors.append('absence_verification')
             cleanup = {}
         if cleanup_errors:
-            save('cleanup_uncertain', failure=failure, cleanup_errors=sorted(set(cleanup_errors)))
+            save('cleanup_uncertain', failure=failure, cause=cause if failure else None,
+                 cleanup_errors=sorted(set(cleanup_errors)))
             raise ValueError('Cleanup uncertain; retain reservation and reconcile owned journal.')
         # Failed tests can release only after absence has been independently checked.
         save('cleaned_release_pending', cleanup=cleanup)
         self.backend.release_reservation(target)
         if failure:
-            save('failed_cleaned', failure=failure)
+            save('failed_cleaned', failure=failure, cause=cause)
             raise ValueError('Network acceptance failed; owned probe and temporary rules removed.')
         receipt = {'schema_version': 1, 'scope': target, 'zone': 'crange', 'mtu': 1450,
                    'source_revision': source_revision, 'tested_at': tested_at,
