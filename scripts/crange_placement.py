@@ -341,7 +341,7 @@ class ReservationLedger:
 
     def reserve_source_probe(self, *, project_id, job_id, owner, source_ref,
                              source_sha256, node_name, datastore_id, capacity,
-                             inventory, policy, now=None, kind="vm"):
+                             inventory, policy, now=None, kind="vm", clone_mode="full"):
         """Reserve one direct, disposable source-verification clone.
 
         This reservation is deliberately independent of the immutable image
@@ -349,6 +349,8 @@ class ReservationLedger:
         Its allocation records the exact source reference/config fingerprint.
         """
         now = time.time() if now is None else now
+        if clone_mode not in ('full', 'linked') or (clone_mode == 'linked' and kind != 'container'):
+            raise PlacementError('linked source probes require an explicit container source')
         if kind not in ('vm', 'container'):
             raise PlacementError('unsupported source-probe guest kind')
         if (isinstance(project_id, bool) or not isinstance(project_id, int) or
@@ -382,7 +384,10 @@ class ReservationLedger:
             count = self.db.execute("SELECT COUNT(*) FROM jobs WHERE project_id=? AND owner=? AND state='reviewed'", (project_id, owner)).fetchone()[0]
             if count >= policy.get('max_reviewed_plans', 2):
                 raise PlacementError('outstanding reviewed-plan limit reached')
-            window = capacity_window(node, policy, node_name, storage, 'full')
+            if clone_mode == 'linked' and (storage.get('shared') is not False or
+                    not storage.get('snapshots_verified') or 'linked' not in storage.get('clone_modes', [])):
+                raise PlacementError('linked source-probe storage lacks local snapshot proof')
+            window = capacity_window(node, policy, node_name, storage, clone_mode)
             pending = self.active_reservations()
             available = {
                 'memory_mb': window['memory_mb'] - sum(r['memory_mb'] for r in pending if r['node_name'] == node_name),
@@ -400,7 +405,7 @@ class ReservationLedger:
                         raise PlacementError('source-probe ' + scope + ' quota exceeded')
             allocation = {'operation': 'source_probe', 'resource_key': 'source-probe:' + source_ref,
                 'project_id': project_id, 'image': source_ref, 'artifact_sha256': source_sha256,
-                'resolved': {'node_name': node_name, 'datastore_id': datastore_id, 'clone_mode': 'full'},
+                'resolved': {'node_name': node_name, 'datastore_id': datastore_id, 'clone_mode': clone_mode},
                 'resources': demand, 'headroom': {key: available[key] - demand[key] for key in demand},
                 'policy_revision': policy['revision'], 'reservation_id': str(uuid.uuid4()),
                 'reason': 'Direct source acceptance clone and isolated disposable probe'}

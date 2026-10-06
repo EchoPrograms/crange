@@ -250,6 +250,64 @@ class ReplicaTests(unittest.TestCase):
         self.assertTrue(all(t['state'] == 'confirmed-terminal' for t in result['provider_tasks']))
         self.assertEqual(verify.call_args.args[1:], ('proxmox1', 'lxc', 20000))
 
+    def test_linked_ct_source_probe_checks_backing_before_identity_and_cleanup(self):
+        api = Mock()
+        source = {'unprivileged': 1, 'tags': 'crange-image', 'template': 1, 'memory': 1024,
+                  'cores': 2, 'sockets': 1,
+                  'rootfs': 'local-lvm:base-8830-disk-0,size=12G'}
+        probe = {'tags': 'crange-image', 'template': 0, 'memory': 1024,
+                 'cores': 2, 'rootfs': 'local-lvm:vm-20000-disk-0,size=12G'}
+        def request(method, path, fields=None):
+            if path == '/cluster/resources': return []
+            if path.endswith('/status/current'):
+                return {'status': 'stopped'}
+            if path == '/cluster/nextid':
+                return fields['vmid']
+            if path == '/pools/crange-probes':
+                return {'members': [{'type': 'lxc', 'node': 'proxmox1', 'vmid': 8830},
+                                    {'type': 'lxc', 'node': 'proxmox1', 'vmid': 20000}]}
+            if method == 'PUT' and path.endswith('/20000/config'):
+                probe['tags'] = fields['tags']
+                return None
+            if path.endswith('/config'):
+                return source if '/8830/' in path else probe
+            return 'UPID:proxmox1:00000001:00000001:00000001:qmclone:20000:root@pam:'
+        api.request.side_effect = request
+        api.task.return_value = None
+        capture = {'kind': 'container', 'job_id': 'capture-8830', 'source_config_sha256':
+                   _source_config_identity(source, 8830), 'source_identity': {'machine_id': '1' * 32,
+                   'ssh_host_key': 'ssh-ed25519 YWJj source'}}
+        reservation = {'reservation_id': 'reservation-1', 'resolved': {'clone_mode': 'linked'}}
+        verify = Mock(return_value={'passed': True, 'identity_unique': True,
+            'evidence': {'readiness': 'default', 'machine_id': '2' * 32,
+                         'ssh_host_key': 'ssh-ed25519 ZGVm probe',
+                         'isolated_bridge': 'crprobe1450'}})
+        journal = Mock()
+        backing = Mock(return_value={'verified': True, 'origin': 'base-8830-disk-0'})
+        worker = SourceProbeWorker(api, journal, verify, lambda *args: True, backing_verifier=backing)
+        result = worker.run(source_node='proxmox1', source_id=8830,
+            datastore_id='local-lvm', job_id='source-probe-1', capture=capture,
+            reservation=reservation)
+        api.request.assert_any_call('POST', '/nodes/proxmox1/lxc/8830/clone', {
+            'newid': 20000, 'full': 0, 'pool': 'crange-probes',
+            'hostname': 'crange-source-probe-20000',
+            'description': 'CRANGE source verification source-probe-1'})
+        api.request.assert_any_call('GET', '/cluster/nextid', {'vmid': 20000})
+        api.request.assert_any_call('DELETE', '/nodes/proxmox1/lxc/20000', {'purge': 1})
+        self.assertEqual(result['state'], 'source-probed')
+        self.assertTrue(all(t['state'] == 'confirmed-terminal' for t in result['provider_tasks']))
+        self.assertEqual(verify.call_args.args[1:], ('proxmox1', 'lxc', 20000))
+
+        backing.assert_called_once_with('proxmox1', 8830, 20000)
+        self.assertTrue(result['linked_backing']['verified'])
+        verify.reset_mock(); api.request.reset_mock()
+        backing.return_value = {'verified': False}
+        with self.assertRaisesRegex(DistributionError, 'backing relation'):
+            worker.run(source_node='proxmox1', source_id=8830, datastore_id='local-lvm',
+                job_id='source-probe-2', capture=capture, reservation=reservation)
+        verify.assert_not_called()
+        self.assertFalse(any(call.args[0] == 'DELETE' for call in api.request.call_args_list))
+
     def test_probe_requires_exact_captured_source_before_mutation(self):
         api = Mock()
         api.request.side_effect = lambda method, path, fields=None: (

@@ -69,6 +69,27 @@ class PlacementTests(unittest.TestCase):
             self.assertNotIn('container', node['guest_types'])
             ledger.close()
 
+    def test_linked_ct_source_probe_requires_snapshot_proof_and_full_growth_budget(self):
+        _, inv, _, pol = fixtures()
+        node = inv['nodes']['n1']; node['architectures'] = ['amd64']
+        storage = node['storages']['local']; storage.update(guest_types=['container'], shared=False,
+            committed_gb=170, total_gb=200, free_gb=100)
+        pol['local_linked_disk_overcommit_ratio'] = 1.5
+        with tempfile.TemporaryDirectory() as temp:
+            ledger = ReservationLedger(pathlib.Path(temp) / 'ledger')
+            fields = dict(project_id=3, job_id='linked-ct', owner='cli', source_ref='source:n1:lxc:8840',
+                source_sha256='b'*64, node_name='n1', datastore_id='local', kind='container',
+                capacity={'memory_mb': 512, 'cpu_cores': 1, 'disk_gb': 4.4}, inventory=inv, policy=pol, now=100)
+            with self.assertRaises(PlacementError): ledger.reserve_source_probe(**fields)
+            storage['snapshots_verified'] = False
+            with self.assertRaisesRegex(PlacementError, 'snapshot proof'):
+                ledger.reserve_source_probe(**fields, clone_mode='linked')
+            storage['snapshots_verified'] = True
+            allocation = ledger.reserve_source_probe(**fields, clone_mode='linked')
+            self.assertEqual(allocation['resources']['disk_gb'], 4.4)
+            self.assertEqual(allocation['resolved']['clone_mode'], 'linked')
+            ledger.close()
+
     def test_universal_image_scope_still_uses_project_scoped_scheduler_check(self):
         r, inv, cat, pol = fixtures()
         cat['images']['base-v1']['approved_projects'] = ['*']

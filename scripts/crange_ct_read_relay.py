@@ -16,13 +16,16 @@ COMMANDS = {
     'openrc-sbin-readiness': ['/sbin/rc-status', '--runlevel'],
     'machine-id': ['/bin/cat', '/etc/machine-id'],
     'ssh-public-key': ['/bin/cat', '/etc/ssh/ssh_host_ed25519_key.pub'],
+    'linked-backing': [],
 }
 
 
 def validate_request(value, config, peer_uid):
     if peer_uid != config['peer_uid']:
         raise ValueError('Service user authentication failed.')
-    if not isinstance(value, dict) or set(value) != {'node', 'vmid', 'command'}:
+    fields = {'node', 'vmid', 'command'}
+    if isinstance(value, dict) and value.get('command') == 'linked-backing': fields.add('source_id')
+    if not isinstance(value, dict) or set(value) != fields:
         raise ValueError('Unexpected identity-read request.')
     node, vmid, command = value['node'], value['vmid'], value['command']
     if (not isinstance(node, str) or not re.fullmatch('proxmox[1-5]', node) or
@@ -31,6 +34,10 @@ def validate_request(value, config, peer_uid):
     marker = config['allowed_guests'].get(node, {}).get(str(vmid))
     if not isinstance(marker, str) or not re.fullmatch('crange-job-[a-zA-Z0-9-]{1,64}', marker):
         raise ValueError('Container ID is outside approved acceptance scope.')
+    if command == 'linked-backing':
+        source = value['source_id']
+        if type(source) is not int or source == vmid or str(source) not in config['allowed_guests'].get(node, {}):
+            raise ValueError('Exact approved backing source required.')
     return node, vmid, command, marker
 
 
@@ -50,7 +57,7 @@ def validate_guest(config, members, node, vmid, marker):
         raise ValueError('Probe must remain disconnected on the approved bridge.')
 
 
-def host_read(request, marker):
+def host_read(request, marker, source_marker=None):
     node, vmid, command = request['node'], request['vmid'], request['command']
     if socket.gethostname().split('.')[0] != node:
         raise ValueError('Relay reached a different cluster node.')
@@ -58,7 +65,32 @@ def host_read(request, marker):
         return json.loads(subprocess.check_output(['pvesh', 'get', path, '--output-format', 'json'], text=True, timeout=15))
     before = get(f'/nodes/{node}/lxc/{vmid}/config')
     validate_guest(before, get('/pools/crange-probes')['members'], node, vmid, marker)
-    value = subprocess.check_output(['pct', 'exec', str(vmid), '--'] + COMMANDS[command], text=True, timeout=30)
+    if command == 'linked-backing':
+        source_id = request['source_id']
+        source = get(f'/nodes/{node}/lxc/{source_id}/config')
+        members = get('/pools/crange-probes')['members']
+        if (len([r for r in members if r.get('type') == 'lxc' and r.get('node') == node and r.get('vmid') == source_id]) != 1 or
+                not source_marker or source_marker not in str(source.get('tags', '')).split(';') or
+                'crange-image' not in str(source.get('tags', '')).split(';') or
+                str(source.get('unprivileged')) != '1' or int(source.get('template', 0)) != 1 or
+                get(f'/nodes/{node}/lxc/{source_id}/status/current').get('status') != 'stopped'):
+            raise ValueError('Exact immutable owned backing source required.')
+        if not all(str(c.get('rootfs', '')).startswith('local-lvm:') for c in (source, before)):
+            raise ValueError('Only accepted local thin-LVM backing inspection is allowed.')
+        volumes = [str(c['rootfs']).split(',')[0] for c in (source, before)]
+        paths = [subprocess.check_output(['pvesm', 'path', v], text=True, timeout=15).strip() for v in volumes]
+        if any(not re.fullmatch(r'/dev/[a-zA-Z0-9_./-]+', path) for path in paths):
+            raise ValueError('Unrecognized local backing volume.')
+        rows = json.loads(subprocess.check_output(['lvs', '--reportformat', 'json', '-o', 'lv_name,origin', paths[1]], text=True, timeout=15))['report'][0]['lv']
+        if len(rows) != 1 or rows[0].get('origin', '').strip(' []') != paths[0].split('/')[-1]:
+            raise ValueError('Physical snapshot origin differs from the captured source.')
+        if source != get(f'/nodes/{node}/lxc/{source_id}/config'):
+            raise ValueError('Backing source changed during inspection.')
+        value = json.dumps({'verified': True, 'source_id': source_id, 'probe_id': vmid,
+                            'source_volume': volumes[0], 'probe_volume': volumes[1],
+                            'origin': rows[0]['origin'].strip(' []')})
+    else:
+        value = subprocess.check_output(['pct', 'exec', str(vmid), '--'] + COMMANDS[command], text=True, timeout=30)
     after = get(f'/nodes/{node}/lxc/{vmid}/config')
     validate_guest(after, get('/pools/crange-probes')['members'], node, vmid, marker)
     if before != after:
@@ -72,7 +104,8 @@ def dispatch(value, config, peer_uid, run=subprocess.run):
     node, vmid, command, marker = validate_request(value, config, peer_uid)
     # The remote program is fixed source plus serialized validated data, never shell input.
     program = Path(__file__).read_text().split("\nif __name__ == '__main__':")[0]
-    program += '\nprint(json.dumps({"value":host_read(' + repr(value) + ',' + repr(marker) + ')}))\n'
+    source_marker = config['allowed_guests'].get(node, {}).get(str(value.get('source_id')))
+    program += '\nprint(json.dumps({"value":host_read(' + repr(value) + ',' + repr(marker) + ',' + repr(source_marker) + ')}))\n'
     target = config['node_addresses'][node]
     if not re.fullmatch(r'10\.0\.0\.10[1-5]', target):
         raise ValueError('Unapproved cluster SSH address.')

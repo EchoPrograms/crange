@@ -323,7 +323,8 @@ class ReplicaWorker:
 
 class SourceProbeWorker:
     """Verify one captured source by cloning it into the isolated probe pool."""
-    def __init__(self, api, journal, verify, reservation_validator):
+    def __init__(self, api, journal, verify, reservation_validator, backing_verifier=None):
+        self.backing_verifier = backing_verifier
         self.api, self.journal, self.verify = api, journal, verify
         self.reservation_validator = reservation_validator
 
@@ -343,6 +344,11 @@ class SourceProbeWorker:
                 _source_config_identity(source, source_id) != capture.get('source_config_sha256')):
             raise DistributionError('Captured source template identity changed or is not stopped.')
         capacity = _source_capacity(source, kind)
+        clone_mode = reservation.get('resolved', {}).get('clone_mode', 'full')
+        if clone_mode not in ('full', 'linked') or (clone_mode == 'linked' and
+                (kind != 'lxc' or self.backing_verifier is None or
+                 not str(source.get('rootfs', '')).startswith(datastore_id + ':'))):
+            raise DistributionError('Linked source probes require an exact local CT source and backing verifier.')
         source_ref = f'source:{source_node}:{kind}:{source_id}'
         if (self.reservation_validator is None or not self.reservation_validator(
                 reservation, source_node, datastore_id, capacity)):
@@ -358,7 +364,8 @@ class SourceProbeWorker:
                   'reservation': reservation, 'probe_id': vmid,
                   'probe_pool': PROBE_POOL, 'probe_marker': marker}
         self.journal(dict(record))
-        clone_fields = {'newid': vmid, 'full': 1, 'storage': datastore_id,
+        clone_fields = {'newid': vmid, 'full': int(clone_mode == 'full'),
+                        **({'storage': datastore_id} if clone_mode == 'full' else {}),
                         'pool': PROBE_POOL, 'name' if kind == 'qemu' else 'hostname': f'crange-source-probe-{vmid}',
                         'description': f'CRANGE source verification {job_id}'}
         upid = self.api.request('POST', base + '/clone', clone_fields)
@@ -375,6 +382,11 @@ class SourceProbeWorker:
             raise DistributionError('Disposable source clone unexpectedly remains a template.')
         tags = set(str(probe.get('tags', '')).split(';')) | {'crange-image', marker}
         self.api.request('PUT', probe_path + '/config', {'tags': ';'.join(sorted(tags))})
+        if clone_mode == 'linked':
+            proof = self.backing_verifier(source_node, source_id, vmid)
+            if not isinstance(proof, dict) or proof.get('verified') is not True:
+                raise DistributionError('Linked source-probe backing relation is unverified.')
+            record['linked_backing'] = proof
         record['state'] = 'verifying'
         self.journal(dict(record))
         result = self.verify(_JournaledProbeAPI(self.api, record, self.journal),
@@ -394,6 +406,8 @@ class SourceProbeWorker:
         self.journal(dict(record))
         self.api.task(source_node, delete_upid, timeout=1800)
         record['provider_tasks'][-1]['state'] = 'confirmed-terminal'
+        if source != self.api.request('GET', base + '/config') or self.api.request('GET', base + '/status/current').get('status') != 'stopped':
+            raise DistributionError('Source template changed during clone verification.')
         record.update(state='source-probed', verification=result)
         self.journal(dict(record))
         return record
@@ -426,6 +440,11 @@ class SourceProbeWorker:
                 _source_config_identity(source, source_id) != capture.get('source_config_sha256')):
             raise DistributionError('Captured source template identity changed or is not stopped.')
         capacity = _source_capacity(source, kind)
+        clone_mode = reservation.get('resolved', {}).get('clone_mode', 'full')
+        if clone_mode not in ('full', 'linked') or (clone_mode == 'linked' and
+                (kind != 'lxc' or self.backing_verifier is None or
+                 not str(source.get('rootfs', '')).startswith(datastore_id + ':'))):
+            raise DistributionError('Linked source probes require an exact local CT source and backing verifier.')
         if self.reservation_validator is None or not self.reservation_validator(reservation, source_node, datastore_id, capacity):
             raise DistributionError('A valid shared-ledger source-probe reservation is required.')
         vmid = int(record.get('probe_id', 0))
@@ -452,6 +471,11 @@ class SourceProbeWorker:
         self.journal(dict(record))
         tags = set(str(probe.get('tags', '')).split(';')) | {'crange-image', marker}
         self.api.request('PUT', probe_path + '/config', {'tags': ';'.join(sorted(tags))})
+        if clone_mode == 'linked':
+            proof = self.backing_verifier(source_node, source_id, vmid)
+            if not isinstance(proof, dict) or proof.get('verified') is not True:
+                raise DistributionError('Linked source-probe backing relation is unverified.')
+            record['linked_backing'] = proof
         record['state'] = 'verifying'
         self.journal(dict(record))
         wrapped = _JournaledProbeAPI(self.api, record, self.journal)
@@ -467,6 +491,8 @@ class SourceProbeWorker:
         _require_probe_pool(self.api, source_node, kind, vmid)
         upid = wrapped.request('DELETE', probe_path, {'purge': 1})
         wrapped.task(source_node, upid, timeout=1800)
+        if source != self.api.request('GET', base + '/config') or self.api.request('GET', base + '/status/current').get('status') != 'stopped':
+            raise DistributionError('Source template changed during clone verification.')
         record.update(state='source-probed', verification=result)
         self.journal(dict(record))
         return record
@@ -1032,6 +1058,26 @@ class ProbeVerifier:
                              'ssh_host_key': ssh_host_key, 'isolated_bridge': self.bridge}}
 
 
+class UnixContainerBackingVerifier:
+    def __call__(self, node, source_id, probe_id):
+        import socket
+        request = {'node': node, 'vmid': probe_id, 'source_id': source_id, 'command': 'linked-backing'}
+        with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as client:
+            client.settimeout(65); client.connect('/run/crange-ct-read/socket')
+            client.sendall(json.dumps(request).encode() + b'\n')
+            data = b''
+            while not data.endswith(b'\n') and len(data) <= 8192:
+                chunk = client.recv(8193 - len(data))
+                if not chunk: break
+                data += chunk
+        if len(data) > 8192 or not data.endswith(b'\n'):
+            raise DistributionError('Fixed backing relay response is invalid.')
+        response = json.loads(data)
+        if set(response) != {'value'} or not isinstance(response['value'], str):
+            raise DistributionError('Fixed backing relay denied the inspection.')
+        return json.loads(response['value'])
+
+
 class SSHContainerExec:
     """Only the verifier's three fixed readonly commands are executable."""
     def __init__(self, run=None): self.run = run or subprocess.run
@@ -1153,6 +1199,7 @@ def main(argv=None):
     source_probe.add_argument('--project', type=int, required=True)
     source_probe.add_argument('--source-id', type=int, required=True)
     source_probe.add_argument('--identity-record', type=Path, required=True)
+    source_probe.add_argument('--clone-mode', choices=['full', 'linked'], default='full')
     resume_probe = commands.add_parser('source-probe-resume')
     for field in ('source-node', 'job-id', 'isolated-bridge'):
         resume_probe.add_argument('--' + field, required=True)
@@ -1237,13 +1284,13 @@ def main(argv=None):
                         job_id=args.job_id, owner='cli', source_ref=source_ref,
                         source_sha256=source_sha, node_name=args.source_node,
                         datastore_id=args.datastore_id, capacity=capacity,
-                        inventory=inventory, policy=policy, kind=capture['kind'])
+                        inventory=inventory, policy=policy, kind=capture['kind'], clone_mode=args.clone_mode)
                     ledger.mark_running(args.job_id)
                 except PlacementError as exc:
                     raise DistributionError('Shared-ledger source-probe reservation failed.') from exc
                 validator = shared_reservation_validator(ledger, args.job_id,
                     allocation, source_ref, source_sha)
-                worker = SourceProbeWorker(api, journal, verify, validator)
+                worker = SourceProbeWorker(api, journal, verify, validator, backing_verifier=UnixContainerBackingVerifier())
                 record = worker.run(source_node=args.source_node, source_id=args.source_id,
                     datastore_id=args.datastore_id, job_id=args.job_id,
                     capture=capture, reservation=allocation)
@@ -1314,7 +1361,7 @@ def main(argv=None):
                     raise DistributionError('Captured source template identity changed.')
                 probe_id = int(record.get('probe_id', 0))
                 task_upid = find_source_clone_task(api, args.source_node, args.source_id, probe_id, kind)
-                worker = SourceProbeWorker(api, journal, verify, validator)
+                worker = SourceProbeWorker(api, journal, verify, validator, backing_verifier=UnixContainerBackingVerifier())
                 completed = worker.resume(source_node=args.source_node,
                     source_id=args.source_id, datastore_id=datastore_id,
                     job_id=args.job_id, capture=capture, reservation=allocation,

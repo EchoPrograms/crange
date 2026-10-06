@@ -38,6 +38,37 @@ class RelayTests(unittest.TestCase):
             with self.assertRaises(ValueError):
                 validate_guest(self.guest, members, 'proxmox2', 8840, 'crange-job-source')
 
+    def test_backing_request_requires_exact_approved_source(self):
+        self.policy['allowed_guests']['proxmox2']['20000'] = 'crange-job-probe'
+        request = {'node': 'proxmox2', 'vmid': 20000, 'source_id': 8840, 'command': 'linked-backing'}
+        validate_request(request, self.policy, 101000)
+        for mutation in [{'source_id': 8810}, {'source_id': 20000}, {'source_id': True}]:
+            with self.assertRaises(ValueError):
+                validate_request({**request, **mutation}, self.policy, 101000)
+
+    def test_physical_backing_proof_refuses_wrong_origin_and_never_executes_guest(self):
+        from unittest.mock import patch
+        from crange_ct_read_relay import host_read
+        source = {**self.guest, 'template': 1, 'rootfs': 'local-lvm:base-8840-disk-0,size=4G'}
+        probe = {**self.guest, 'tags': 'crange-image;crange-job-probe', 'rootfs': 'local-lvm:vm-20000-disk-0,size=4G'}
+        members = self.members + [{'type': 'lxc', 'node': 'proxmox2', 'vmid': 20000}]
+        origin = ['base-8840-disk-0']
+        def call(argv, **kwargs):
+            if argv[0] == 'pvesh':
+                path = argv[2]
+                if path == '/pools/crange-probes': return json.dumps({'members': members})
+                if path.endswith('/status/current'): return json.dumps({'status': 'stopped'})
+                return json.dumps(source if '/8840/' in path else probe)
+            if argv[0] == 'pvesm': return '/dev/pve/' + argv[2].split(':')[1] + '\n'
+            if argv[0] == 'lvs': return json.dumps({'report': [{'lv': [{'lv_name': 'vm-20000-disk-0', 'origin': origin[0]}]}]})
+            self.fail('Unexpected guest execution or host command')
+        request = {'node': 'proxmox2', 'vmid': 20000, 'source_id': 8840, 'command': 'linked-backing'}
+        with patch('crange_ct_read_relay.socket.gethostname', return_value='proxmox2'), patch('crange_ct_read_relay.subprocess.check_output', side_effect=call):
+            self.assertTrue(json.loads(host_read(request, 'crange-job-probe', 'crange-job-source'))['verified'])
+            origin[0] = 'base-8810-disk-0'
+            with self.assertRaisesRegex(ValueError, 'origin differs'):
+                host_read(request, 'crange-job-probe', 'crange-job-source')
+
     def test_container_exec_uses_bounded_unix_transport(self):
         import socket
         import tempfile
