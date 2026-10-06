@@ -341,7 +341,7 @@ class ReservationLedger:
 
     def reserve_source_probe(self, *, project_id, job_id, owner, source_ref,
                              source_sha256, node_name, datastore_id, capacity,
-                             inventory, policy, now=None):
+                             inventory, policy, now=None, kind="vm"):
         """Reserve one direct, disposable source-verification clone.
 
         This reservation is deliberately independent of the immutable image
@@ -349,6 +349,8 @@ class ReservationLedger:
         Its allocation records the exact source reference/config fingerprint.
         """
         now = time.time() if now is None else now
+        if kind not in ('vm', 'container'):
+            raise PlacementError('unsupported source-probe guest kind')
         if (isinstance(project_id, bool) or not isinstance(project_id, int) or
                 not 1 <= project_id <= 255 or not owner or
                 not isinstance(job_id, str) or not job_id or
@@ -358,6 +360,9 @@ class ReservationLedger:
         if (now - _number(inventory.get('captured_at'), 'inventory captured_at') >
                 policy.get('max_inventory_age_seconds', 120) or inventory['captured_at'] > now + 5):
             raise PlacementError('stale source-probe capacity inventory')
+        api_kind = 'qemu' if kind == 'vm' else 'lxc'
+        if not re.fullmatch(r'source:' + re.escape(node_name) + ':' + api_kind + r':[0-9]+', source_ref):
+            raise PlacementError('source-probe reference does not match node and guest kind')
         demand = {key: _number(capacity.get(key), 'source-probe ' + key, .001)
                   for key in ('memory_mb', 'cpu_cores', 'disk_gb')}
         self.db.execute('BEGIN IMMEDIATE')
@@ -368,9 +373,10 @@ class ReservationLedger:
                     node.get('draining') or node.get('load', 0) > policy.get('max_load', 1)):
                 raise PlacementError('source-probe node is unavailable or excluded')
             if (datastore_id not in policy.get('allowed_storages', []) or
-                    not storage.get('available') or 'vm' not in storage.get('guest_types', []) or
-                    'amd64' not in node.get('architectures', []) or 'vm' not in node.get('guest_types', [])):
-                raise PlacementError('source-probe datastore or VM capability unavailable')
+                    not storage.get('available') or kind not in storage.get('guest_types', []) or
+                    'amd64' not in node.get('architectures', []) or
+                    (kind == 'vm' and 'vm' not in node.get('guest_types', []))):
+                raise PlacementError('source-probe datastore or guest capability unavailable')
             if self.db.execute('SELECT 1 FROM jobs WHERE job_id=?', (job_id,)).fetchone():
                 raise PlacementError('job already has reservations; reconcile instead of duplicating')
             count = self.db.execute("SELECT COUNT(*) FROM jobs WHERE project_id=? AND owner=? AND state='reviewed'", (project_id, owner)).fetchone()[0]

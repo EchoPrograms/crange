@@ -48,6 +48,27 @@ class PlacementTests(unittest.TestCase):
             self.assertEqual(ledger.active_reservations(), [])
             ledger.close()
 
+    def test_ct_source_probe_reserves_container_storage_without_enabling_guest_placement(self):
+        _, inv, _, pol = fixtures()
+        node = inv['nodes']['n1']
+        node['architectures'] = ['amd64']
+        node['guest_types'] = ['vm']
+        node['storages']['local']['guest_types'] = ['container']
+        with tempfile.TemporaryDirectory() as temp:
+            ledger = ReservationLedger(pathlib.Path(temp) / 'ledger')
+            fields = dict(project_id=3, job_id='ct-probe', owner='cli',
+                source_ref='source:n1:lxc:8840', source_sha256='b' * 64,
+                node_name='n1', datastore_id='local', kind='container',
+                capacity={'memory_mb': 512, 'cpu_cores': 1, 'disk_gb': 4.4},
+                inventory=inv, policy=pol, now=100)
+            for changes in ({'source_ref': 'source:n1:qemu:8840'}, {'kind': 'vm'}):
+                with self.assertRaises(PlacementError):
+                    ledger.reserve_source_probe(**{**fields, **changes})
+            allocation = ledger.reserve_source_probe(**fields)
+            self.assertEqual(allocation['image'], 'source:n1:lxc:8840')
+            self.assertNotIn('container', node['guest_types'])
+            ledger.close()
+
     def test_universal_image_scope_still_uses_project_scoped_scheduler_check(self):
         r, inv, cat, pol = fixtures()
         cat['images']['base-v1']['approved_projects'] = ['*']
