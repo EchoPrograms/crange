@@ -7,13 +7,16 @@ import tempfile
 import argparse
 import contextlib
 import io
-from unittest.mock import Mock
+import json
+import base64
+import struct
+from unittest.mock import Mock, patch
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'scripts'))
-from crange_catalog import CatalogError, validate_catalog
+from crange_catalog import CatalogError, validate_catalog, publish_replica
 from crange_distribution import (ReplicaWorker, DistributionError, publish_artifact,
     ProbeVerifier, SSHContainerExec, normalize_projects, publish_stock_archive,
     publish_exported_image, required_capacity, _add_project_approval_arguments,
-    _project_approval_scope, main as distribution_main)
+    _project_approval_scope, shared_reservation_validator, main as distribution_main)
 
 
 class ReplicaTests(unittest.TestCase):
@@ -140,6 +143,106 @@ class ReplicaTests(unittest.TestCase):
         self.assertEqual(self.journal.call_count, 2)
         self.assertEqual(self.journal.call_args.args[0]['template_id'], 200)
         self.verify.assert_not_called()
+
+    def test_shared_reservation_validator_binds_proof_image_node_storage_and_capacity(self):
+        allocation = {'image': 'base-v1', 'artifact_sha256': 'a'*64,
+            'resolved': {'node_name': 'proxmox2', 'datastore_id': 'local-lvm'},
+            'resources': {'memory_mb': 512, 'cpu_cores': 1, 'disk_gb': 16}}
+        ledger = Mock()
+        ledger.validate_job.return_value = [allocation]
+        validate = shared_reservation_validator(ledger, 'job-1', allocation, 'base-v1', 'a'*64)
+        required = {'memory_mb': 512, 'cpu_cores': 1, 'disk_gb': 16}
+        self.assertTrue(validate(allocation, 'proxmox2', 'local-lvm', required))
+        self.assertFalse(validate({}, 'proxmox2', 'local-lvm', required))
+        self.assertFalse(validate(allocation, 'proxmox3', 'local-lvm', required))
+        self.assertFalse(validate(allocation, 'proxmox2', 'ssd-lvm', required))
+        self.assertFalse(validate(allocation, 'proxmox2', 'local-lvm', {**required, 'disk_gb': 17}))
+        ledger.validate_job.assert_called()
+
+    def test_replica_cli_wires_shared_ledger_reservation_into_worker(self):
+        import crange_distribution as distribution
+        import crange_scheduling as scheduling
+        import crange_placement as placement
+        import crange_cache_jobs as cache_jobs
+        import crange
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            key = base64.b64encode(struct.pack('>I', 11) + b'ssh-ed25519' +
+                                   struct.pack('>I', 32) + b'x' * 32).decode()
+            identity = {'machine_id': 'a' * 32, 'ssh_host_key': 'ssh-ed25519 ' + key}
+            capture = {'state': 'identity-captured', 'job_id': 'capture-1', 'node': 'proxmox1',
+                'kind': 'vm', 'source_id': 100, 'source_config_sha256': 'c' * 64,
+                'source_identity': identity, 'init_system': 'openrc', 'readiness': 'default'}
+            export = {'state': 'exported', 'complete_capture': True, 'kind': 'vm', 'node': 'proxmox1',
+                'source_id': 100, 'artifact_sha256': 'a' * 64,
+                'volume_id': 'crange-library:backup/vzdump-qemu-100.vma.zst', 'disk_gb': 8,
+                'memory_mb': 512, 'cpu_cores': 1, 'source_identity': identity,
+                'identity_capture': capture, 'init_system': 'openrc'}
+            catalog = publish_exported_image({'schema_version': 1, 'images': {}}, 'base-v1', export,
+                architecture='amd64', source_revision='revision', approved_projects=[3],
+                datastore_id='local-lvm', verification={'passed': True, 'evidence': 'unit fixture'})
+            catalog_path = root / 'catalog.json'
+            catalog_path.write_text(json.dumps(catalog))
+            policy_path = root / 'policy.json'
+            policy_path.write_text(json.dumps({'enabled': True, 'revision': 'test',
+                'allowed_nodes': ['proxmox1'], 'allowed_storages': ['local-lvm'],
+                'approved_storage': [['proxmox1', 'local-lvm']],
+                'tested_paths': ['local-linked-vm', 'vm-archive-restore'],
+                'isolated_bridges': ['crprobe1450']}))
+            identity_path = root / 'identity.json'
+            identity_path.write_text(json.dumps(identity))
+            archive_path = root / 'archive.json'
+            archive_path.write_text(json.dumps(export))
+            allocation = {'image': 'base-v1', 'artifact_sha256': 'a' * 64,
+                'resolved': {'node_name': 'proxmox1', 'datastore_id': 'local-lvm'},
+                'resources': {'memory_mb': 512, 'cpu_cores': 1, 'disk_gb': 16.8}}
+            ledger = Mock()
+            ledger.reserve_preparation.return_value = allocation
+            ledger.validate_job.return_value = [allocation]
+            worker_cls = Mock()
+            worker = worker_cls.return_value
+            final_inventory = {'guests': {'200': {'template': True, 'node_name': 'proxmox1'}}}
+
+            def prepare(catalog_value, image_id, **kwargs):
+                validator = worker_cls.call_args.kwargs['reservation_validator']
+                self.assertTrue(validator(allocation, 'proxmox1', 'local-lvm', required_capacity(catalog_value['images'][image_id])))
+                self.assertEqual(kwargs['reservation'], allocation)
+                journal = worker_cls.call_args.args[1]
+                record = {'job_id': 'replica-1', 'state': 'allocated', 'image_id': image_id,
+                    'node': 'proxmox1', 'datastore_id': 'local-lvm', 'kind': 'qemu',
+                    'source_node': 'proxmox1', 'source_id': 100, 'artifact_sha256': 'a' * 64,
+                    'reservation': allocation, 'template_id': 200, 'allocation_node': 'proxmox1',
+                    'probe_id': 201, 'probe_pool': 'crange-probes', 'provider_tasks': []}
+                journal(record)
+                for state in ('converting-template', 'verifying', 'ready'):
+                    journal({**record, 'state': state})
+                return publish_replica(catalog_value, image_id, {'node': 'proxmox1',
+                    'template_id': 200, 'datastore_id': 'local-lvm', 'state': 'ready',
+                    'artifact_sha256': 'a' * 64, 'verified_at': 'now',
+                    'verification': {'passed': True, 'identity_unique': True},
+                    'job_id': 'replica-1', 'clone_modes': ['linked'],
+                    'clone_modes_verified': ['linked'], 'cache_local': True})
+            worker.prepare.side_effect = prepare
+            common = ['--catalog', str(catalog_path), '--journal-dir', str(root / 'journal'),
+                '--policy', str(policy_path), 'replica', '--image-id', 'base-v1',
+                '--source-node', 'proxmox1', '--node', 'proxmox1', '--datastore-id', 'local-lvm',
+                '--job-id', 'replica-1', '--isolated-bridge', 'crprobe1450', '--project', '3',
+                '--source-id', '100', '--source-identity', str(identity_path), '--archive', str(archive_path)]
+            with contextlib.ExitStack() as stack:
+                stack.enter_context(patch.object(crange, 'ProxmoxAPI', return_value=Mock()))
+                stack.enter_context(patch.object(distribution, 'ReplicaWorker', worker_cls))
+                stack.enter_context(patch.object(distribution, 'SSHVolumeHasher', return_value=Mock()))
+                stack.enter_context(patch.object(placement, 'ReservationLedger', return_value=ledger))
+                stack.enter_context(patch.object(scheduling, 'discover', side_effect=[{}, final_inventory]))
+                stack.enter_context(patch.object(scheduling, 'node_locks', side_effect=lambda *a, **k: contextlib.nullcontext()))
+                stack.enter_context(patch.object(cache_jobs, 'artifact_pin', return_value=contextlib.nullcontext()))
+                stack.enter_context(contextlib.redirect_stdout(io.StringIO()))
+                distribution.main(common)
+            ledger.reserve_preparation.assert_called_once()
+            ledger.reconcile_job.assert_called_once_with('replica-1', operation_terminal=True,
+                                                         allocations_reconciled=True)
+            self.assertTrue(worker_cls.call_args.kwargs['reservation_validator'](
+                allocation, 'proxmox1', 'local-lvm', required_capacity(catalog['images']['base-v1'])))
 
 class PublicationTests(unittest.TestCase):
     def test_projects_normalized_and_invalid_scope_rejected(self):

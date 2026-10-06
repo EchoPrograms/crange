@@ -18,7 +18,8 @@ import uuid
 
 from crange import ProxmoxAPI
 from crange_distribution import (DistributionError, FileJournal, ProbeVerifier,
-    ReplicaWorker, SSHContainerExec, SSHVolumeHasher, catalog_transaction, required_capacity)
+    ReplicaWorker, SSHContainerExec, SSHVolumeHasher, catalog_transaction, required_capacity,
+    shared_reservation_validator)
 from crange_image_cache import CacheError, build_eviction_plan, apply_eviction_plan
 from crange_placement import ReservationLedger
 import crange_scheduling as scheduling
@@ -120,12 +121,8 @@ def prepare_cache(*, project_id, image_id, node_name, datastore_id='local-lvm',
                     owner=owner, image_id=image_id, catalog=catalog, node_name=node_name,
                     datastore_id=datastore_id, capacity=total, inventory=inventory, policy=policy)
                 ledger.mark_running(job_id)
-                def validator(proof, node, storage, required):
-                    saved = ledger.validate_job(job_id)
-                    return (len(saved) == 1 and saved[0] == allocation and proof == allocation and
-                        allocation['image'] == image_id and allocation['artifact_sha256'] == image['artifact_sha256'] and
-                        allocation['resolved']['node_name'] == node and allocation['resolved']['datastore_id'] == storage and
-                        all(allocation['resources'][key] >= required[key] for key in ('memory_mb', 'cpu_cores', 'disk_gb')))
+                validator = shared_reservation_validator(ledger, job_id, allocation,
+                                                         image_id, image['artifact_sha256'])
                 archive = {'state': 'exported', 'source_id': artifact.get('source_id'),
                     'node': artifact.get('node'), 'volume_id': artifact.get('volume_id'),
                     'complete_capture': artifact.get('complete_capture'),

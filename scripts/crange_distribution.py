@@ -291,6 +291,20 @@ class ReplicaWorker:
         return updated
 
 
+def shared_reservation_validator(ledger, job_id, allocation, image_id, artifact_sha256):
+    """Bind a worker operation to its exact running shared-ledger reservation."""
+    def validate(proof, node, storage, required):
+        saved = ledger.validate_job(job_id)
+        return (len(saved) == 1 and saved[0] == allocation and proof == allocation and
+                allocation.get('image') == image_id and
+                allocation.get('artifact_sha256') == artifact_sha256 and
+                allocation.get('resolved', {}).get('node_name') == node and
+                allocation.get('resolved', {}).get('datastore_id') == storage and
+                all(allocation.get('resources', {}).get(key, 0) >= required[key]
+                    for key in ('memory_mb', 'cpu_cores', 'disk_gb')))
+    return validate
+
+
 class FileJournal:
     """Controller-owned durable journal and cooperative allocation lock."""
     _INITIAL_STATES = {'identity-captured', 'exporting', 'allocated', 'evicting'}
@@ -807,6 +821,8 @@ def main(argv=None):
     replica = commands.add_parser('replica')
     for field in ('image-id', 'source-node', 'node', 'datastore-id', 'job-id', 'isolated-bridge'):
         replica.add_argument('--' + field, required=True)
+    replica.add_argument('--project', type=int, required=True,
+                         help='Project whose quota and image approval fund this verification job.')
     replica.add_argument('--source-id', type=int, required=True)
     replica.add_argument('--source-identity', type=Path, required=True)
     replica.add_argument('--archive', type=Path)
@@ -847,18 +863,88 @@ def main(argv=None):
                 hash_volume=SSHVolumeHasher(), verification=verification))
         print('Published immutable stock archive ' + args.image_id)
     else:
+        if not policy.get('enabled'):
+            raise DistributionError('Image distribution is disabled by administrator policy.')
+        if args.node not in policy.get('allowed_nodes', []):
+            raise DistributionError('Replica destination node is not enabled by administrator policy.')
+        if args.isolated_bridge not in policy.get('isolated_bridges', []):
+            raise DistributionError('Probe bridge is not approved by administrator policy.')
+        from crange_placement import PlacementError, ReservationLedger
+        from crange_cache_jobs import artifact_pin
+        import crange_scheduling as scheduling
+        source_identity = json.loads(args.source_identity.read_text())
+        from crange_catalog import validate_source_identity
+        validate_source_identity(source_identity)
         verify = ProbeVerifier(args.isolated_bridge, policy.get('isolated_bridges', []),
-            json.loads(args.source_identity.read_text()), ct_exec=SSHContainerExec())
-        worker = ReplicaWorker(api, journal, verify,
-            approved_storage=map(tuple, policy.get('approved_storage', [])),
-            tested_paths=policy.get('tested_paths', []), allocation_lock=journal.allocation_lock, hash_volume=SSHVolumeHasher())
+            source_identity, ct_exec=SSHContainerExec())
         archive = json.loads(args.archive.read_text()) if args.archive else None
-        with node_locks([args.source_node, args.node], library=True):
-            catalog_transaction(args.catalog, lambda catalog: worker.prepare(catalog,
-                args.image_id, source_node=args.source_node, source_id=args.source_id,
-                node=args.node, datastore_id=args.datastore_id, job_id=args.job_id,
-                archive=archive))
-        print('Published verified replica ' + args.image_id)
+        ledger = ReservationLedger(scheduling.DATA / 'reservations.sqlite3')
+        try:
+            with node_locks([args.source_node, args.node], library=True):
+                def prepare(catalog):
+                    image = catalog.get('images', {}).get(args.image_id)
+                    if (not image or ('*' not in image.get('approved_projects', []) and
+                                      args.project not in image.get('approved_projects', []))):
+                        raise DistributionError('Image is not approved for the selected project.')
+                    expected_identity = (image.get('source_identity') or
+                                         image.get('verification', {}).get('source_identity'))
+                    if archive:
+                        expected_identity = archive.get('identity_capture', {}).get('source_identity')
+                        artifact = image.get('artifact', {})
+                        if (archive.get('state') != 'exported' or not archive.get('complete_capture') or
+                                archive.get('source_identity') != source_identity or
+                                archive.get('artifact_sha256') != image.get('artifact_sha256') or
+                                archive.get('source_id') != args.source_id or
+                                archive.get('node') != args.source_node or
+                                artifact.get('source_id') != args.source_id or
+                                artifact.get('node') != args.source_node or
+                                artifact.get('volume_id') != archive.get('volume_id')):
+                            raise DistributionError('Archive does not match the approved source image and identity.')
+                    if expected_identity != source_identity:
+                        raise DistributionError('Probe identity must match captured image provenance.')
+                    if not archive and args.source_node != args.node:
+                        raise DistributionError('Cross-node source cloning requires a verified central archive.')
+                    capacity = required_capacity(image)
+                    inventory = discover(api, policy)
+                    try:
+                        allocation = ledger.reserve_preparation(project_id=args.project,
+                            job_id=args.job_id, owner='cli', image_id=args.image_id,
+                            catalog=catalog, node_name=args.node, datastore_id=args.datastore_id,
+                            capacity=capacity, inventory=inventory, policy=policy)
+                        ledger.mark_running(args.job_id)
+                    except PlacementError as exc:
+                        raise DistributionError('Shared-ledger capacity reservation failed.') from exc
+                    validator = shared_reservation_validator(ledger, args.job_id,
+                        allocation, args.image_id, image['artifact_sha256'])
+                    worker = ReplicaWorker(api, journal, verify,
+                        approved_storage=map(tuple, policy.get('approved_storage', [])),
+                        tested_paths=policy.get('tested_paths', []),
+                        allocation_lock=journal.allocation_lock, hash_volume=SSHVolumeHasher(),
+                        reservation_validator=validator)
+                    if archive:
+                        with artifact_pin(archive['volume_id'], image['artifact_sha256'], args.job_id):
+                            return worker.prepare(catalog, args.image_id,
+                                source_node=args.source_node, source_id=args.source_id,
+                                node=args.node, datastore_id=args.datastore_id,
+                                job_id=args.job_id, archive=archive, reservation=allocation)
+                    return worker.prepare(catalog, args.image_id,
+                        source_node=args.source_node, source_id=args.source_id,
+                        node=args.node, datastore_id=args.datastore_id,
+                        job_id=args.job_id, reservation=allocation)
+                catalog_transaction(args.catalog, prepare)
+                inventory = discover(api, policy)
+                record = json.loads((Path(args.journal_dir) / (args.job_id + '.json')).read_text())
+                guest = inventory.get('guests', {}).get(str(record.get('template_id')))
+                if (record.get('state') != 'ready' or not guest or not guest.get('template') or
+                        guest.get('node_name') != args.node or
+                        str(record.get('probe_id')) in inventory.get('guests', {}) or
+                        any(task.get('state') != 'confirmed-terminal'
+                            for task in record.get('provider_tasks', []))):
+                    raise DistributionError('Replica allocation or provider tasks remain uncertain; reservation retained.')
+                ledger.reconcile_job(args.job_id, operation_terminal=True, allocations_reconciled=True)
+            print('Published verified replica ' + args.image_id)
+        finally:
+            ledger.close()
 
 
 
