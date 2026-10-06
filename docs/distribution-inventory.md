@@ -3,7 +3,11 @@
 Inspected 2026-10-01 using read-only Proxmox API/SSH, VM configuration,
 block-device metadata, live network interfaces, and OMV service discovery.
 No VM, disk, export, firewall, or network configuration was changed.
-This is observed inventory, not approval to enable automatic placement.
+This is a historical observed inventory, not the later acceptance decision.
+The 2026-10-05 live pilot is documented in
+[distribution operations](distribution-operations.md); it admits only the P1
+Alpine image and the verified `p003t254` network scope. This report's network
+observations alone do not establish acceptance on other paths or nodes.
 
 ## Capacity and existing workloads
 
@@ -106,7 +110,8 @@ Cluster zone `crange` is VXLAN with MTU 1450, all five nodes, and peers
 
 These are configuration and link-presence checks. They do **not** certify
 cross-node guest VXLAN delivery, effective path MTU, DHCP/DNS, egress, isolation,
-or controller/Guacamole access. Admission must retain a separate verified
-network gate until disposable guests exercise those paths across node pairs.
-Do not mark a network verified solely because a bridge exists. No production
-router reboot, guest migration or infrastructure acceptance apply was performed.
+or controller/Guacamole access. The later live acceptance covers `p003t254`
+for the restricted P1 Alpine pilot only; it does not verify other node pairs or
+networks. Do not mark a network verified solely because a bridge exists. No
+production router reboot or guest migration was performed as part of this
+historical inventory.

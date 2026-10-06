@@ -91,6 +91,11 @@ def discover(api, policy, planned_networks=()):
     """
     nodes = {n['node']: n for n in api.request('GET', '/nodes')}
     guests = api.request('GET', '/cluster/resources', {'type': 'vm'})
+    try:
+        cluster_storages = api.request('GET', '/cluster/resources', {'type': 'storage'})
+    except Exception:
+        # Detailed per-node storage discovery still gates every eligible node.
+        cluster_storages = []
     # Node storage listings expose audit-safe status/content/type. The global
     # configuration index requires Datastore.Allocate on some PVE versions.
     storage_defs = {}
@@ -132,13 +137,25 @@ def discover(api, policy, planned_networks=()):
                     'disks': {'offline': disk}}
             continue
         status = api.request('GET', f'/nodes/{name}/status')
-        storage_rows = api.request('GET', f'/nodes/{name}/storage')
+        storage_summary = [row for row in cluster_storages if row.get('node') == name]
+        storage_detail = name in policy['allowed_nodes']
+        storage_error = False
+        if storage_detail:
+            try:
+                storage_rows = api.request('GET', f'/nodes/{name}/storage')
+            except Exception:
+                storage_rows = storage_summary
+                storage_detail = False
+                storage_error = True
+        else:
+            storage_rows = storage_summary
         cpu = int(status['cpuinfo']['cpus'])
         attestation = policy.get('network_attestations', {}).get(name, {})
         fresh = (attestation.get('verified') is True and attestation.get('mtu') == 1450
                  and attestation.get('zone') == 'crange')
         networks = vnets | {'craccess', 'crtrans'}
         if fresh: networks |= set(planned_networks)
+        verified_networks = (set(attestation.get('verified_networks', [])) & networks) if fresh else set()
         node = {'online': True, 'draining': policy.get('nodes', {}).get(name, {}).get('draining', False),
                 'memory_mb': status['memory']['total']/2**20, 'cpu_cores': cpu,
                 'committed_memory_mb': 0, 'committed_cpu_cores': 0,
@@ -147,17 +164,20 @@ def discover(api, policy, planned_networks=()):
                 'observed_cpu_cores': float(status['cpu']) * cpu if status.get('cpu') is not None else None,
                 'architectures': ['amd64'], 'guest_types': ['vm'] + (['container'] if policy.get('nodes', {}).get(name, {}).get('provider_container_verified') is True else []),
                 'features': policy.get('nodes', {}).get(name, {}).get('verified_features', []),
-                'networks': sorted(networks), 'verified_networks': sorted(networks) if fresh else [],
+                'networks': sorted(networks), 'verified_networks': sorted(verified_networks),
                 'management_verified': fresh and attestation.get('management_verified') is True,
+                'storage_inventory_error': storage_error,
                 'storages': {}}
         for row in storage_rows:
             sid = row['storage']; definition = storage_defs.get(sid, {})
             content = str(row.get('content', definition.get('content', ''))).split(',')
-            node['storages'][sid] = {'available': bool(row.get('active')) and bool(row.get('enabled', 1)),
-                'total_gb': row.get('total', 0)/2**30, 'free_gb': row.get('avail', 0)/2**30,
+            total_bytes = row.get('total', row.get('maxdisk', 0))
+            free_bytes = row.get('avail', max(0, total_bytes - row.get('disk', 0)))
+            node['storages'][sid] = {'available': storage_detail and bool(row.get('active')) and bool(row.get('enabled', 1)),
+                'total_gb': total_bytes/2**30, 'free_gb': free_bytes/2**30,
                 'committed_gb': 0, 'shared': bool(row.get('shared', definition.get('shared', 0))), 'guest_types': ([ 'vm' ] if 'images' in content else []) +
                 (['container'] if 'rootdir' in content else []), 'clone_modes': ['full', 'linked'] if sid in policy.get('nodes', {}).get(name, {}).get('snapshot_storages', []) else ['full'],
-                'snapshots_verified': sid in policy.get('nodes', {}).get(name, {}).get('snapshot_storages', [])}
+                'snapshots_verified': storage_detail and sid in policy.get('nodes', {}).get(name, {}).get('snapshot_storages', [])}
         result['nodes'][name] = node
     for guest in guests:
         name = guest['node']

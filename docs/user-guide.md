@@ -2,7 +2,7 @@
 
 [Documentation index](../README.md) · [CLI reference](reference.md) · [Administrator guide](administrator-guide.md)
 
-This guide describes the checked-in dashboard and CLI. Installed services may run an earlier revision. Automatic distribution remains disabled pending live acceptance; selecting Automatic in new source is not evidence that it is enabled on the controller. See [distribution operations](distribution-operations.md).
+This guide describes the checked-in dashboard and CLI. Installed services may run an earlier revision. Automatic placement is enabled only for the administrator-approved P1 Alpine pilot; other nodes and images remain outside its scope. See [distribution operations](distribution-operations.md).
 
 ## Accounts and responsibilities
 
@@ -44,7 +44,7 @@ scripts/crange stage-deploy 3 --plan-id PLAN_ID --yes
 scripts/crange scenario-health 3 web
 ```
 
-`PLAN_ID` is the retained identifier printed by staging. `infra-plan 3 --retain` is an infrastructure preview and never fills caches. With disabled distribution, use the existing approved pinned placement; Automatic requires administrator activation.
+`PLAN_ID` is the retained identifier printed by staging. `infra-plan 3 --retain` is an infrastructure preview and never fills caches. Automatic placement is available only where the administrator's current policy, image catalog and verified network scope admit it; the current live pilot is restricted to proxmox1 and the Alpine image.
 
 ## Machines and jump boxes
 

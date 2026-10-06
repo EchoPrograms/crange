@@ -68,7 +68,7 @@ Verify fresh clone boot, unique machine/SSH identities, static customization, gu
 
 The deployed library is CT145 on proxmox5; `crange-library` NFS storage is registered on all five nodes. Its NFS address is `10.0.0.249`, administration address `10.60.0.30`. No template disks have been moved. [Library deployment](library-deployment.md) records the precise storage/export/security configuration and reproducible Ansible/Terraform paths.
 
-Automatic placement and multi-node image acceptance remain disabled. Worker-owned `distribution-policy.json`, `image-catalog.json` and image identity records govern activation. Global read-only discovery permission is now recorded in the deployment record; remaining live acceptance is still required. See [distribution operations](distribution-operations.md) and [DISTRIBUTION-PLAN.md](../DISTRIBUTION-PLAN.md) for activation gates and checks.
+Automatic placement is enabled only for the P1 Alpine pilot: the protected policy allows `proxmox1`, catalog image `alpine-3-24-20261005`, and the accepted Project 3 staging network `p003t254`. This is not multi-node acceptance. The image record still has `captured_source_identity: false`; treat that as an explicit provenance limitation and do not broaden its scope. See [distribution operations](distribution-operations.md) and [DISTRIBUTION-PLAN.md](../DISTRIBUTION-PLAN.md) for current gates.
 
 Read-only capacity discovery and explicit preparation are distinct:
 

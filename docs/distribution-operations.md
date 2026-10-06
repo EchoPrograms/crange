@@ -1,26 +1,46 @@
 # Distribution implementation and activation
 
 The automatic-placement code and Cluster GUI were deployed to the controller on
-2026-10-05. Automatic admission remains **disabled** by the protected policy.
-The live policy `capacity-20261005` sets CPU commitment to 3.5 times physical
+2026-10-05. Automatic admission is enabled for a deliberately narrow pilot:
+the protected policy allows only `proxmox1`. Other cluster nodes have not been
+admitted. This does not establish multi-node placement acceptance.
+The live policy `alpine-p1-pilot-v2-20261005` sets CPU commitment to 3.5 times physical
 cores, RAM commitment to 2 times physical RAM less host reserve, and verified
 local linked-disk commitment to 1.5 times physical disk less reserve. These
 limits do not override live physical-pressure or image/network gates.
 
-The five-node inventory refresh succeeds. It currently reports no approved
-image catalog or verified network/storage attestation. Proxmox4 already has
-about 164 GiB configured guest RAM against a 109.5 GiB permitted commitment
-window, and about 106 configured vCPUs against 56 permitted. Proxmox2's
-152 GiB declared image/cache disks exceed its current 113 GiB conservative
-local-lvm window. Neither can accept new automatic guests until those
-commitments change or verified capacity is added. Proxmox6 is recognized in
-code but excluded from active policy until its future cluster enrollment.
+The five-node inventory refresh succeeds, and the verified network scope is
+`p003t254` for this pilot. The protected acceptance record at
+`/var/lib/crange-distribution/acceptance/alpine-p1-20261005.json` supports the
+published catalog image `alpine-3-24-20261005`, backed by VM template 8820 on
+Proxmox1 `local-lvm`. It records the archive restore and validated local linked
+clone path. Project 3's retained infrastructure plan reported **no resource
+changes**. Acceptance is limited to this image, node, storage and network scope.
+The catalog record has `captured_source_identity: false`, so source provenance
+is not fully captured even though the image is approved for this restricted
+pilot; resolve that gap before broadening catalog approval or placement scope.
+Proxmox2 storage API discovery has been intermittent; placement safely falls
+back by excluding it when current storage evidence is unavailable. Proxmox4's
+configured commitments exceed its conservative admission window. Proxmox3 and
+Proxmox5 have not been admitted. Proxmox6 remains a future optional node and
+has not been enrolled or changed.
 
 The isolated Parrot provider probe VM 8819 was removed on 2026-10-05 after
 confirming its exact disposable name, tags, bridge, and owned disks. Source
 and cache templates 112 and 8818 were retained. The probe booted with SSH
 and RDP active, but four optional services left the guest in a degraded
 systemd state; that is not yet a publishable readiness proof.
+
+An existing Alpine 3.24 VM archive from Proxmox2's source template 8809 was
+restored onto Proxmox1 as owned template 8820. Two disconnected linked clones
+booted with QEMU guest agent and SSH, showed different machine IDs, and were
+destroyed after verification. Their thin disks both reported template 8820 as
+their origin. The archive checksum was verified by the controller over
+key-authenticated SSH to CT145; this does not require controller SSH access
+to Proxmox management addresses. The template backs the published catalog image
+`alpine-3-24-20261005` and is enabled only for the P1 pilot. Network acceptance
+is limited to `p003t254`. The catalog's `captured_source_identity: false` value
+remains a source-provenance limitation.
 
 ## Implemented controls
 
@@ -64,12 +84,12 @@ The worker operations are `template-distribution-inventory` and `template-distri
 
 ## Remaining activation gates
 
-1. Dedicated CT145/NFS library and scoped storage/discovery permissions were deployed and verified on 2026-10-02; see [library-deployment.md](library-deployment.md). Independent backup/restore protection and clone/archive acceptance remain pending.
+1. Dedicated CT145/NFS library and scoped storage/discovery permissions were deployed and verified on 2026-10-02; see [library-deployment.md](library-deployment.md). Independent backup/restore protection remains pending. Local linked-clone acceptance is complete only for the P1 Alpine pilot; broader clone/archive acceptance remains pending.
 2. Global read-only VM.Audit and library storage ACLs are installed; preserve those narrowly scoped roles and validate fresh discovery before admission.
-3. Publish real approved artifacts, associate logical IDs with template approvals, retain critical local recovery copies, and verify source identities and destination replicas.
+3. For each additional image or node, publish approved artifacts, associate logical IDs with template approvals, retain critical local recovery copies, and verify source identities and destination replicas. The current Alpine pilot still lacks captured source identity evidence.
 4. Verify cross-node VXLAN/MTU, controller and Guacamole access, DHCP/DNS, egress and isolation. Bridge availability alone is not acceptance.
-5. Run the mixed-resource multi-node project, image-library outage, concurrent admission, interrupted provisioning and cross-node capture/test/rollout/rollback checks in DISTRIBUTION-PLAN.md.
-6. Deploy reviewed source with workers idle, verify the production GUI, then explicitly enable Automatic for new resources.
+5. Run the mixed-resource multi-node project, image-library outage, concurrent admission, interrupted provisioning and cross-node capture/test/rollout/rollback checks in DISTRIBUTION-PLAN.md before admitting additional nodes.
+6. Keep the current pilot restricted to proxmox1 until each additional node, image and network path passes its reviewed acceptance checks. Proxmox6 enrollment is a separate future decision.
 
 ## Validation performed
 

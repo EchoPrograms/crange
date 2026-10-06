@@ -11,7 +11,7 @@ CRANGE manages isolated Proxmox cyber-range projects through reviewed Terraform,
 - [Template workflows](docs/admin-templates.md), [custom jump boxes](docs/custom-jump-boxes.md), [guest accounts](docs/box-user-management.md), [Guacamole integration](docs/guacamole-integration.md).
 - [Distribution operations](docs/distribution-operations.md), [library deployment](docs/library-deployment.md), [storage audit](docs/template-storage-audit.md), [acceptance plan](DISTRIBUTION-PLAN.md).
 
-The guides describe checked-in behavior. Automatic placement and the new library/cache multi-node workflow remain disabled pending live acceptance; the deployed library does not establish rollout readiness. Existing detailed audit/delivery documents are historical evidence, not installation instructions.
+The guides describe checked-in behavior. Automatic placement is enabled only for the restricted P1 Alpine pilot (`alpine-3-24-20261005` on `proxmox1`, with verified `p003t254` networking); it is not multi-node acceptance, and the catalog still records `captured_source_identity: false`. The deployed library does not establish rollout readiness. Existing detailed audit/delivery documents are historical evidence, not installation instructions.
 
 ## Dashboard
 

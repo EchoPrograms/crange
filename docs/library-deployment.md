@@ -64,6 +64,15 @@ establish protection. Project workflows must reject library infrastructure as
 a capture, backup, deletion or rollout target. Capacity reclamation and image
 clone/restore acceptance require separate reviewed work.
 
+On 2026-10-05, Proxmox2 briefly reported the registered NFS storage inactive
+while CT145 remained healthy and the export responded on `10.0.0.249:2049`.
+The node's NFSv4 mount recovered and the storage returned active. The
+controller key is now restricted in CT145's root `authorized_keys`, and the
+library role preserves that setting. Controller checksum verification uses
+CT145's export filesystem over `10.60.0.30`; it does not depend on SSH access
+to a Proxmox management IP. An existing Alpine VM archive was read and hashed
+successfully through that path.
+
 Final registration status was active/enabled on all five nodes, each reporting
 400,113,532,928 bytes available. Own temporary probe mounts and empty probe
 directories were cleaned up. Scoped controller API discovery returned all 71

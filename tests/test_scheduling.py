@@ -10,7 +10,10 @@ from crange_placement import PlacementError
 class API:
     def request(self, method, path, fields=None):
         if path == '/nodes': return [{'node':'proxmox2','status':'online'}]
-        if path == '/cluster/resources': return [{'node':'proxmox2','type':'qemu','vmid':101},{'node':'proxmox2','type':'lxc','vmid':102}]
+        if path == '/cluster/resources':
+            if fields and fields.get('type') == 'storage':
+                return [{'node':'proxmox2','storage':'local-lvm','maxdisk':100*2**30,'disk':20*2**30,'status':'available'}]
+            return [{'node':'proxmox2','type':'qemu','vmid':101},{'node':'proxmox2','type':'lxc','vmid':102}]
         if path == '/storage': return [{'storage':'local-lvm','content':'images,rootdir'}]
         if path == '/cluster/sdn/vnets': return [{'vnet':'p003t254','zone':'crange'}]
         if path.endswith('/status'): return {'cpuinfo':{'cpus':4},'memory':{'total':8*2**30,'used':2*2**30},'loadavg':[0,0,0]}
@@ -37,12 +40,38 @@ class SchedulingTests(unittest.TestCase):
         policy['nodes']={'proxmox2':{'provider_container_verified':True}}
         self.assertIn('container',scheduling.discover(API(),policy)['nodes']['proxmox2']['guest_types'])
 
+    def test_attestation_admits_only_networks_actually_tested_on_node(self):
+        policy=dict(scheduling.DEFAULT_POLICY,allowed_nodes=['proxmox2'])
+        policy['network_attestations']={'proxmox2':{'verified':True,'mtu':1450,
+            'zone':'crange','management_verified':True,'verified_networks':['p003t254']}}
+        node=scheduling.discover(API(),policy)['nodes']['proxmox2']
+        self.assertTrue(node['management_verified'])
+        self.assertEqual(node['verified_networks'],['p003t254'])
+        self.assertIn('crtrans',node['networks'])
+        self.assertNotIn('crtrans',node['verified_networks'])
+
+    def test_storage_timeout_excludes_node_without_losing_guest_commitments(self):
+        class SlowStorageAPI(API):
+            def request(self, method, path, fields=None):
+                if path == '/nodes/proxmox2/storage':
+                    raise RuntimeError('storage API timeout')
+                return super().request(method, path, fields)
+        policy=dict(scheduling.DEFAULT_POLICY,allowed_nodes=['proxmox2'])
+        node=scheduling.discover(SlowStorageAPI(),policy)['nodes']['proxmox2']
+        self.assertTrue(node['storage_inventory_error'])
+        self.assertFalse(node['storages']['local-lvm']['available'])
+        self.assertEqual(node['storages']['local-lvm']['total_gb'],100)
+        self.assertEqual(node['committed_memory_mb'],2048)
+        self.assertEqual(node['storages']['local-lvm']['committed_gb'],28)
+
     def test_excluded_node_workloads_still_count_toward_project_quota(self):
         class ExcludedAPI(API):
             def request(self, method, path, fields=None):
                 if path == '/nodes':
                     return [{'node': 'proxmox2', 'status': 'online'}, {'node': 'proxmox4', 'status': 'online'}]
                 if path == '/cluster/resources':
+                    if fields and fields.get('type') == 'storage':
+                        return super().request(method, path, fields)
                     return [{'node': 'proxmox4', 'type': 'qemu', 'vmid': 101}]
                 return super().request(method, path, fields)
         result = scheduling.discover(ExcludedAPI(), dict(scheduling.DEFAULT_POLICY, allowed_nodes=['proxmox2']))
@@ -64,6 +93,8 @@ class SchedulingTests(unittest.TestCase):
                 if path == '/nodes':
                     return [{'node': 'proxmox2', 'status': 'online'}, {'node': 'proxmox6', 'status': 'offline'}]
                 if path == '/cluster/resources':
+                    if fields and fields.get('type') == 'storage':
+                        return super().request(method, path, fields)
                     return [{'node': 'proxmox6', 'type': 'qemu', 'vmid': 600,
                              'template': 0, 'maxmem': 4096 * 2**20, 'maxcpu': 2,
                              'maxdisk': 20 * 2**30, 'tags': 'p003', 'name': 'parked'}]

@@ -392,14 +392,29 @@ def export_image(api, *, node, kind, vmid, storage, job_id, journal,
 
 
 class SSHVolumeHasher:
-    """Trusted transport: fixed pvesm path + sha256sum, no guest shell access."""
-    def __init__(self, run=None):
+    """Hash central archives at the library, or node-local volumes on their host."""
+    def __init__(self, run=None, library_host='10.60.0.30', key_path=None):
         self.run = run or subprocess.run
+        self.library_host = library_host
+        self.key_path = key_path or os.path.expanduser('~/.ssh/id_ed25519_range')
 
     def __call__(self, node, volume_id):
         if node not in {f'proxmox{i}' for i in range(1, 7)} or not re.fullmatch(
                 r'[a-zA-Z0-9_-]+:(backup|vztmpl)/[a-zA-Z0-9_.-]+', volume_id):
             raise DistributionError('Invalid artifact transport identity.')
+        if volume_id.startswith('crange-library:'):
+            kind, filename = volume_id.split(':', 1)[1].split('/', 1)
+            directory = 'dump' if kind == 'backup' else 'template/cache'
+            path = f'/srv/crange-library/{directory}/{filename}'
+            result = self.run(['ssh', '-i', self.key_path, '-o', 'IdentitiesOnly=yes',
+                               '-o', 'BatchMode=yes', '-o', 'ConnectTimeout=8',
+                               'root@' + self.library_host,
+                               'sha256sum -- ' + shlex.quote(path)],
+                              check=True, capture_output=True, text=True, timeout=3600)
+            digest = result.stdout.split()
+            if not digest or not re.fullmatch(r'[a-f0-9]{64}', digest[0]):
+                raise DistributionError('Library returned no valid artifact checksum.')
+            return digest[0]
         command = 'pvesm path ' + shlex.quote(volume_id)
         result = self.run(['ssh', '-o', 'BatchMode=yes', node, command],
                           check=True, capture_output=True, text=True, timeout=60)

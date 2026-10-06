@@ -50,6 +50,8 @@ def _refresh_inventory_snapshot(*, api=None):
         blockers = []
         if name not in policy.get('allowed_nodes', scheduling.DEFAULT_POLICY['allowed_nodes']):
             blockers.append('Node is excluded by placement policy')
+        if node.get('storage_inventory_error'):
+            blockers.append('Detailed datastore discovery failed; this node is unavailable for placement')
         if not node.get('online'): blockers.append('Node is offline')
         if node.get('draining'): blockers.append('Node is draining')
         if node.get('load', 0) > policy.get('max_load', 1): blockers.append('Observed host load exceeds admission limit')
@@ -183,7 +185,8 @@ def configuration_bundle(inventory, catalog, acceptance, output_directory):
             raise ValueError('Node capability acceptance requires actual inventory and evidence.')
         network = proof.get('network', {})
         required = {'vxlan_mtu', 'controller', 'guacamole', 'dns', 'internet_egress', 'team_isolation'}
-        if network.get('verified') and (not required <= set(network.get('passed_checks', [])) or network.get('mtu') != 1450):
+        if network.get('verified') and (not required <= set(network.get('passed_checks', [])) or
+                network.get('mtu') != 1450 or not network.get('verified_networks')):
             raise ValueError('Network attestation lacks required end-to-end acceptance checks.')
         policy['network_attestations'][node] = {**network, 'zone': 'crange',
             'management_verified': bool(network.get('verified'))}

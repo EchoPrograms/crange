@@ -2,5 +2,7 @@
 - name: Configure the dedicated Debian NFSv4 library
   hosts: library
   become: true
+  vars:
+    controller_public_key: "{{ lookup('ansible.builtin.file', lookup('ansible.builtin.env', 'HOME') + '/.ssh/id_ed25519_range.pub') }}"
   roles:
     - library

@@ -48,6 +48,24 @@
       PermitRootLogin prohibit-password
   notify: Reload SSH
 
+- name: Authorize the controller to verify immutable library artifacts
+  ansible.builtin.file:
+    path: /root/.ssh
+    state: directory
+    owner: root
+    group: root
+    mode: '0700'
+
+- name: Install the controller's restricted library verification key
+  ansible.builtin.lineinfile:
+    path: /root/.ssh/authorized_keys
+    create: true
+    owner: root
+    group: root
+    mode: '0600'
+    regexp: '^.*{{ controller_public_key.split()[1] | regex_escape }}(?: .*)?$'
+    line: 'restrict {{ controller_public_key }}'
+
 - name: Create nftables service override directory
   ansible.builtin.file:
     path: /etc/systemd/system/nftables.service.d
