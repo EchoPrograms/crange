@@ -10,12 +10,13 @@ local linked-disk commitment to 1.5 times physical disk less reserve. These
 limits do not override live physical-pressure or image/network gates.
 
 The five-node inventory refresh succeeds, and the verified network scope is
-`p003t254` for this pilot. A temporary-network check on proxmox5 used disposable
-VMs 8824 and 8825. DNS, Internet egress, team isolation, controller SSH, and the
-1450-byte MTU passed. Guacamole SSH to undeclared address `10.3.254.98` was
-blocked by the existing router rule, so proxmox5 has **not** been admitted by
-policy. Both probe VMs were removed after the checks. These results are partial
-network acceptance and do not widen the current P1 policy.
+`p003t254` for this pilot. The initial 2026-10-05 proxmox5 network check used
+disposable VMs 8824 and 8825. DNS, Internet egress, team isolation, controller
+SSH, and the 1450-byte MTU passed, while Guac SSH to undeclared
+`10.3.254.98` was blocked by the existing router rule. A bounded follow-up
+passed the exact Guac path on 2026-10-06; P5 network and cache evidence is in
+[P5 network acceptance](p5-network-acceptance.md). These checks do not widen
+the current P1 placement policy.
 
 Detailed storage discovery for NFS-backed storage has a latency issue. Until its
 detailed capacity, content, and locality query completes successfully, that
@@ -121,10 +122,10 @@ release provenance.
 
 ## Remaining activation gates
 
-1. Dedicated CT145/NFS library and scoped storage/discovery permissions were deployed and verified on 2026-10-02; see [library-deployment.md](library-deployment.md). Independent backup/restore protection remains pending. Local linked-clone acceptance is complete only for the P1 Alpine pilot; broader clone/archive acceptance remains pending.
+1. Dedicated CT145/NFS library and scoped storage/discovery permissions were deployed and verified on 2026-10-02; see [library-deployment.md](library-deployment.md). Independent backup/restore protection remains pending. The legacy Alpine P1 pilot has linked-clone acceptance; the portable Alpine image cache is verified on P2, P3 and P5. Broader image/archive acceptance remains pending.
 2. Global read-only VM.Audit and library storage ACLs are installed; preserve those narrowly scoped roles and validate fresh discovery before admission.
-3. For each additional image or node, publish approved artifacts, associate logical IDs with template approvals, retain critical local recovery copies, and verify source identities and destination replicas. The current Alpine pilot still lacks captured source identity evidence; the catalog remains unchanged until the workflow is rerun and verified.
-4. Verify cross-node VXLAN/MTU, controller and Guacamole access, DHCP/DNS, egress and isolation. Proxmox5's Project 3 staging network and Guac SSH path passed on 2026-10-06; see [P5 network acceptance](p5-network-acceptance.md). P5 remains outside placement admission pending its local image-cache and snapshot/restore checks. Bridge availability alone is not acceptance.
+3. For each additional image or node, publish approved artifacts, associate logical IDs with template approvals, retain critical local recovery copies, and verify source identities and destination replicas. The legacy `alpine-3-24-20261005` record still has `captured_source_identity: false`; the separately published portable image has captured identity evidence.
+4. Verify cross-node VXLAN/MTU, controller and Guacamole access, DHCP/DNS, egress and isolation. Proxmox5's Project 3 staging network, Guac SSH path, and Alpine local linked-cache check passed on 2026-10-06; see [P5 network acceptance](p5-network-acceptance.md). P5 remains outside placement admission while broader admission checks are pending. Bridge availability alone is not acceptance.
 5. Run the mixed-resource multi-node project, image-library outage, concurrent admission, interrupted provisioning and cross-node capture/test/rollout/rollback checks in DISTRIBUTION-PLAN.md before admitting additional nodes.
 6. Keep the current pilot restricted to proxmox1 until each additional node, image and network path passes its reviewed acceptance checks. Proxmox6 enrollment is a separate future decision.
 
