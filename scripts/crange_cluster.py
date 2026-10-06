@@ -77,6 +77,7 @@ def _refresh_inventory_snapshot(*, api=None):
             storage_blockers = []
             if sid not in policy.get('allowed_storages', []): storage_blockers.append('Datastore is not approved for running guests')
             if not storage.get('available'): storage_blockers.append('Datastore is unavailable')
+            if storage.get('inventory_complete') is False: storage_blockers.append('Datastore capacity/content/locality discovery is incomplete')
             if available <= 0: storage_blockers.append('Disk headroom is exhausted')
             if policy.get('clone_mode', 'linked') == 'linked' and (storage.get('shared') or not storage.get('snapshots_verified')):
                 storage_blockers.append('Local linked-clone/snapshot acceptance is missing')
@@ -184,7 +185,7 @@ def configuration_bundle(inventory, catalog, acceptance, output_directory):
         if node not in inventory['nodes'] or not proof.get('evidence'):
             raise ValueError('Node capability acceptance requires actual inventory and evidence.')
         network = proof.get('network', {})
-        required = {'vxlan_mtu', 'controller', 'guacamole', 'dns', 'internet_egress', 'team_isolation'}
+        required = scheduling.NETWORK_CHECKS
         if network.get('verified') and (not required <= set(network.get('passed_checks', [])) or
                 network.get('mtu') != 1450 or not network.get('verified_networks')):
             raise ValueError('Network attestation lacks required end-to-end acceptance checks.')

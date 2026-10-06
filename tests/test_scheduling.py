@@ -17,7 +17,7 @@ class API:
         if path == '/storage': return [{'storage':'local-lvm','content':'images,rootdir'}]
         if path == '/cluster/sdn/vnets': return [{'vnet':'p003t254','zone':'crange'}]
         if path.endswith('/status'): return {'cpuinfo':{'cpus':4},'memory':{'total':8*2**30,'used':2*2**30},'loadavg':[0,0,0]}
-        if path.endswith('/storage'): return [{'storage':'local-lvm','active':1,'total':100*2**30,'avail':80*2**30}]
+        if path.endswith('/storage'): return [{'storage':'local-lvm','active':1,'total':100*2**30,'avail':80*2**30,'content':'images,rootdir','shared':0}]
         if path.endswith('/101/config'): return {'memory':2048,'cores':2,'template':0,'scsi0':'local-lvm:vm-101-disk-0,size=20G','tags':'p003'}
         if path.endswith('/102/config'): return {'memory':512,'cores':1,'template':1,'rootfs':'local-lvm:vm-102-disk-0,size=8G'}
         raise AssertionError(path)
@@ -43,12 +43,52 @@ class SchedulingTests(unittest.TestCase):
     def test_attestation_admits_only_networks_actually_tested_on_node(self):
         policy=dict(scheduling.DEFAULT_POLICY,allowed_nodes=['proxmox2'])
         policy['network_attestations']={'proxmox2':{'verified':True,'mtu':1450,
-            'zone':'crange','management_verified':True,'verified_networks':['p003t254']}}
+            'zone':'crange','management_verified':True,'passed_checks':list(scheduling.NETWORK_CHECKS),'verified_networks':['p003t254']}}
         node=scheduling.discover(API(),policy)['nodes']['proxmox2']
         self.assertTrue(node['management_verified'])
         self.assertEqual(node['verified_networks'],['p003t254'])
         self.assertIn('crtrans',node['networks'])
         self.assertNotIn('crtrans',node['verified_networks'])
+
+    def test_project_three_proof_cannot_admit_other_project_or_unattested_planned_vnet(self):
+        policy=dict(scheduling.DEFAULT_POLICY,allowed_nodes=['proxmox2'])
+        policy['network_attestations']={'proxmox2':{'verified':True,'mtu':1450,
+            'zone':'crange','management_verified':True,'passed_checks':list(scheduling.NETWORK_CHECKS),
+            'verified_networks':['p003t254']}}
+        node=scheduling.discover(API(),policy,['p042t001','p042tr'])['nodes']['proxmox2']
+        self.assertNotIn('p042t001',node['verified_networks'])
+        self.assertNotIn('p042tr',node['verified_networks'])
+        policy['network_attestations']['proxmox2']['passed_checks'].remove('team_isolation')
+        node=scheduling.discover(API(),policy,['p003t254'])['nodes']['proxmox2']
+        self.assertFalse(node['management_verified'])
+        self.assertEqual(node['verified_networks'],[])
+
+    def test_every_cluster_node_requires_its_own_exact_project_proof(self):
+        class AllNodesAPI(API):
+            def request(self, method, path, fields=None):
+                if path == '/nodes': return [{'node':f'proxmox{i}','status':'online'} for i in range(1,6)]
+                return super().request(method,path,fields)
+        policy=dict(scheduling.DEFAULT_POLICY)
+        policy['network_attestations']={'proxmox5':{'verified':True,'mtu':1450,
+            'zone':'crange','management_verified':True,'passed_checks':list(scheduling.NETWORK_CHECKS),
+            'verified_networks':['p042t001','p042tr']}}
+        nodes=scheduling.discover(AllNodesAPI(),policy,['p042t001','p042tr'])['nodes']
+        self.assertEqual(nodes['proxmox5']['verified_networks'],['p042t001','p042tr'])
+        for i in range(1,5): self.assertEqual(nodes[f'proxmox{i}']['verified_networks'],[])
+
+    def test_incomplete_or_shared_storage_cannot_claim_local_linked_capability(self):
+        for mutation in ({'shared':None},{'content':''},{'avail':None},{'total':float('nan')},{'enabled':'0'},{'shared':1}):
+            with self.subTest(mutation=mutation):
+                class StorageAPI(API):
+                    def request(self, method, path, fields=None):
+                        rows=super().request(method,path,fields)
+                        if path == '/nodes/proxmox2/storage': rows[0].update(mutation)
+                        return rows
+                policy=dict(scheduling.DEFAULT_POLICY,allowed_nodes=['proxmox2'],nodes={'proxmox2':{'snapshot_storages':['local-lvm']}})
+                storage=scheduling.discover(StorageAPI(),policy)['nodes']['proxmox2']['storages']['local-lvm']
+                if mutation != {'shared':1}: self.assertFalse(storage['available'])
+                if mutation != {'enabled':'0'}: self.assertFalse(storage['snapshots_verified'])
+                self.assertEqual(storage['committed_gb'],28)
 
     def test_storage_timeout_excludes_node_without_losing_guest_commitments(self):
         class SlowStorageAPI(API):

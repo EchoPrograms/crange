@@ -159,8 +159,15 @@ class PublicationTests(unittest.TestCase):
                       source_id=100, artifact_sha256='a'*64, volume_id='local:backup/export', disk_gb=32)
         arguments = dict(architecture='amd64', source_revision='revision', approved_projects=['3'],
                          datastore_id='local-lvm', verification={'passed': True, 'evidence': 'clone test'})
+        import base64, struct
+        key = base64.b64encode(struct.pack('>I',11)+b'ssh-ed25519'+struct.pack('>I',32)+b'a'*32).decode()
+        record['source_identity']={'machine_id':'a'*32,'ssh_host_key':'ssh-ed25519 '+key}
+        record['identity_capture']={'state':'identity-captured','job_id':'capture-1','node':'proxmox1',
+            'kind':'vm','source_id':100,'source_config_sha256':'c'*64,'source_identity':record['source_identity']}
+
         catalog = publish_exported_image({'schema_version': 1, 'images': {}}, 'vm-v1', record, **arguments)
         self.assertEqual(catalog['images']['vm-v1']['disk_gb'], 32)
+        self.assertEqual(catalog['images']['vm-v1']['source_identity'],record['source_identity'])
         del record['disk_gb']
         with self.assertRaisesRegex(DistributionError, 'disk size'):
             publish_exported_image({'schema_version': 1, 'images': {}}, 'vm-v2', record, **arguments)

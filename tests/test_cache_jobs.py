@@ -1,3 +1,5 @@
+import base64
+import struct
 from pathlib import Path
 import json
 import sys
@@ -37,7 +39,7 @@ class CacheJobTests(unittest.TestCase):
             image = {'kind': 'vm', 'architecture': 'amd64', 'artifact_sha256': 'a'*64,
                 'source_revision': 'rev', 'verified': True, 'approved_projects': [3],
                 'disk_gb': 8, 'memory_mb': 512, 'cpu_cores': 1, 'replicas': [],
-                'source_identity': {'machine_id': 'a'*32, 'ssh_host_key': 'ssh-ed25519 old'},
+                'source_identity': {'machine_id': 'a'*32, 'ssh_host_key': 'ssh-ed25519 '+base64.b64encode(struct.pack('>I',11)+b'ssh-ed25519'+struct.pack('>I',32)+b'a'*32).decode()},
                 'artifact': {'node': 'proxmox1', 'source_id': 100, 'complete_capture': True,
                              'volume_id': 'crange-library:backup/vzdump-qemu-100.vma.zst'}}
             catalog = {'schema_version': 1, 'images': {'base-v1': image}}

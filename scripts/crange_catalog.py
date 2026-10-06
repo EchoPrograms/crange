@@ -1,5 +1,7 @@
 """Immutable, controller-owned logical image catalog validation."""
 import copy
+import base64
+import struct
 import hashlib
 import json
 import math
@@ -8,6 +10,23 @@ import re
 
 class CatalogError(ValueError):
     pass
+
+
+def validate_source_identity(identity):
+    if not isinstance(identity, dict) or not re.fullmatch(r'[a-f0-9]{32}', identity.get('machine_id', '')) or identity['machine_id'] == '0' * 32:
+        raise CatalogError('Captured source machine identity is invalid')
+    parts = str(identity.get('ssh_host_key', '')).split()
+    try:
+        raw = base64.b64decode(parts[1], validate=True)
+        name_length = struct.unpack('>I', raw[:4])[0]
+        offset = 4 + name_length
+        valid = (parts[0] == 'ssh-ed25519' and raw[4:offset] == b'ssh-ed25519'
+                 and struct.unpack('>I', raw[offset:offset+4])[0] == 32 and len(raw) == offset + 4 + 32)
+    except (ValueError, IndexError, struct.error):
+        valid = False
+    if not valid:
+        raise CatalogError('Captured source Ed25519 public host key is invalid')
+    return identity
 
 
 def validate_probe_resources(profile):
@@ -39,6 +58,8 @@ def validate_catalog(catalog):
             raise CatalogError(f'{image_id}: verified publication and source revision required')
         if not isinstance(image.get('approved_projects'), list):
             raise CatalogError(f'{image_id}: approval scope required')
+        if 'source_identity' in image:
+            validate_source_identity(image['source_identity'])
         if 'probe_resources' in image:
             validate_probe_resources(image['probe_resources'])
         for replica in image.get('replicas', []):

@@ -5,6 +5,7 @@ import copy
 import fcntl
 import hashlib
 import json
+import math
 import os
 import re
 import time
@@ -82,6 +83,20 @@ def disk_allocations(config):
     return result
 
 
+NETWORK_CHECKS = frozenset({'vxlan_mtu', 'controller', 'guacamole', 'dns', 'internet_egress', 'team_isolation'})
+
+
+def network_attestation_valid(attestation):
+    """Evidence is node-specific; exact VNet membership remains mandatory."""
+    return (attestation.get('verified') is True and attestation.get('mtu') == 1450
+            and attestation.get('zone') == 'crange'
+            and NETWORK_CHECKS <= set(attestation.get('passed_checks', [])))
+
+
+def _api_flag(value):
+    return value in (True, 1, '1')
+
+
 def discover(api, policy, planned_networks=()):
     """Account every visible guest, including stopped guests and non-range guests.
 
@@ -151,8 +166,7 @@ def discover(api, policy, planned_networks=()):
             storage_rows = storage_summary
         cpu = int(status['cpuinfo']['cpus'])
         attestation = policy.get('network_attestations', {}).get(name, {})
-        fresh = (attestation.get('verified') is True and attestation.get('mtu') == 1450
-                 and attestation.get('zone') == 'crange')
+        fresh = network_attestation_valid(attestation)
         networks = vnets | {'craccess', 'crtrans'}
         if fresh: networks |= set(planned_networks)
         verified_networks = (set(attestation.get('verified_networks', [])) & networks) if fresh else set()
@@ -172,12 +186,27 @@ def discover(api, policy, planned_networks=()):
             sid = row['storage']; definition = storage_defs.get(sid, {})
             content = str(row.get('content', definition.get('content', ''))).split(',')
             total_bytes = row.get('total', row.get('maxdisk', 0))
-            free_bytes = row.get('avail', max(0, total_bytes - row.get('disk', 0)))
-            node['storages'][sid] = {'available': storage_detail and bool(row.get('active')) and bool(row.get('enabled', 1)),
-                'total_gb': total_bytes/2**30, 'free_gb': free_bytes/2**30,
-                'committed_gb': 0, 'shared': bool(row.get('shared', definition.get('shared', 0))), 'guest_types': ([ 'vm' ] if 'images' in content else []) +
-                (['container'] if 'rootdir' in content else []), 'clone_modes': ['full', 'linked'] if sid in policy.get('nodes', {}).get(name, {}).get('snapshot_storages', []) else ['full'],
-                'snapshots_verified': storage_detail and sid in policy.get('nodes', {}).get(name, {}).get('snapshot_storages', [])}
+            used_bytes = row.get('disk', 0)
+            fallback_free = max(0, total_bytes - used_bytes) if isinstance(total_bytes, (int, float)) and isinstance(used_bytes, (int, float)) else 0
+            free_bytes = row.get('avail', fallback_free)
+            valid_capacity = (isinstance(total_bytes, (int, float)) and not isinstance(total_bytes, bool)
+                and isinstance(free_bytes, (int, float)) and not isinstance(free_bytes, bool)
+                and math.isfinite(total_bytes) and math.isfinite(free_bytes)
+                and total_bytes > 0 and 0 <= free_bytes <= total_bytes)
+            locality_known = row.get('shared') in (False, True, 0, 1, '0', '1')
+            # Unknown locality must never authorize a local linked clone.
+            shared = _api_flag(row['shared']) if locality_known else True
+            complete = (storage_detail and valid_capacity and 'avail' in row
+                and locality_known and bool(set(content) & {'images', 'rootdir'}))
+            snapshots = complete and not shared and sid in policy.get('nodes', {}).get(name, {}).get('snapshot_storages', [])
+            node['storages'][sid] = {'available': complete and _api_flag(row.get('active')) and _api_flag(row.get('enabled', 1)),
+                'total_gb': total_bytes/2**30 if valid_capacity else 0,
+                'free_gb': free_bytes/2**30 if valid_capacity else 0,
+                'inventory_complete': complete, 'locality_known': locality_known,
+                'committed_gb': 0, 'shared': shared, 'guest_types': (['vm'] if 'images' in content else []) +
+                (['container'] if 'rootdir' in content else []),
+                'clone_modes': ['full', 'linked'] if snapshots else ['full'],
+                'snapshots_verified': snapshots}
         result['nodes'][name] = node
     for guest in guests:
         name = guest['node']

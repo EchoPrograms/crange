@@ -10,15 +10,29 @@ local linked-disk commitment to 1.5 times physical disk less reserve. These
 limits do not override live physical-pressure or image/network gates.
 
 The five-node inventory refresh succeeds, and the verified network scope is
-`p003t254` for this pilot. The protected acceptance record at
+`p003t254` for this pilot. A temporary-network check on proxmox5 used disposable
+VMs 8824 and 8825. DNS, Internet egress, team isolation, controller SSH, and the
+1450-byte MTU passed. Guacamole SSH to undeclared address `10.3.254.98` was
+blocked by the existing router rule, so proxmox5 has **not** been admitted by
+policy. Both probe VMs were removed after the checks. These results are partial
+network acceptance and do not widen the current P1 policy.
+
+Detailed storage discovery for NFS-backed storage has a latency issue. Until its
+detailed capacity, content, and locality query completes successfully, that
+storage is treated as unavailable for placement; summary storage data is not
+sufficient evidence for admission.
+
+The protected acceptance record at
 `/var/lib/crange-distribution/acceptance/alpine-p1-20261005.json` supports the
 published catalog image `alpine-3-24-20261005`, backed by VM template 8820 on
 Proxmox1 `local-lvm`. It records the archive restore and validated local linked
 clone path. Project 3's retained infrastructure plan reported **no resource
 changes**. Acceptance is limited to this image, node, storage and network scope.
-The catalog record has `captured_source_identity: false`, so source provenance
-is not fully captured even though the image is approved for this restricted
-pilot; resolve that gap before broadening catalog approval or placement scope.
+The existing catalog record still has `captured_source_identity: false`, so
+source provenance is not fully captured even though the image is approved for
+this restricted pilot. The deployed fixed identity-capture workflow documents
+how to close that gap; do so before broadening catalog approval or placement
+scope. Live policy and catalog were not changed as part of that deployment.
 Proxmox2 storage API discovery has been intermittent; placement safely falls
 back by excluding it when current storage evidence is unavailable. Proxmox4's
 configured commitments exceed its conservative admission window. Proxmox3 and
@@ -40,14 +54,15 @@ key-authenticated SSH to CT145; this does not require controller SSH access
 to Proxmox management addresses. The template backs the published catalog image
 `alpine-3-24-20261005` and is enabled only for the P1 pilot. Network acceptance
 is limited to `p003t254`. The catalog's `captured_source_identity: false` value
-remains a source-provenance limitation.
+remains a source-provenance limitation until the image is recaptured through
+the new identity-bound workflow.
 
 ## Implemented controls
 
 - `crange_catalog.py`: immutable logical versions, artifact checksums, approval scopes, unique template VMIDs and verified archive/replica identities.
 - `crange_placement.py`: deterministic batch admission, conservative memory/CPU/disk reserves, stopped-workload commitments, soft preferences, hard pins and a shared transactional SQLite reservation ledger. Running reservations do not expire automatically.
 - `crange_scheduling.py`: fresh whole-cluster discovery, existing placement preservation, retained-plan overrides, policy/catalog fingerprints, exact pre-apply checks, destination-node locks and applied placement records.
-- `crange_distribution.py`: immutable artifact publication, complete backup exports, central archived versions and local verified template caches, captured CT restore, disconnected disposable readiness/identity probes, durable allocation journals and serialized catalog writes.
+- `crange_distribution.py`: immutable artifact publication, complete backup exports, central archived versions and local verified template caches, captured CT restore, disconnected disposable readiness/identity probes, durable allocation journals and serialized catalog writes. A fixed identity-capture operation reads a running owned source's machine ID and Ed25519 SSH host key before template conversion; export binds that evidence to the source's stable configuration fingerprint, and publication carries the capture provenance into the catalog.
 - CLI/worker/GUI: new guest declarations accept Automatic and optional preferred nodes. Legacy `--node` remains a hard pin. Admin preparation jobs accept only fixed image/node/storage fields. Plan summaries expose reviewed placement and reservation details without controller credentials.
 - Terraform: every guest/router accepts resolved node, datastore and replica inputs. Stock archives and captured CT templates use separate provisioning paths. Linked clones require the exact local node/datastore, a verified linked replica, snapshot support and a controller-supplied proof flag for captured CTs. Legacy full-clone validation remains without this proof.
 - Runtime operations and rollout records use applied physical identity, independently of desired preferences.
@@ -60,7 +75,7 @@ Worker-owned files reside in `~/.config/crange`:
 
 - `distribution-policy.json`: revision, enabled flag, allowed nodes/storage, headroom and verified network/capability attestations. Start disabled.
 - `image-catalog.json`: immutable logical images and ready replicas; each published image needs a defensible `disk_gb`.
-- `distribution-identities/<image-id>.json`: captured machine and SSH host identities for disposable-clone verification.
+- `distribution-identities/<image-id>.json`: captured machine and SSH host identities for disposable-clone verification. The identity-capture job record is worker-journaled and must match the source node, type, ID, and stable configuration fingerprint at export time.
 
 The policy additionally specifies `approved_storage` and `approved_backup_storage` as node/storage pairs, `isolated_bridges`, `probe_bridge`, and `tested_paths`. `vm-cross-node-full-clone` and `captured-ct-restore` must only be recorded after live acceptance, not inferred from API schema support.
 
@@ -82,12 +97,34 @@ crange distribution-prepare debian-13-v1 --project 3 --node proxmox2 --storage l
 
 The worker operations are `template-distribution-inventory` and `template-distribution-prepare`, restricted to dashboard administrators. Export/publication commands are available through `python3 scripts/crange_distribution.py --help`; file paths are administrator CLI inputs and are not accepted by the GUI worker interface.
 
+For a captured source, run identity capture while the owned VM or container is
+running and before converting it to a template. It reads only fixed readiness
+and identity files; QEMU guests use the guest agent and containers use the
+controller's fixed `pct exec` adapter:
+
+```
+python3 scripts/crange_distribution.py \
+  --catalog /path/to/image-catalog.json \
+  --journal-dir /var/lib/crange-distribution/jobs \
+  --policy /path/to/distribution-policy.json \
+  identity-capture --node proxmox2 --kind vm --source-id 8809 \
+  --job-id capture-alpine-20261006
+```
+
+Save the emitted record as a protected administrator file. After stopping and
+converting the source to a template, pass that record to `export` with
+`--identity-record`. Export rejects a different source or a changed stable
+configuration fingerprint. `publish` then requires the exported identity and
+capture provenance alongside the existing artifact verification evidence.
+Identity records contain a machine ID and public SSH host key; retain them as
+release provenance.
+
 ## Remaining activation gates
 
 1. Dedicated CT145/NFS library and scoped storage/discovery permissions were deployed and verified on 2026-10-02; see [library-deployment.md](library-deployment.md). Independent backup/restore protection remains pending. Local linked-clone acceptance is complete only for the P1 Alpine pilot; broader clone/archive acceptance remains pending.
 2. Global read-only VM.Audit and library storage ACLs are installed; preserve those narrowly scoped roles and validate fresh discovery before admission.
-3. For each additional image or node, publish approved artifacts, associate logical IDs with template approvals, retain critical local recovery copies, and verify source identities and destination replicas. The current Alpine pilot still lacks captured source identity evidence.
-4. Verify cross-node VXLAN/MTU, controller and Guacamole access, DHCP/DNS, egress and isolation. Bridge availability alone is not acceptance.
+3. For each additional image or node, publish approved artifacts, associate logical IDs with template approvals, retain critical local recovery copies, and verify source identities and destination replicas. The current Alpine pilot still lacks captured source identity evidence; the catalog remains unchanged until the workflow is rerun and verified.
+4. Verify cross-node VXLAN/MTU, controller and Guacamole access, DHCP/DNS, egress and isolation. Proxmox5's temporary-VM checks passed these except Guacamole SSH to undeclared `.98`, which the existing rule blocked; keep proxmox5 outside policy admission until a reviewed path passes every required check. Bridge availability alone is not acceptance.
 5. Run the mixed-resource multi-node project, image-library outage, concurrent admission, interrupted provisioning and cross-node capture/test/rollout/rollback checks in DISTRIBUTION-PLAN.md before admitting additional nodes.
 6. Keep the current pilot restricted to proxmox1 until each additional node, image and network path passes its reviewed acceptance checks. Proxmox6 enrollment is a separate future decision.
 

@@ -333,8 +333,63 @@ class FileJournal:
             Path(temporary).unlink(missing_ok=True)
 
 
+def _source_config_identity(config):
+    # PVE changes these metadata fields when stopping/converting to a template.
+    stable = {key: value for key, value in config.items() if key not in {'template', 'lock', 'digest'}}
+    return hashlib.sha256(json.dumps(stable, sort_keys=True, separators=(',', ':')).encode()).hexdigest()
+
+
+def _fixed_guest_read(api, node, guest_type, vmid, command, ct_exec, timeout):
+    if guest_type == 'lxc':
+        if ct_exec is None: raise DistributionError('Fixed CT exec adapter is unavailable.')
+        return ct_exec(node, vmid, command).strip()
+    import time
+    response = api.request('POST', f'/nodes/{node}/qemu/{vmid}/agent/exec', {'command': command})
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        result = api.request('GET', f'/nodes/{node}/qemu/{vmid}/agent/exec-status', {'pid': int(response['pid'])})
+        if result.get('exited'):
+            if int(result.get('exitcode', -1)) != 0: raise DistributionError('Source identity command failed.')
+            return str(result.get('out-data', '')).strip()
+        time.sleep(1)
+    raise DistributionError('Source identity guest-agent check timed out.')
+
+
+def capture_source_identity(api, *, node, kind, vmid, job_id, journal, ct_exec=None, timeout=60, init_system='systemd'):
+    """Read fixed identity commands before reviewed stop/template conversion.
+
+    This never starts, stops or reconfigures a guest and cannot boot a template.
+    The trusted worker journals the result; GUI parameters cannot supply commands.
+    """
+    from crange_catalog import validate_source_identity
+    if (node not in {f'proxmox{i}' for i in range(1, 7)} or kind not in ('vm', 'container')
+            or type(vmid) is not int or vmid < 100 or not re.fullmatch(r'[a-zA-Z0-9-]{1,64}', job_id)
+            or init_system not in ('systemd', 'openrc') or not 1 <= timeout <= 180):
+        raise DistributionError('Invalid source identity capture scope.')
+    guest_type = 'qemu' if kind == 'vm' else 'lxc'
+    base = f'/nodes/{node}/{guest_type}/{vmid}'
+    config = api.request('GET', base + '/config')
+    _owned(config)
+    if int(config.get('template', 0)) or api.request('GET', base + '/status/current').get('status') != 'running':
+        raise DistributionError('Identity capture requires an owned running guest before template conversion.')
+    read = lambda command: _fixed_guest_read(api, node, guest_type, vmid, command, ct_exec, timeout)
+    readiness = read(['/usr/bin/systemctl', 'is-system-running'] if init_system == 'systemd' else ['/sbin/rc-status', '--runlevel'])
+    if readiness != ('running' if init_system == 'systemd' else 'default'):
+        raise DistributionError('Source guest is not ready for identity capture.')
+    identity = {'machine_id': read(['/bin/cat', '/etc/machine-id']),
+                'ssh_host_key': read(['/bin/cat', '/etc/ssh/ssh_host_ed25519_key.pub'])}
+    validate_source_identity(identity)
+    if config != api.request('GET', base + '/config') or api.request('GET', base + '/status/current').get('status') != 'running':
+        raise DistributionError('Source changed during identity capture; repeat capture.')
+    record = {'state': 'identity-captured', 'job_id': job_id, 'node': node, 'kind': kind,
+              'source_id': vmid, 'source_config_sha256': _source_config_identity(config),
+              'source_identity': identity, 'readiness': readiness, 'captured_at': datetime.now(timezone.utc).isoformat()}
+    journal(record)
+    return record
+
+
 def export_image(api, *, node, kind, vmid, storage, job_id, journal,
-                 hash_volume, approved_backup_storage):
+                 hash_volume, approved_backup_storage, identity_record=None):
     """Export an owned stopped guest/template via vzdump, including config.
 
     hash_volume(node, volume_id) is a trusted fixed transport adapter, never a
@@ -365,10 +420,17 @@ def export_image(api, *, node, kind, vmid, storage, job_id, journal,
                     raise DistributionError('Captured CT has an excluded/external mount.')
         if any(str(k).startswith(('lxc.mount', 'dev')) for k in config):
             raise DistributionError('Captured CT external mounts/devices are unsupported.')
+    from crange_catalog import validate_source_identity
+    if (not isinstance(identity_record, dict) or identity_record.get('state') != 'identity-captured'
+            or (identity_record.get('node'), identity_record.get('kind'), identity_record.get('source_id')) != (node, kind, vmid)
+            or identity_record.get('source_config_sha256') != _source_config_identity(config)):
+        raise DistributionError('Matching worker-captured source identity is required before export.')
+    validate_source_identity(identity_record.get('source_identity'))
     content_path = f'/nodes/{node}/storage/{storage}/content'
     before = {item['volid'] for item in api.request('GET', content_path)}
     record = dict(job_id=job_id, node=node, kind=kind, source_id=vmid,
                   storage=storage, state='exporting', disk_gb=disk_gb,
+                  source_identity=dict(identity_record['source_identity']), identity_capture=dict(identity_record),
                   memory_mb=int(config.get('memory', 0)), cpu_cores=int(config.get('cores', 0)))
     journal(record)
     upid = api.request('POST', f'/nodes/{node}/vzdump',
@@ -439,6 +501,14 @@ def publish_exported_image(catalog, image_id, export, *, architecture,
     if (export.get('state') != 'exported' or not export.get('complete_capture') or
             verification.get('passed') is not True or not verification.get('evidence')):
         raise DistributionError('Complete export and source verification evidence required.')
+    from crange_catalog import validate_source_identity
+    validate_source_identity(export.get('source_identity'))
+    capture = export.get('identity_capture', {})
+    if (capture.get('state') != 'identity-captured' or not capture.get('job_id')
+            or capture.get('source_identity') != export['source_identity']
+            or (capture.get('node'), capture.get('kind'), capture.get('source_id')) != (export['node'], export['kind'], export['source_id'])
+            or not re.fullmatch(r'[a-f0-9]{64}', capture.get('source_config_sha256', ''))):
+        raise DistributionError('Export is missing bound source identity capture provenance.')
     projects = normalize_projects(approved_projects)
     disk_gb = export.get('disk_gb')
     if not isinstance(disk_gb, (int, float)) or isinstance(disk_gb, bool) or not math.isfinite(disk_gb) or disk_gb <= 0:
@@ -446,6 +516,7 @@ def publish_exported_image(catalog, image_id, export, *, architecture,
     return publish_image(catalog, image_id, {
         'kind': export['kind'], 'architecture': architecture, 'disk_gb': disk_gb,
         'memory_mb': export.get('memory_mb'), 'cpu_cores': export.get('cpu_cores'),
+        'source_identity': dict(export['source_identity']), 'identity_capture': dict(capture),
         'artifact_sha256': export['artifact_sha256'],
         'artifact': {'volume_id': export['volume_id'], 'node': export['node'],
                      'format': 'vzdump', 'complete_capture': True, 'source_id': export['source_id']},
@@ -587,12 +658,19 @@ def main(argv=None):
                         help='Administrator policy including approved_storage/backup_storage/tested_paths')
     commands = parser.add_subparsers(dest='action', required=True)
     commands.add_parser('inventory')
+    capture = commands.add_parser('identity-capture')
+    capture.add_argument('--node', required=True)
+    capture.add_argument('--kind', choices=['vm', 'container'], required=True)
+    capture.add_argument('--source-id', type=int, required=True)
+    capture.add_argument('--job-id', required=True)
+    capture.add_argument('--init-system', choices=['systemd', 'openrc'], default='systemd')
     export = commands.add_parser('export')
     export.add_argument('--node', required=True)
     export.add_argument('--kind', choices=['vm', 'container'], required=True)
     export.add_argument('--source-id', type=int, required=True)
     export.add_argument('--storage', required=True)
     export.add_argument('--job-id', required=True)
+    export.add_argument('--identity-record', type=Path, required=True)
     publish = commands.add_parser('publish')
     publish.add_argument('--export-record', type=Path, required=True)
     publish.add_argument('--verification', type=Path, required=True)
@@ -620,12 +698,18 @@ def main(argv=None):
     journal = FileJournal(args.journal_dir)
     if args.action == 'inventory':
         print(json.dumps(discover(api, policy.get('placement', DEFAULT_POLICY)), indent=2))
+    elif args.action == 'identity-capture':
+        with node_locks([args.node]), journal.allocation_lock():
+            record = capture_source_identity(api, node=args.node, kind=args.kind, vmid=args.source_id,
+                job_id=args.job_id, journal=journal, ct_exec=SSHContainerExec(), init_system=args.init_system)
+        print(json.dumps(record, indent=2))
     elif args.action == 'export':
         with node_locks([args.node], library=True), journal.allocation_lock():
             record = export_image(api, node=args.node, kind=args.kind,
                 vmid=args.source_id, storage=args.storage, job_id=args.job_id,
                 journal=journal, hash_volume=SSHVolumeHasher(),
-                approved_backup_storage=map(tuple, policy.get('approved_backup_storage', [])))
+                approved_backup_storage=map(tuple, policy.get('approved_backup_storage', [])),
+                identity_record=json.loads(args.identity_record.read_text()))
         print(json.dumps(record, indent=2))
     elif args.action == 'publish':
         export_record = json.loads(args.export_record.read_text())
