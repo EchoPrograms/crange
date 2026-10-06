@@ -7,7 +7,7 @@ import unittest
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1] / 'scripts'))
 from crange_catalog import CatalogError, publish_image, validate_catalog
-from crange_placement import PlacementError, ReservationLedger, schedule_batch
+from crange_placement import PlacementError, ReservationLedger, capacity_window, schedule_batch
 
 
 def fixtures():
@@ -169,6 +169,21 @@ class PlacementTests(unittest.TestCase):
             schedule_batch([r], inv, cat, pol, now=100)
         pol['local_linked_disk_overcommit_ratio'] = 1.6
         with self.assertRaisesRegex(PlacementError, 'ceiling'):
+            schedule_batch([r], inv, cat, pol, now=100)
+
+    def test_linked_disk_overcommit_never_multiplies_physical_free_space(self):
+        r, inv, cat, pol = fixtures()
+        pol['allowed_nodes'] = ['n1']
+        pol['local_linked_disk_overcommit_ratio'] = 1.5
+        storage = inv['nodes']['n1']['storages']['local']
+        # 20% reserve is 40 GB, leaving just 10 GB of physical write headroom.
+        storage.update(total_gb=200, free_gb=50, committed_gb=50)
+        window = capacity_window(inv['nodes']['n1'], pol, 'n1', storage, 'linked')
+        self.assertEqual(window['disk_gb'], 10)
+        # The former calculation multiplied that physical headroom by 1.5 and
+        # admitted this 13.2 GB request despite only 10 GB being safely free.
+        r['disk_gb'] = 12
+        with self.assertRaisesRegex(PlacementError, 'no eligible placement'):
             schedule_batch([r], inv, cat, pol, now=100)
 
     def test_batch_determinism_reserves_and_network_gate(self):

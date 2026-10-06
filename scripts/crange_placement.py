@@ -63,7 +63,10 @@ def capacity_window(node, policy, node_name, storage=None, clone_mode='linked'):
         result.update(disk_limit_gb=limit, disk_reserve_gb=reserve,
                       disk_ratio=ratio,
                       disk_gb=min(limit - _number(storage.get('committed_gb'), 'storage commitments'),
-                                  (free - reserve) * ratio))
+                                  # Overcommit applies to configured virtual disk
+                                  # commitments only. Physical free space must
+                                  # cover every possible new write byte-for-byte.
+                                  free - reserve))
     return result
 
 
