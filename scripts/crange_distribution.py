@@ -349,9 +349,17 @@ class FileJournal:
             Path(temporary).unlink(missing_ok=True)
 
 
-def _source_config_identity(config):
+def _source_config_identity(config, vmid):
     # PVE changes these metadata fields when stopping/converting to a template.
     stable = {key: value for key, value in config.items() if key not in {'template', 'lock', 'digest'}}
+    # Template conversion renames only this VM's disk volume prefix from
+    # vm-<id>-disk-N to base-<id>-disk-N. Normalize that exact volume identity;
+    # datastore, disk number, size/options, and every other config field remain
+    # part of the fingerprint.
+    volume = re.compile(rf'(?P<storage>[A-Za-z0-9_.-]+:)(?:vm|base)-{int(vmid)}-disk-(?P<number>[0-9]+)(?=,|$)')
+    for key, value in stable.items():
+        if isinstance(value, str):
+            stable[key] = volume.sub(lambda match: f'{match["storage"]}vm-{int(vmid)}-disk-{match["number"]}', value)
     return hashlib.sha256(json.dumps(stable, sort_keys=True, separators=(',', ':')).encode()).hexdigest()
 
 
@@ -413,7 +421,7 @@ def capture_source_identity(api, *, node, kind, vmid, job_id, journal, ct_exec=N
     if config != api.request('GET', base + '/config') or api.request('GET', base + '/status/current').get('status') != 'running':
         raise DistributionError('Source changed during identity capture; repeat capture.')
     record = {'state': 'identity-captured', 'job_id': job_id, 'node': node, 'kind': kind,
-              'source_id': vmid, 'source_config_sha256': _source_config_identity(config),
+              'source_id': vmid, 'source_config_sha256': _source_config_identity(config, vmid),
               'source_identity': identity, 'init_system': init_system, 'readiness': readiness,
               'captured_at': datetime.now(timezone.utc).isoformat()}
     journal(record)
@@ -455,7 +463,7 @@ def export_image(api, *, node, kind, vmid, storage, job_id, journal,
     from crange_catalog import validate_source_identity
     if (not isinstance(identity_record, dict) or identity_record.get('state') != 'identity-captured'
             or (identity_record.get('node'), identity_record.get('kind'), identity_record.get('source_id')) != (node, kind, vmid)
-            or identity_record.get('source_config_sha256') != _source_config_identity(config)
+            or identity_record.get('source_config_sha256') != _source_config_identity(config, vmid)
             or identity_record.get('init_system') not in ('systemd', 'openrc')
             or identity_record.get('readiness') != ('running' if identity_record['init_system'] == 'systemd' else 'default')):
         raise DistributionError('Matching worker-captured source identity is required before export.')

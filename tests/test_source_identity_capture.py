@@ -6,12 +6,26 @@ import sys
 import unittest
 from unittest.mock import Mock, call
 sys.path.insert(0,str(pathlib.Path(__file__).resolve().parents[1]/'scripts'))
-from crange_distribution import capture_source_identity, export_image, DistributionError
+from crange_distribution import capture_source_identity, export_image, DistributionError, _source_config_identity
 from crange_catalog import validate_source_identity, CatalogError
 
 KEY='ssh-ed25519 '+base64.b64encode(struct.pack('>I',11)+b'ssh-ed25519'+struct.pack('>I',32)+b'a'*32).decode()
 
 class CaptureTests(unittest.TestCase):
+    def test_template_conversion_only_normalizes_same_guest_disk_prefix(self):
+        before = {'scsi0': 'local-lvm:vm-8830-disk-0,size=20G', 'memory': 512,
+                  'net0': 'virtio=AA:BB,bridge=crprobe1450,link_down=1'}
+        after = {**before, 'template': 1,
+                 'scsi0': 'local-lvm:base-8830-disk-0,size=20G'}
+        self.assertEqual(_source_config_identity(before, 8830),
+                         _source_config_identity(after, 8830))
+        changed = {**after, 'scsi0': 'local-lvm:base-8830-disk-0,size=21G'}
+        self.assertNotEqual(_source_config_identity(before, 8830),
+                            _source_config_identity(changed, 8830))
+        other = {**after, 'unused0': 'local-lvm:base-8831-disk-0,size=20G'}
+        self.assertNotEqual(_source_config_identity(before, 8830),
+                            _source_config_identity(other, 8830))
+
     def fixture(self,kind='container'):
         config={'tags':'crange-image','memory':512,'cores':1,'rootfs':'local-lvm:vm-100-disk-0,size=8G'}
         def request(method,path,fields=None):
