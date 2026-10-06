@@ -285,3 +285,58 @@ source binding, exact Guac QGA origin and authentication-disabled handshake.
 They have not yet been executed against live infrastructure. Cross-node MTU,
 firewall-backed isolation, reservation integration and complete receipts remain
 required before publishing automatic-placement network attestations.
+
+## Complete controller CLI
+
+`scripts/crange_network_workflow.py` combines the concrete adapters with the
+shared reservation ledger. It remains root-only and has no GUI/job-queue action.
+Use `preflight <job-id>` for read-only guest/desired-state checks, `run <job-id>`
+for one owned lifecycle, and `reconcile <job-id>` for exact cleanup after an
+interruption. The run retains six command-level artifacts, the inspected plans,
+a cleanup artifact and a validated receipt. It never changes placement policy.
+
+The protected manifest additionally binds an approved ready local VM replica
+under `source` (`image_id`, `template_id`, `datastore_id`, `config_sha256`), all
+project input hashes under `project_input_sha256`, exact management origins,
+another regular `other_team_id`, and the reviewed 40-character source revision.
+The CLI checks the catalog's project approval and source configuration identity,
+local full clone, 512–4096 MiB memory, 1–2 cores, at most 32 GiB source/disks, and
+approved storage. It derives/validates the team router from project Terraform
+outputs and actual router CT tags/downstream interface. Custom LAN router
+origins remain unsupported; their different upstream topology needs an explicit
+adapter. Service credential/key files retain their existing root-or-`crange`
+ownership with restrictive permissions; they are never copied or printed.
+
+Reservation uses the shared capacity/quota ledger and includes the exact probe
+VMID and LAN static address. Conflicting active probe leases, occupied VMIDs and
+desired/live static addresses are rejected. The existing node/library locks are
+held across the lifecycle. Production callers must still serialize independent
+project edits: the CLI compares all project input hashes before create and after
+cleanup and rejects drift. Ordinary team deployment retains its image, provider,
+capacity and network trust gates.
+
+Actual guest checks now include:
+
+- Cross-node VNet/routed path: router node must differ, NIC MTU and expected
+  default route/source must match, iputils is mandatory, 1422-byte payload DF
+  ping to `1.1.1.1` succeeds, and 1423-byte payload fails locally as too large.
+- DNS queries OPNsense `10.60.2.1`. DHCP checks the declared `.101`–`.254` range
+  and options, performs bounded DORA with a no-op lease script, releases its
+  lease, and explicitly restores the static address/default route before
+  verifying routing. This does not change project firewall policy.
+- Internet uses bounded HTTPS to `example.com`.
+- Controller and Guac use their actual fixed origins described above.
+- Isolation requires a working public positive control, bounded TCP attempts to
+  another team gateway, project transit gateway, controller and Guac, and a
+  small positive increment of the exact existing static `ufw-before-forward`
+  `10.0.0.0/8` DROP rule for each attempt. Counter resets or large background
+  deltas fail evidence. These shared counters are operational evidence rather
+  than per-source packet capture; avoid concurrent noisy traffic during testing.
+
+Recovery bypasses source-image approval/current project revision requirements:
+retiring an image or editing desired state must not prevent owned cleanup. It
+uses the saved router identity, exact live probe ownership, inspected one-delete
+plan, actual absence checks and shared reservation scope. Reservations remain
+held if node provider tasks are still active. No acceptance receipt is generated
+by recovery. Queue integration remains blocked on cooperative cancellation and
+startup reconciliation; a killed process must never trigger blind reallocation.

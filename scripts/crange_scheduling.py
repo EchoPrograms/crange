@@ -538,6 +538,7 @@ def required_preparations(path, cfg, *, api=None):
                 'cpu_cores':int(box.get('cores',1 if row['kind']=='container' else 2)),
                 'disk_gb':image['disk_gb']*(1+policy.get('copy_overhead_fraction',.1))}
         for node_name,node in sorted(working['nodes'].items()):
+            if row['kind'] not in node.get('guest_types', []):continue
             if intent.get('pinned_node',node_name)!=node_name or node_name not in intent.get('allowed_nodes',policy['allowed_nodes']):continue
             if not node.get('management_verified') or not set(row['networks'])<=set(node.get('verified_networks',[])):continue
             if not set(image.get('required_features',[]))<=set(node.get('features',[])):continue

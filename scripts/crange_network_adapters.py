@@ -11,6 +11,7 @@ import hashlib
 import ipaddress
 import json
 import os
+import pwd
 from pathlib import Path
 import shlex
 import socket
@@ -35,6 +36,17 @@ def protected(path, *, directory=False):
             'Network probe inputs must be root-owned and not writable by group/others.')
     require(stat.S_ISDIR(info.st_mode) if directory else stat.S_ISREG(info.st_mode),
             'Network probe input has the wrong file type.')
+    return path
+
+
+def worker_file(path, *, private=False):
+    """Existing controller-worker inputs may belong to root or crange service."""
+    path=Path(path)
+    info=path.lstat()
+    require(stat.S_ISREG(info.st_mode) and not stat.S_ISLNK(info.st_mode), 'Worker input must be a regular file.')
+    trusted={0,pwd.getpwnam('crange').pw_uid}
+    require(info.st_uid in trusted and not info.st_mode & (0o077 if private else 0o022),
+            'Worker input ownership/permissions are unsafe.')
     return path
 
 
@@ -79,8 +91,7 @@ class SavedTerraformProbe:
 
     def _env(self):
         values = {}
-        credential_file = protected(CREDENTIALS)
-        require(credential_file.stat().st_mode & 0o077 == 0, 'API credentials need owner-only permissions.')
+        credential_file = worker_file(CREDENTIALS,private=True)
         for line in credential_file.read_text().splitlines():
             line = line.removeprefix('export ').strip()
             key, sep, raw = line.partition('=')
@@ -89,6 +100,9 @@ class SavedTerraformProbe:
                 require(len(parsed) == 1, 'Invalid protected API credential format.')
                 values[key] = parsed[0]
         require(set(values) == {'PROXMOX_VE_ENDPOINT','PROXMOX_VE_API_TOKEN'}, 'Protected API configuration incomplete.')
+        from crange_proxmox_compat import reviewed_identity
+        identity=reviewed_identity()
+        if identity['enabled']:values['PROXMOX_VE_ENDPOINT']=identity['endpoint']
         return {'PATH':'/usr/local/bin:/usr/bin:/bin', 'HOME':'/root',
                 'PROXMOX_VE_INSECURE':'true', **values}
 
@@ -102,6 +116,9 @@ class SavedTerraformProbe:
         return {'operation':operation,'plan_sha256':digest}
 
     def state_addresses(self):
+        if not (self.root/'terraform.tfstate').exists():
+            require(not (self.root/'terraform.tfstate.backup').exists(), 'Missing current state with backup needs reconciliation.')
+            return []
         result=self.run(['terraform','state','list'],cwd=self.root,env=self._env(),
                         capture_output=True,text=True,timeout=30,check=False)
         require(result.returncode == 0, 'Cannot inspect standalone probe state.')
@@ -175,7 +192,7 @@ class OwnedQGADiagnostics:
             'address':['/bin/busybox','ip','-4','address','show','dev','eth0'],
             'routes':['/bin/busybox','ip','-4','route','show'],
             'mtu':['/bin/busybox','cat','/sys/class/net/eth0/mtu'],
-            'dns':['/bin/busybox','timeout','15','/bin/busybox','nslookup','example.com',gateway],
+            'dns':['/bin/busybox','timeout','15','/bin/busybox','nslookup','example.com','10.60.2.1'],
             'egress':['/bin/busybox','timeout','15','/bin/busybox','wget','-q','-O','/dev/null','https://example.com/'],
         }
         require(diagnostic in commands, 'Unknown fixed diagnostic.')
@@ -214,7 +231,7 @@ class FixedRouterUFW:
     adapter is not exposed to HTTP and never edits OPNsense. Unknown/mismatched
     rule lines are rejected, rather than deleting by a mutable numeric index.
     """
-    KEY = Path('/etc/crange/network-probe-ssh-key')
+    KEY = Path('/home/crange/.ssh/id_ed25519_range')
 
     def __init__(self, target, *, project_router, team_router, run=subprocess.run):
         self.target=scope(**target)
@@ -224,10 +241,10 @@ class FixedRouterUFW:
                 'Project router must use declared shared transit.')
         require(team in ipaddress.ip_network(f'10.{target["project_id"]}.0.0/24')
                 and 2 <= int(str(team).split('.')[-1]) <= 254, 'Team router must use project transit.')
-        key=protected(self.KEY)
-        require(key.stat().st_mode & 0o077 == 0, 'Probe SSH key requires owner-only permissions.')
+        worker_file(self.KEY,private=True)
+        worker_file('/home/crange/.ssh/known_hosts')
         self.prefix=['ssh','-o','BatchMode=yes','-o','StrictHostKeyChecking=yes',
-                     '-o','ConnectTimeout=5','-i',str(self.KEY),'-J','root@'+str(project),'root@'+str(team)]
+                     '-o','ConnectTimeout=5','-o','UserKnownHostsFile=/home/crange/.ssh/known_hosts','-i',str(self.KEY),'-J','root@'+str(project),'root@'+str(team)]
         self.run=run
 
     def _rule(self, target, rule):
@@ -237,8 +254,18 @@ class FixedRouterUFW:
         return expected
 
     def _execute(self, arguments):
-        result=self.run(self.prefix+[shlex.join(['/usr/sbin/ufw',*arguments])],
-                        capture_output=True,text=True,timeout=20,check=False)
+        return self._fixed_ssh(['/usr/sbin/ufw',*arguments])
+
+    def observe(self, observation, *, timeout=5):
+        commands={'firewall_counters':['/usr/sbin/iptables-save','-c'],
+                  'dhcp_config':['/bin/cat','/etc/dnsmasq.d/crange-dhcp.conf']}
+        require(observation in commands, 'Unknown fixed router observation.')
+        return self._fixed_ssh(commands[observation],timeout=timeout)
+
+    def _fixed_ssh(self, command, *, timeout=20):
+        require(type(timeout) in (int,float) and 0 < timeout <= 20, 'Router observation deadline must be bounded.')
+        result=self.run(self.prefix+[shlex.join(command)],
+                        capture_output=True,text=True,timeout=timeout,check=False)
         require(result.returncode == 0, 'Fixed router rule operation failed.')
         require(len(result.stdout.encode()) <= 65536, 'Router rule output exceeded bound.')
         return result.stdout

@@ -167,4 +167,24 @@ class SchedulingTests(unittest.TestCase):
             self.assertEqual((root/'public').stat().st_mode & 0o777,0o750)
             self.assertEqual((root/'private').stat().st_mode & 0o777,0o700)
 
+    def test_admin_container_cache_flag_does_not_admit_normal_staging_guests(self):
+        policy={'enabled':True,'revision':'ct-bootstrap','allowed_nodes':['proxmox2'],
+                'nodes':{'proxmox2':{'container_cache_preparation_allowed':True}}}
+        catalog={'images':{'ct':{'kind':'container','disk_gb':4,'replicas':[]}}}
+        row={'resource_key':'container:test','kind':'container','image':'ct',
+             'networks':['p003t254'],'box':{'node_name':'auto','memory_mb':512,'cores':1}}
+        node={'guest_types':['vm'],'management_verified':True,'verified_networks':['p003t254'],
+              'features':[],'storages':{'local-lvm':{}}}
+        with tempfile.TemporaryDirectory() as directory:
+            path=pathlib.Path(directory)
+            with patch.object(scheduling,'DATA',path/'data'), \
+                 patch.object(scheduling,'read_settings',return_value=(policy,catalog)), \
+                 patch.object(scheduling,'declarations',return_value=[row]), \
+                 patch.object(scheduling,'applied_resources',return_value={}), \
+                 patch.object(scheduling,'discover',return_value={'nodes':{'proxmox2':node}}), \
+                 patch('crange_distribution.required_capacity',side_effect=AssertionError('Guest cache planning bypassed provider gate')) as cache:
+                with self.assertRaises(PlacementError):
+                    scheduling.required_preparations(path,{'project_id':3},api=API())
+                cache.assert_not_called()
+
 if __name__=='__main__': unittest.main()

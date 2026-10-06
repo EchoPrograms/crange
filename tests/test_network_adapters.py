@@ -104,6 +104,9 @@ class RouterAdapterTests(unittest.TestCase):
         key=pathlib.Path(temporary.name)/'key'
         key.write_text('test-only-placeholder')
         key.chmod(0o600)
+        worker_patcher=patch.object(adapters,'worker_file',side_effect=lambda p,**_:pathlib.Path(p))
+        worker_patcher.start()
+        self.addCleanup(worker_patcher.stop)
         patcher=patch.object(adapters.FixedRouterUFW,'KEY',key)
         patcher.start()
         self.addCleanup(patcher.stop)
