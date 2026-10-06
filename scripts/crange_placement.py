@@ -341,7 +341,7 @@ class ReservationLedger:
 
     def reserve_source_probe(self, *, project_id, job_id, owner, source_ref,
                              source_sha256, node_name, datastore_id, capacity,
-                             inventory, policy, now=None, kind="vm", clone_mode="full"):
+                             inventory, policy, now=None, kind="vm", clone_mode="full", network_scope=None):
         """Reserve one direct, disposable source-verification clone.
 
         This reservation is deliberately independent of the immutable image
@@ -349,6 +349,21 @@ class ReservationLedger:
         Its allocation records the exact source reference/config fingerprint.
         """
         now = time.time() if now is None else now
+        if network_scope is not None:
+            from crange_network_acceptance import scope as validate_network_scope
+            try:
+                network_scope = validate_network_scope(**network_scope)
+            except (ValueError, TypeError, KeyError) as error:
+                raise PlacementError('Invalid exact network-probe scope') from error
+            if (network_scope['project_id'] != project_id or network_scope['node'] != node_name
+                    or network_scope['job_id'] != job_id or kind != 'vm' or clone_mode != 'full'):
+                raise PlacementError('network probe must be one exact scoped full VM clone')
+            if str(network_scope['vmid']) in inventory.get('guests', {}):
+                raise PlacementError('network probe VMID is already allocated')
+            if not isinstance(inventory.get('declared_addresses'), list):
+                raise PlacementError('network probe requires a desired/live static address inventory')
+            if network_scope['address'].split('/')[0] in inventory['declared_addresses']:
+                raise PlacementError('network probe address is already declared')
         if clone_mode not in ('full', 'linked') or (clone_mode == 'linked' and kind != 'container'):
             raise PlacementError('linked source probes require an explicit container source')
         if kind not in ('vm', 'container'):
@@ -389,6 +404,14 @@ class ReservationLedger:
                 raise PlacementError('linked source-probe storage lacks local snapshot proof')
             window = capacity_window(node, policy, node_name, storage, clone_mode)
             pending = self.active_reservations()
+            if network_scope is not None:
+                for (encoded,) in self.db.execute("SELECT allocations FROM jobs WHERE state != 'released'"):
+                    for reserved in json.loads(encoded):
+                        other = reserved.get('network_scope', {})
+                        if (other.get('vmid') == network_scope['vmid'] or
+                                (other.get('vnet') == network_scope['vnet'] and
+                                 other.get('address') == network_scope['address'])):
+                            raise PlacementError('network probe VMID/address is already reserved')
             available = {
                 'memory_mb': window['memory_mb'] - sum(r['memory_mb'] for r in pending if r['node_name'] == node_name),
                 'cpu_cores': window['cpu_cores'] - sum(r['cpu_cores'] for r in pending if r['node_name'] == node_name),
@@ -409,6 +432,10 @@ class ReservationLedger:
                 'resources': demand, 'headroom': {key: available[key] - demand[key] for key in demand},
                 'policy_revision': policy['revision'], 'reservation_id': str(uuid.uuid4()),
                 'reason': 'Direct source acceptance clone and isolated disposable probe'}
+            if network_scope is not None:
+                allocation.update(operation='network_probe', network_scope=network_scope,
+                    resource_key='network-probe:' + network_scope['vnet'],
+                    reason='Fixed owned disposable network acceptance probe')
             self.db.execute('INSERT INTO jobs VALUES (?, ?, ?, ?, ?, ?, ?)',
                 (job_id, project_id, owner, 'reviewed', now + policy.get('review_ttl_seconds', 3600), now,
                  json.dumps([allocation], sort_keys=True)))
@@ -417,6 +444,22 @@ class ReservationLedger:
         except Exception:
             self.db.execute('ROLLBACK')
             raise
+
+    def reserve_network_probe(self, *, target, owner, source_ref, source_sha256,
+                              datastore_id, capacity, inventory, policy, now=None):
+        """Shared capacity plus globally unique probe VMID/exact LAN static lease.
+
+        Uses the existing full-clone resource budget and all normal capacity,
+        node, storage and quota gates. Network trust is intentionally not a
+        prerequisite for the probe that measures it. The privileged caller must
+        separately verify approved source identity and collect desired/live
+        static addresses in inventory.declared_addresses under its project lock.
+        """
+        return self.reserve_source_probe(project_id=target['project_id'],
+            job_id=target['job_id'], owner=owner, source_ref=source_ref,
+            source_sha256=source_sha256, node_name=target['node'],
+            datastore_id=datastore_id, capacity=capacity, inventory=inventory,
+            policy=policy, now=now, kind='vm', clone_mode='full', network_scope=target)
 
     def validate_job(self, job_id, now=None):
         now = time.time() if now is None else now
