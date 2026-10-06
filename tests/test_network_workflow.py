@@ -102,6 +102,19 @@ class WorkflowTests(unittest.TestCase):
 
     def backend(self):return workflow.NetworkAcceptanceBackend(self.saved,self.api,self.ledger,run=self.run)
 
+    def test_active_task_check_uses_supported_proxmox_filter(self):
+        calls=[]
+        class API:
+            def request(self,method,path,fields=None):
+                calls.append((method,path,fields))
+                return []
+        self.assertTrue(workflow.no_active_node_tasks(API(),'proxmox1'))
+        self.assertEqual(calls,[('GET','/nodes/proxmox1/tasks',{'source':'active'})])
+
+        class BusyAPI:
+            def request(self,method,path,fields=None):return [{'upid':'active-task'}]
+        self.assertFalse(workflow.no_active_node_tasks(BusyAPI(),'proxmox2'))
+
     def test_full_lifecycle_reserves_runs_six_artifacts_cleans_and_releases(self):
         backend=self.backend()
         tick=iter(range(100))

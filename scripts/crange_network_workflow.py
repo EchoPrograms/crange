@@ -23,6 +23,12 @@ def digest(value):
     return hashlib.sha256(json.dumps(value,sort_keys=True,separators=(',',':')).encode()).hexdigest()
 
 
+def no_active_node_tasks(api, node):
+    tasks = api.request('GET', f'/nodes/{node}/tasks', {'source': 'active'})
+    require(isinstance(tasks, list), 'Active Proxmox task response is invalid.')
+    return not tasks
+
+
 class NetworkAcceptanceBackend:
     def __init__(self, saved, api, ledger, *, run=subprocess.run):
         self.saved=saved
@@ -190,7 +196,7 @@ class NetworkAcceptanceBackend:
     def release_reservation(self,target):
         require(self.vmid_absent(target) and self.probe_state_empty(target) and self.temporary_rules_absent(target),
                 'Reservation cannot release before cleanup.')
-        require(not self.api.request('GET',f'/nodes/{target["node"]}/tasks',{'running':1}),
+        require(no_active_node_tasks(self.api, target['node']),
                 'Node has active tasks; retain reservation until independent task reconciliation.')
         self.ledger.reconcile_job(target['job_id'],operation_terminal=True,allocations_reconciled=True)
 
@@ -218,7 +224,7 @@ def main():
                 allocations=ledger.validate_job(saved.target['job_id'])
                 require(len(allocations)==1 and allocations[0].get('operation')=='network_probe'
                         and allocations[0].get('network_scope')==saved.target, 'Reconcile reservation owner differs.')
-                require(not api.request('GET',f'/nodes/{saved.target["node"]}/tasks',{'running':1}),
+                require(no_active_node_tasks(api, saved.target['node']),
                         'Node tasks still active; retain reconciled reservation.')
                 ledger.reconcile_job(saved.target['job_id'],operation_terminal=True,allocations_reconciled=True)
                 journal=json.loads((saved.root/'journal.json').read_text())
