@@ -91,10 +91,14 @@ class FileJournalTests(unittest.TestCase):
             journal = FileJournal(Path(directory))
             initial = {'job_id': 'source-probe-1', 'state': 'allocated',
                        'node': 'proxmox1', 'image_id': 'source:proxmox1:qemu:8830',
-                       'datastore_id': 'local-lvm'}
+                       'datastore_id': 'local-lvm', 'template_id': 147}
             journal(initial)
             reconciled = {**initial, 'state': 'reconciled-absent',
-                          'absence_verified': True}
+                          'absence_verified': True, 'absence_evidence': {
+                              'verified': True, 'node': 'proxmox1', 'template_id': 147,
+                              'inventory_complete': True, 'target_absent': True,
+                              'active_task_scan_complete': True, 'history_scan_complete': True,
+                              'cluster_guest_inventory_sha256': 'a' * 64}}
             journal(reconciled)
             retry = {**initial, 'job_id': 'source-probe-2'}
             journal(retry)
@@ -106,7 +110,8 @@ class FileJournalTests(unittest.TestCase):
                        'node': 'proxmox1', 'provider_tasks': [{'upid': UPID, 'state': 'running'}]}
             journal(initial)
             with self.assertRaisesRegex(DistributionError, 'task-free'):
-                journal({**initial, 'state': 'reconciled-absent', 'absence_verified': True})
+                journal({**initial, 'state': 'reconciled-absent', 'absence_verified': True,
+                         'absence_evidence': {'verified': True}})
 
     def test_job_state_cannot_move_backwards(self):
         with tempfile.TemporaryDirectory() as directory:

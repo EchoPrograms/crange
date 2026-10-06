@@ -389,6 +389,110 @@ class ReplicaTests(unittest.TestCase):
             self.assertTrue(worker_cls.call_args.kwargs['reservation_validator'](
                 allocation, 'proxmox1', 'local-lvm', required_capacity(catalog['images']['base-v1'])))
 
+class CacheRecoveryTests(unittest.TestCase):
+    def test_cache_bridge_defaults_only_to_one_approved_bridge(self):
+        from crange_cache_jobs import select_probe_bridge
+        self.assertEqual(select_probe_bridge({'isolated_bridges': ['crprobe1450']}), 'crprobe1450')
+        self.assertEqual(select_probe_bridge({'isolated_bridge': 'crprobe1450',
+                                              'isolated_bridges': ['other', 'crprobe1450']}),
+                         'crprobe1450')
+        with self.assertRaisesRegex(DistributionError, 'not in isolated_bridges'):
+            select_probe_bridge({'isolated_bridge': 'vmbr0', 'isolated_bridges': ['crprobe1450']})
+        with self.assertRaisesRegex(DistributionError, 'multiple isolated_bridges'):
+            select_probe_bridge({'isolated_bridges': ['crprobe1450', 'crprobe1500']})
+
+    def test_absent_cache_reconciliation_releases_only_exact_verified_job(self):
+        import time
+        import crange_cache_jobs as cache_jobs
+        from crange_distribution import FileJournal
+        digest = 'd' * 64
+        job_id = 'cache-' + 'a' * 32
+        image_id = 'alpine-test'
+        volume = 'crange-library:backup/vzdump-qemu-8830.vma.zst'
+        reservation = {'image': image_id, 'artifact_sha256': digest,
+            'resolved': {'node_name': 'proxmox2', 'datastore_id': 'local-lvm'},
+            'resources': {'memory_mb': 512, 'cpu_cores': 1, 'disk_gb': 42}}
+        record = {'job_id': job_id, 'image_id': image_id, 'node': 'proxmox2',
+            'datastore_id': 'local-lvm', 'state': 'allocated', 'kind': 'qemu',
+            'source_node': 'proxmox1', 'source_id': 8830, 'artifact_sha256': digest,
+            'reservation': reservation, 'template_id': 147, 'allocation_node': 'proxmox2',
+            'created_at': time.time()}
+
+        class API:
+            def __init__(self, resources=(), active=(), history=()):
+                self.resources, self.active, self.history = resources, active, history
+            def request(self, method, path, fields=None):
+                if path == '/nodes':
+                    return [{'node': f'proxmox{i}', 'status': 'online'} for i in range(1, 6)]
+                if path == '/cluster/resources': return list(self.resources)
+                if path.endswith('/tasks') and fields.get('source') == 'active': return list(self.active)
+                if path.endswith('/tasks') and fields.get('source') == 'all': return list(self.history)
+                raise AssertionError(path)
+
+        catalog = {'images': {image_id: {'artifact_sha256': digest,
+            'artifact': {'volume_id': volume, 'node': 'proxmox1', 'source_id': 8830}, 'replicas': []}}}
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            journal = FileJournal(root / 'cache-journal')
+            journal(record)
+            pins = root / 'artifact-pins'; pins.mkdir()
+            pin_path = pins / (job_id + '.json')
+            pin_path.write_text(json.dumps({'volume_id': volume, 'artifact_sha256': digest,
+                                            'job_id': job_id, 'state': 'active'}))
+            ledger = Mock()
+            ledger.get_job.return_value = {'state': 'running', 'project_id': 3,
+                                           'allocations': [reservation]}
+            with patch.object(cache_jobs, '_root', return_value=root):
+                result = cache_jobs._reconcile_absent_cache_job(job_id, record.copy(),
+                    catalog=catalog, api=API(), journal=journal, ledger=ledger)
+            self.assertEqual(result['state'], 'released')
+            ledger.reconcile_job.assert_called_once_with(job_id, operation_terminal=True,
+                                                         allocations_reconciled=True)
+            saved = json.loads((root / 'cache-journal' / (job_id + '.json')).read_text())
+            self.assertEqual(saved['state'], 'reconciled-absent')
+            self.assertTrue(saved['absence_verified'])
+            self.assertFalse(pin_path.exists())
+
+    def test_absent_cache_reconciliation_fails_closed_on_guest_or_task(self):
+        import time
+        import crange_cache_jobs as cache_jobs
+        from crange_distribution import FileJournal
+        digest = 'e' * 64; image_id = 'alpine-test'; job_id = 'cache-' + 'b' * 32
+        volume = 'crange-library:backup/vzdump-qemu-8830.vma.zst'
+        reservation = {'image': image_id, 'artifact_sha256': digest,
+            'resolved': {'node_name': 'proxmox2', 'datastore_id': 'local-lvm'},
+            'resources': {'memory_mb': 512, 'cpu_cores': 1, 'disk_gb': 42}}
+        record = {'job_id': job_id, 'image_id': image_id, 'node': 'proxmox2',
+            'datastore_id': 'local-lvm', 'state': 'allocated', 'kind': 'qemu',
+            'source_node': 'proxmox1', 'source_id': 8830, 'artifact_sha256': digest,
+            'reservation': reservation, 'template_id': 147, 'allocation_node': 'proxmox2',
+            'created_at': time.time()}
+        class API:
+            def __init__(self, resources=(), active=(), history=()):
+                self.resources, self.active, self.history = resources, active, history
+            def request(self, method, path, fields=None):
+                if path == '/nodes': return [{'node': f'proxmox{i}', 'status': 'online'} for i in range(1, 6)]
+                if path == '/cluster/resources': return list(self.resources)
+                if path.endswith('/tasks') and fields.get('source') == 'active': return list(self.active)
+                if path.endswith('/tasks') and fields.get('source') == 'all': return list(self.history)
+                raise AssertionError(path)
+        catalog = {'images': {image_id: {'artifact_sha256': digest,
+            'artifact': {'volume_id': volume, 'node': 'proxmox1', 'source_id': 8830}, 'replicas': []}}}
+        for api in (API(resources=[{'vmid': 147}]), API(active=[{'id': '147'}]),
+                    API(history=[{'id': '147', 'type': 'qmrestore', 'starttime': time.time()}])):
+            with tempfile.TemporaryDirectory() as directory:
+                root = Path(directory); journal = FileJournal(root / 'cache-journal'); journal(record)
+                pins = root / 'artifact-pins'; pins.mkdir()
+                (pins / (job_id + '.json')).write_text(json.dumps({'volume_id': volume,
+                    'artifact_sha256': digest, 'job_id': job_id, 'state': 'active'}))
+                ledger = Mock(); ledger.get_job.return_value = {'state': 'running', 'project_id': 3,
+                                                               'allocations': [reservation]}
+                with patch.object(cache_jobs, '_root', return_value=root), self.assertRaises(DistributionError):
+                    cache_jobs._reconcile_absent_cache_job(job_id, record.copy(), catalog=catalog,
+                        api=api, journal=journal, ledger=ledger)
+                ledger.reconcile_job.assert_not_called()
+
+
 class PublicationTests(unittest.TestCase):
     def test_catalog_transaction_preserves_existing_owner_group_and_mode(self):
         with tempfile.TemporaryDirectory() as directory:

@@ -59,6 +59,58 @@ def _ready(image, node, storage):
             and 'linked' in r.get('clone_modes_verified', [])]
 
 
+def select_probe_bridge(policy):
+    """Choose only an administrator-approved isolated bridge before allocation."""
+    settings = policy.get('cache', policy)
+    if not isinstance(settings, dict):
+        raise DistributionError('Cache probe bridge policy is invalid.')
+    approved = settings.get('isolated_bridges', [])
+    if (not isinstance(approved, list) or not approved or
+            any(not isinstance(item, str) or not re.fullmatch(r'[a-zA-Z0-9_-]{1,15}', item)
+                for item in approved)):
+        raise DistributionError('Cache preparation requires an approved isolated bridge.')
+    configured = settings.get('isolated_bridge')
+    if configured is not None:
+        if configured not in approved:
+            raise DistributionError('Configured cache probe bridge is not in isolated_bridges.')
+        return configured
+    if len(approved) == 1:
+        return approved[0]
+    raise DistributionError('Set isolated_bridge when policy approves multiple isolated_bridges.')
+
+
+def _prove_absent_cache_allocation(api, node, template_id, created_at):
+    """Require complete PVE inventory and task evidence before clearing an absent allocation."""
+    expected = {f'proxmox{i}' for i in range(1, 6)}
+    nodes = api.request('GET', '/nodes')
+    if ({row.get('node') for row in nodes} != expected or
+            any(row.get('status') != 'online' for row in nodes)):
+        raise DistributionError('Cannot reconcile allocation while cluster nodes are unavailable.')
+    resources = api.request('GET', '/cluster/resources', {'type': 'vm'})
+    if any(str(row.get('vmid')) == str(template_id) for row in resources):
+        raise DistributionError('Allocated cache guest exists; owned repair is required.')
+    identity = sorted((row.get('node'), row.get('type'), str(row.get('vmid'))) for row in resources)
+    inventory_hash = hashlib.sha256(json.dumps(identity, separators=(',', ':')).encode()).hexdigest()
+    active = api.request('GET', f'/nodes/{node}/tasks', {'source': 'active', 'limit': 1000})
+    if len(active) >= 1000:
+        raise DistributionError('Active task enumeration may be truncated; retain reservation.')
+    if any(str(task.get('id')) == str(template_id) for task in active):
+        raise DistributionError('A provider task for the cache allocation is still active.')
+    history = api.request('GET', f'/nodes/{node}/tasks', {'source': 'all', 'limit': 1000})
+    if len(history) >= 1000:
+        raise DistributionError('Provider task history may be truncated; retain reservation.')
+    allocation_types = {'qmcreate', 'qmrestore', 'qmclone', 'vzcreate', 'vzrestore', 'vzclone'}
+    if any(str(task.get('id')) == str(template_id) and task.get('type') in allocation_types and
+           float(task.get('starttime', 0)) >= created_at - 1 for task in history):
+        raise DistributionError('A provider allocation task exists; reconcile its exact terminal result.')
+    return {'verified': True, 'node': node, 'template_id': int(template_id),
+            'inventory_complete': True, 'target_absent': True,
+            'active_task_scan_complete': True, 'history_scan_complete': True,
+            'cluster_guest_inventory_sha256': inventory_hash,
+            'active_task_count': len(active), 'history_task_count': len(history),
+            'verified_at': time.time()}
+
+
 def prepare_cache(*, project_id, image_id, node_name, datastore_id='local-lvm',
                   additional_capacity=None, owner='cli', job_id=None):
     """Admit cache/probe plus optional imminent guest demand, then verify local base.
@@ -69,6 +121,7 @@ def prepare_cache(*, project_id, image_id, node_name, datastore_id='local-lvm',
     """
     job_id = job_id or 'cache-' + uuid.uuid4().hex
     policy, _ = _settings()
+    bridge = select_probe_bridge(policy)
     api = ProxmoxAPI()
     journal = FileJournal(_root() / 'cache-journal')
     ledger = ReservationLedger(_root() / 'reservations.sqlite3')
@@ -100,7 +153,6 @@ def prepare_cache(*, project_id, image_id, node_name, datastore_id='local-lvm',
                 settings = policy.get('cache', policy)
                 source_identity = image.get('source_identity') or image.get('verification', {}).get('source_identity')
                 if not source_identity: raise DistributionError('Captured source identity evidence is missing.')
-                bridge = settings.get('isolated_bridge')
                 verify = ProbeVerifier(bridge, settings.get('isolated_bridges', []), source_identity,
                                        ct_exec=SSHContainerExec(), init_system=image.get('init_system', 'systemd'))
                 artifact = image.get('artifact', {})
@@ -396,6 +448,65 @@ def apply_cache_gc(plan_id):
     finally: ledger.close()
 
 
+def _reconcile_absent_cache_job(job_id, record, *, catalog, api, journal, ledger):
+    """Release only an allocated cache request proven absent from PVE and its task history."""
+    if (record.get('job_id') != job_id or record.get('state') not in ('allocated', 'reconciled-absent') or
+            record.get('provider_tasks', []) != [] or record.get('probe_id') is not None):
+        raise DistributionError('Only a task-free allocated cache request can be reconciled as absent.')
+    node, vmid = record.get('node'), record.get('template_id')
+    if (node not in {f'proxmox{i}' for i in range(1, 6)} or
+            isinstance(vmid, bool) or not isinstance(vmid, int) or vmid < 100 or
+            record.get('allocation_node') != node or record.get('datastore_id') != 'local-lvm' or
+            record.get('kind') != 'qemu'):
+        raise DistributionError('Allocated cache request identity is incomplete or unsupported.')
+    image_id = record.get('image_id')
+    image = catalog.get('images', {}).get(image_id)
+    artifact = image.get('artifact', {}) if image else {}
+    if (not image or record.get('artifact_sha256') != image.get('artifact_sha256') or
+            record.get('source_node') != artifact.get('node') or
+            record.get('source_id') != artifact.get('source_id') or
+            any(r.get('node') == node and int(r.get('template_id', -1)) == vmid
+                for r in image.get('replicas', []))):
+        raise DistributionError('Catalog still references the allocated cache identity.')
+    reservation = record.get('reservation')
+    saved = ledger.get_job(job_id)
+    if (saved.get('state') not in ('running', 'released') or saved.get('project_id') not in range(1, 256) or
+            saved.get('allocations') != [reservation] or not isinstance(reservation, dict) or
+            reservation.get('image') != image_id or reservation.get('artifact_sha256') != image['artifact_sha256'] or
+            reservation.get('resolved', {}).get('node_name') != node or
+            reservation.get('resolved', {}).get('datastore_id') != record.get('datastore_id')):
+        raise DistributionError('Reservation ledger does not exactly own the allocated cache request.')
+    pin_path = _root() / 'artifact-pins' / (job_id + '.json')
+    if (saved.get('state') == 'released' and record.get('state') == 'reconciled-absent' and
+            record.get('absence_verified') is True and isinstance(record.get('absence_evidence'), dict) and
+            not pin_path.exists()):
+        return {'job_id': job_id, 'state': 'released', 'template_id': vmid, 'allocation_absent': True}
+    try:
+        pin = json.loads(pin_path.read_text())
+    except (OSError, ValueError) as exc:
+        raise DistributionError('Exact artifact pin is missing or unreadable; retain reservation.') from exc
+    artifact = image.get('artifact', {})
+    if pin != {'volume_id': artifact.get('volume_id'), 'artifact_sha256': image['artifact_sha256'],
+               'job_id': job_id, 'state': 'active'}:
+        raise DistributionError('Artifact pin does not match the exact cache request.')
+    journal_path = journal.directory / (job_id + '.json')
+    try:
+        created_at = float(record.get('created_at', journal_path.stat().st_mtime))
+    except (OSError, TypeError, ValueError) as exc:
+        raise DistributionError('Cache request creation time is unavailable; retain reservation.') from exc
+    evidence = _prove_absent_cache_allocation(api, node, vmid, created_at)
+    if record.get('state') == 'allocated':
+        record.update(state='reconciled-absent', absence_verified=True, absence_evidence=evidence)
+        journal(record)
+    elif (record.get('absence_verified') is not True or
+          not isinstance(record.get('absence_evidence'), dict)):
+        raise DistributionError('Existing absent-allocation receipt is incomplete; retain reservation.')
+    if saved['state'] == 'running':
+        ledger.reconcile_job(job_id, operation_terminal=True, allocations_reconciled=True)
+    pin_path.unlink()
+    return {'job_id': job_id, 'state': 'released', 'template_id': vmid, 'allocation_absent': True}
+
+
 def reconcile_cache_job(job_id):
     """Release a completed published cache fill after fresh task/allocation checks.
 
@@ -411,6 +522,9 @@ def reconcile_cache_job(job_id):
     ledger = ReservationLedger(_root() / 'reservations.sqlite3')
     try:
         with scheduling.node_locks([node], library=True), journal.allocation_lock():
+            if record.get('state') in ('allocated', 'reconciled-absent'):
+                return _reconcile_absent_cache_job(job_id, record, catalog=catalog, api=api,
+                                                   journal=journal, ledger=ledger)
             if record.get('state') != 'ready':
                 raise DistributionError('Partial cache job needs reviewed owned repair; reservations retained.')
             published = [r for r in catalog['images'][record['image_id']]['replicas']

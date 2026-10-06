@@ -209,7 +209,8 @@ class ReplicaWorker:
         record = dict(job_id=job_id, image_id=image_id, node=node,
                       datastore_id=datastore_id, state='allocated', kind=kind,
                       source_node=source_node, source_id=source_id,
-                      artifact_sha256=image['artifact_sha256'], reservation=reservation)
+                      artifact_sha256=image['artifact_sha256'], reservation=reservation,
+                      created_at=datetime.now(timezone.utc).timestamp())
         vmid = int(self.api.request('GET', '/cluster/nextid'))
         record['template_id'] = vmid
         record['allocation_node'] = node
@@ -579,8 +580,16 @@ class FileJournal:
                     not incoming.get('upid')):
                 raise DistributionError('Completed export requires one verified artifact and terminal UPID.')
         if new_state == 'reconciled-absent':
+            evidence = incoming.get('absence_evidence')
             if (old_state != 'allocated' or old_tasks or new_tasks or
-                    incoming.get('absence_verified') is not True):
+                    incoming.get('absence_verified') is not True or not isinstance(evidence, dict) or
+                    evidence.get('verified') is not True or evidence.get('inventory_complete') is not True or
+                    evidence.get('target_absent') is not True or
+                    evidence.get('active_task_scan_complete') is not True or
+                    evidence.get('history_scan_complete') is not True or
+                    evidence.get('node') != incoming.get('node') or
+                    evidence.get('template_id') != incoming.get('template_id') or
+                    not re.fullmatch(r'[a-f0-9]{64}', str(evidence.get('cluster_guest_inventory_sha256', '')))):
                 raise DistributionError('Absent allocation reconciliation requires task-free allocation evidence.')
         if new_state == 'source-probed':
             evidence = incoming.get('verification')
