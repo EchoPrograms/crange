@@ -145,7 +145,7 @@ jump_boxes = {
         }
         crange.save_config(self.project, cfg)
         class API:
-            def vm(self, node, vmid): return {"name": "p003t254-" + ("web" if vmid == 115 else "db"), "template": 0}
+            def vm(self, node, vmid): return {"name": "p003t254-" + ("web" if vmid == 115 else "db"), "template": 0, "agent": "1"}
             def status(self, node, vmid): return "running"
             def shutdown(self, *args): pass
             def capture_image(self, node, vmid, name, desc): return 200 + vmid
@@ -153,7 +153,7 @@ jump_boxes = {
         outputs={"scenario_boxes":{"value":{
             "t254-web":{"id":115,"address":"10.3.254.20"},
             "t254-db":{"id":116,"address":"10.3.254.21"}}}}
-        with patch.object(crange, "output_json", return_value=outputs), patch.object(crange,"check_endpoint"), patch.object(crange,"ProxmoxAPI",return_value=API()), patch.object(crange,"run",return_value=SimpleNamespace(stdout="rev\n")):
+        with patch.object(crange, "output_json", return_value=outputs), patch.object(crange,"check_endpoint"), patch.object(crange,"ProxmoxAPI",return_value=API()), patch.object(crange,"run",return_value=SimpleNamespace(stdout="rev\n")), patch('crange_capture.capture_policy'), patch('crange_capture.capture_vm', side_effect=lambda api, **kw: (200 + kw['source_id'], {'export_job': 'export', 'probe_job': 'probe'})), patch.object(crange, 'cmd_release_publish'):
             crange.cmd_release_capture(SimpleNamespace(project="3",version="3.0",boot_order=["web,db","db,web"]))
         release = crange.load_release(3, "3.0")
         self.assertEqual(release["scenario"]["boot_order_permutations"], [["web", "db"], ["db", "web"]])
@@ -283,7 +283,7 @@ jump_boxes = {
                 self.events = []
                 self.state = "running"
             def vm(self, node, vmid):
-                return {"name": "p003t254-web", "template": 0}
+                return {"name": "p003t254-web", "template": 0, "agent": "1"}
             def status(self, node, vmid):
                 return self.state
             def shutdown(self, node, vmid, address):
@@ -301,7 +301,10 @@ jump_boxes = {
         with patch.object(crange, "output_json", return_value=outputs), \
              patch.object(crange, "check_endpoint"), \
              patch.object(crange, "ProxmoxAPI", return_value=api), \
-             patch.object(crange, "run", return_value=SimpleNamespace(stdout="revision\n")):
+             patch.object(crange, "run", return_value=SimpleNamespace(stdout="revision\n")), \
+             patch('crange_capture.capture_policy'), \
+             patch('crange_capture.capture_vm', side_effect=lambda api, **kw: (api.capture_image(kw['node'], kw['source_id'], kw['name'], kw['description']), {'export_job': 'export', 'probe_job': 'probe'})), \
+             patch.object(crange, 'cmd_release_publish'):
             crange.cmd_release_capture(SimpleNamespace(project="3", version="2.0.0"))
         release = crange.load_release(3, "2.0.0")
         box = release["scenario"]["boxes"][0]

@@ -135,7 +135,7 @@ class ReleaseTopologyTests(unittest.TestCase):
                 'owner_team_id': '254', 'upstream_address': '10.3.254.100'}}}}}
         class API:
             state = 'running'
-            def vm(self, node, vmid): return {'name': 'p003c100-original', 'template': 0}
+            def vm(self, node, vmid): return {'name': 'p003c100-original', 'template': 0, 'agent': '1'}
             def status(self, node, vmid): return self.state
             def shutdown(self, node, vmid, address):
                 assert address == '10.3.100.20'
@@ -143,7 +143,10 @@ class ReleaseTopologyTests(unittest.TestCase):
             def start(self, node, vmid): self.state = 'running'
             def capture_image(self, *args): return 201
         with patch.object(crange, 'output_json', return_value=outputs), patch.object(crange, 'ProxmoxAPI', return_value=API()), \
-             patch.object(crange, 'check_endpoint'), patch.object(crange, 'run', return_value=SimpleNamespace(stdout='revision')):
+             patch.object(crange, 'check_endpoint'), patch.object(crange, 'run', return_value=SimpleNamespace(stdout='revision')), \
+             patch('crange_capture.capture_policy'), \
+             patch('crange_capture.capture_vm', return_value=(201, {'export_job': 'export', 'probe_job': 'probe'})), \
+             patch.object(crange, 'cmd_release_publish'):
             crange.cmd_release_capture(SimpleNamespace(project='3', version='2.0'))
         release = crange.load_release(3, '2.0')
         self.assertEqual(release['schema_version'], 4)

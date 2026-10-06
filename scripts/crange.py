@@ -1966,6 +1966,13 @@ def cmd_release_capture(args: argparse.Namespace) -> None:
     for box in boxes:
         if box["kind"] == "vm" and not validate_health_checks(box.get("health_checks", [])):
             raise CrangeError(f"Scenario VM {box['key']} needs at least one health check before release capture.")
+    permutations = [entry.strip().split(",") for entry in getattr(args, "boot_order", [])]
+    scenario_names = {box["name"] for box in boxes}
+    if not permutations:
+        permutations = [[box["name"] for box in boxes]]
+    for order in permutations:
+        if len(order) != len(scenario_names) or set(order) != scenario_names or len(set(order)) != len(order):
+            raise CrangeError("Each --boot-order must list every staging VM name exactly once, comma-separated.")
     destination = manifest_path(project, args.version)
     destination.parent.mkdir(parents=True, exist_ok=True)
     with (destination.parent / ".capture.lock").open("a+") as lock:
@@ -1994,6 +2001,20 @@ def cmd_release_capture(args: argparse.Namespace) -> None:
         ct_approvals = container_templates_for(path)
         references = {}
         captured = []
+        from crange_capture import capture_policy, capture_vm
+        # Gate every image before stopping any staging guest.
+        if any(box['kind'] != 'vm' for box in boxes):
+            raise CrangeError('Reproducible release capture currently supports QGA-enabled VMs only; CT capture remains gated.')
+        capture_profiles = {}
+        for box in boxes:
+            try:
+                profile = {'agent_enabled': False, 'upgrade_packages': True,
+                           **json.loads((path / 'template-profile.json').read_text())}
+                profile.update(approvals[box['template']].get('profile', {}))
+                capture_policy(applied['vm'][box['key']].get('node_name', box['node_name']), profile)
+                capture_profiles[box['key']] = profile
+            except (OSError, ValueError, TypeError) as exc:
+                raise CrangeError(str(exc)) from exc
         for box in boxes:
             node = applied[box["kind"]][box["key"]].get("node_name", box["node_name"])
             vmid = int(applied[box["kind"]][box["key"]]["id"])
@@ -2001,6 +2022,8 @@ def cmd_release_capture(args: argparse.Namespace) -> None:
             vnet = f"p{project:03d}c{box['network_id']:03d}" if box.get("network_key") else f"p{project:03d}t254"
             if actual.get("name", actual.get("hostname")) != f"{vnet}-{box['name']}" or int(actual.get("template", 0)):
                 raise CrangeError(f"Applied VM {node}/{vmid} does not match staging box {box['key']}.")
+            if box['kind'] == 'vm' and str(actual.get('agent', '')).split(',')[0] not in ('1', 'enabled=1'):
+                raise CrangeError('Staging VM QGA is disabled; rebuild with a tested approved agent profile before capture.')
             status = api.status(node, vmid) if box["kind"] == "vm" else api.container_status(node, vmid)
             if status != "running":
                 raise CrangeError(f"Staging VM {node}/{vmid} must be running before capture.")
@@ -2027,8 +2050,10 @@ def cmd_release_capture(args: argparse.Namespace) -> None:
                     else:
                         api.container_stop(node, vmid)
                     if box["kind"] == "vm":
-                        image_id = api.capture_image(node, vmid, name,
-                            f"CRANGE project {project:03d} release {args.version} box {box['key']}")
+                        image_id, evidence = capture_vm(api, project=project, node=node,
+                            source_id=vmid, name=name,
+                            description=f"CRANGE project {project:03d} release {args.version} box {box['key']}",
+                            slug=slug, profile=capture_profiles[box['key']])
                     else:
                         image_id = api.capture_container_image(node, vmid, name,
                             f"CRANGE project {project:03d} release {args.version} CT {box['key']}")
@@ -2039,6 +2064,7 @@ def cmd_release_capture(args: argparse.Namespace) -> None:
                 reference = {"template_id": image_id, "template_node": node, "kind": box["kind"], "image_id": alias}
                 if box["kind"] == "vm":
                     reference['profile'] = {**source_profile, 'upgrade_packages': False}
+                    reference['distribution_evidence'] = evidence
                 references[alias] = reference
                 captured.append((node, image_id, box["kind"]))
                 box["source_template"] = original_template
@@ -2046,13 +2072,6 @@ def cmd_release_capture(args: argparse.Namespace) -> None:
                 box["template"] = alias
                 box["image"] = alias
                 box["full_clone"] = True
-            permutations = [entry.strip().split(",") for entry in getattr(args, "boot_order", [])]
-            scenario_names = {box["name"] for box in boxes}
-            if not permutations:
-                permutations = [[box["name"] for box in boxes]]
-            for order in permutations:
-                if len(order) != len(scenario_names) or set(order) != scenario_names or len(set(order)) != len(order):
-                    raise CrangeError("Each --boot-order must list every staging VM name exactly once, comma-separated.")
             content = {
                 "schema_version": 4,
                 "release_id": f"p{project:03d}-{args.version}",
@@ -2095,17 +2114,14 @@ def cmd_release_capture(args: argparse.Namespace) -> None:
             with os.fdopen(fd, "w") as stream:
                 stream.write(json.dumps(content, indent=2, sort_keys=True) + "\n")
         except Exception:
-            # Preserve any successful templates for diagnosis; they are never reused
-            # without a completed, integrity-checked manifest.
-            leftovers = []
-            for node, vmid, kind in reversed(captured):
-                try:
-                    (api.delete_vm if kind == "vm" else api.delete_container)(node, vmid)
-                except CrangeError:
-                    leftovers.append(f"{node}/{vmid}")
-            if leftovers:
-                print("Could not remove incomplete release images: " + ", ".join(leftovers), file=sys.stderr)
+            # Protected worker journals and reservations own these artifacts.
+            # Automatic deletion would invalidate provenance or race uncertain tasks.
+            print('Capture interrupted; inspect protected capture/source journals and reconcile before retry.', file=sys.stderr)
             raise
+    for alias, reference in references.items():
+        evidence = reference['distribution_evidence']
+        cmd_release_publish(argparse.Namespace(project=args.project, version=args.version,
+            template=alias, export_job=evidence['export_job'], probe_job=evidence['probe_job']))
     print(f"Captured immutable guest images and release {content['release_id']} at {destination.relative_to(ROOT)}")
     print(f"SHA-256 {content['integrity_sha256']}")
 
