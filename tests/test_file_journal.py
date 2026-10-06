@@ -68,6 +68,24 @@ class FileJournalTests(unittest.TestCase):
             with self.assertRaisesRegex(DistributionError, 'cannot move backwards'):
                 journal({**initial, 'provider_tasks': [{'upid': UPID, 'state': 'running'}]})
 
+    def test_source_probe_records_a_terminal_verified_cleanup(self):
+        with tempfile.TemporaryDirectory() as directory:
+            journal = FileJournal(Path(directory))
+            initial = {'job_id': 'source-probe-1', 'state': 'allocated',
+                       'node': 'proxmox1', 'source_id': 8830, 'probe_id': 990,
+                       'probe_pool': 'crange-probes'}
+            journal(initial)
+            verifying = {**initial, 'state': 'verifying',
+                         'provider_tasks': [{'upid': UPID, 'state': 'running'}]}
+            journal(verifying)
+            terminal = {**verifying, 'state': 'source-probed',
+                'provider_tasks': [{'upid': UPID, 'state': 'confirmed-terminal'}],
+                'verification': {'passed': True, 'identity_unique': True,
+                                 'evidence': {'isolated_bridge': 'crprobe1450'}}}
+            journal(terminal)
+            with self.assertRaisesRegex(DistributionError, 'state transition'):
+                journal({**terminal, 'state': 'failed-verification'})
+
     def test_job_state_cannot_move_backwards(self):
         with tempfile.TemporaryDirectory() as directory:
             journal = FileJournal(Path(directory))

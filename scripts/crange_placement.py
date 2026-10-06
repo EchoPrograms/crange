@@ -8,6 +8,7 @@ import copy
 import json
 import math
 import os
+import re
 import sqlite3
 import time
 import uuid
@@ -334,6 +335,74 @@ class ReservationLedger:
             self.db.execute('INSERT INTO jobs VALUES (?, ?, ?, ?, ?, ?, ?)',(job_id,project_id,owner,'reviewed',now+policy.get('review_ttl_seconds',3600),now,json.dumps([item],sort_keys=True)))
             self.db.execute('COMMIT')
             return item
+        except Exception:
+            self.db.execute('ROLLBACK')
+            raise
+
+    def reserve_source_probe(self, *, project_id, job_id, owner, source_ref,
+                             source_sha256, node_name, datastore_id, capacity,
+                             inventory, policy, now=None):
+        """Reserve one direct, disposable source-verification clone.
+
+        This reservation is deliberately independent of the immutable image
+        catalog: it is for validating a captured source before publication.
+        Its allocation records the exact source reference/config fingerprint.
+        """
+        now = time.time() if now is None else now
+        if (isinstance(project_id, bool) or not isinstance(project_id, int) or
+                not 1 <= project_id <= 255 or not owner or
+                not isinstance(job_id, str) or not job_id or
+                not isinstance(source_ref, str) or not source_ref or
+                not re.fullmatch(r'[a-f0-9]{64}', str(source_sha256))):
+            raise PlacementError('valid project, owner, job and captured source required')
+        if (now - _number(inventory.get('captured_at'), 'inventory captured_at') >
+                policy.get('max_inventory_age_seconds', 120) or inventory['captured_at'] > now + 5):
+            raise PlacementError('stale source-probe capacity inventory')
+        demand = {key: _number(capacity.get(key), 'source-probe ' + key, .001)
+                  for key in ('memory_mb', 'cpu_cores', 'disk_gb')}
+        self.db.execute('BEGIN IMMEDIATE')
+        try:
+            node = inventory.get('nodes', {}).get(node_name, {})
+            storage = node.get('storages', {}).get(datastore_id, {})
+            if (node_name not in policy.get('allowed_nodes', []) or not node.get('online') or
+                    node.get('draining') or node.get('load', 0) > policy.get('max_load', 1)):
+                raise PlacementError('source-probe node is unavailable or excluded')
+            if (datastore_id not in policy.get('allowed_storages', []) or
+                    not storage.get('available') or 'vm' not in storage.get('guest_types', []) or
+                    'amd64' not in node.get('architectures', []) or 'vm' not in node.get('guest_types', [])):
+                raise PlacementError('source-probe datastore or VM capability unavailable')
+            if self.db.execute('SELECT 1 FROM jobs WHERE job_id=?', (job_id,)).fetchone():
+                raise PlacementError('job already has reservations; reconcile instead of duplicating')
+            count = self.db.execute("SELECT COUNT(*) FROM jobs WHERE project_id=? AND owner=? AND state='reviewed'", (project_id, owner)).fetchone()[0]
+            if count >= policy.get('max_reviewed_plans', 2):
+                raise PlacementError('outstanding reviewed-plan limit reached')
+            window = capacity_window(node, policy, node_name, storage, 'full')
+            pending = self.active_reservations()
+            available = {
+                'memory_mb': window['memory_mb'] - sum(r['memory_mb'] for r in pending if r['node_name'] == node_name),
+                'cpu_cores': window['cpu_cores'] - sum(r['cpu_cores'] for r in pending if r['node_name'] == node_name),
+                'disk_gb': window['disk_gb'] - sum(r['disk_gb'] for r in pending if r['node_name'] == node_name and r['datastore_id'] == datastore_id),
+            }
+            if any(demand[key] > available[key] for key in demand):
+                raise PlacementError('source-probe has insufficient ' + next(k for k in demand if demand[k] > available[k]) + ' headroom')
+            for scope, limits in [('global', policy.get('global_limits', {})),
+                                  (str(project_id), policy.get('project_quotas', {}).get(str(project_id), {}))]:
+                usage = inventory.get('quota_usage', {}).get(scope, {})
+                for key, limit in limits.items():
+                    reserved = sum(r.get(key, 0) for r in pending if scope == 'global' or r['project_id'] == project_id)
+                    if usage.get(key, 0) + demand.get(key, 0) + reserved > limit:
+                        raise PlacementError('source-probe ' + scope + ' quota exceeded')
+            allocation = {'operation': 'source_probe', 'resource_key': 'source-probe:' + source_ref,
+                'project_id': project_id, 'image': source_ref, 'artifact_sha256': source_sha256,
+                'resolved': {'node_name': node_name, 'datastore_id': datastore_id, 'clone_mode': 'full'},
+                'resources': demand, 'headroom': {key: available[key] - demand[key] for key in demand},
+                'policy_revision': policy['revision'], 'reservation_id': str(uuid.uuid4()),
+                'reason': 'Direct source acceptance clone and isolated disposable probe'}
+            self.db.execute('INSERT INTO jobs VALUES (?, ?, ?, ?, ?, ?, ?)',
+                (job_id, project_id, owner, 'reviewed', now + policy.get('review_ttl_seconds', 3600), now,
+                 json.dumps([allocation], sort_keys=True)))
+            self.db.execute('COMMIT')
+            return allocation
         except Exception:
             self.db.execute('ROLLBACK')
             raise

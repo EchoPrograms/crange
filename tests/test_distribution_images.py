@@ -16,7 +16,8 @@ from crange_catalog import CatalogError, validate_catalog, publish_replica
 from crange_distribution import (ReplicaWorker, DistributionError, publish_artifact,
     ProbeVerifier, SSHContainerExec, normalize_projects, publish_stock_archive,
     publish_exported_image, required_capacity, _add_project_approval_arguments,
-    _project_approval_scope, shared_reservation_validator, main as distribution_main)
+    _project_approval_scope, shared_reservation_validator, SourceProbeWorker,
+    _qemu_capacity, _source_config_identity, main as distribution_main)
 
 
 class ReplicaTests(unittest.TestCase):
@@ -127,6 +128,78 @@ class ReplicaTests(unittest.TestCase):
         self.api.request.return_value = {'template': 1, 'tags': 'homelab'}
         with self.assertRaisesRegex(DistributionError, 'owned'): self.prepare()
         self.journal.assert_not_called()
+
+
+    def test_fixed_source_probe_clones_verifies_deletes_and_journals(self):
+        api = Mock()
+        source = {'tags': 'crange-image', 'template': 1, 'memory': 1024,
+                  'cores': 2, 'sockets': 1,
+                  'scsi0': 'local-lvm:base-8830-disk-0,size=12G'}
+        probe = {'tags': 'crange-image', 'template': 0, 'memory': 1024,
+                 'cores': 2, 'scsi0': 'local-lvm:vm-990-disk-0,size=12G'}
+        def request(method, path, fields=None):
+            if path.endswith('/status/current'):
+                return {'status': 'stopped'}
+            if path == '/cluster/nextid':
+                return 990
+            if path == '/pools/crange-probes':
+                return {'members': [{'type': 'qemu', 'node': 'proxmox1', 'vmid': 8830},
+                                    {'type': 'qemu', 'node': 'proxmox1', 'vmid': 990}]}
+            if method == 'PUT' and path.endswith('/990/config'):
+                probe['tags'] = fields['tags']
+                return None
+            if path.endswith('/config'):
+                return source if '/8830/' in path else probe
+            return 'UPID:proxmox1:00000001:00000001:00000001:qmclone:990:root@pam:'
+        api.request.side_effect = request
+        api.task.return_value = None
+        capture = {'job_id': 'capture-8830', 'source_config_sha256':
+                   _source_config_identity(source, 8830), 'source_identity': {'machine_id': '1' * 32,
+                   'ssh_host_key': 'ssh-ed25519 YWJj source'}}
+        reservation = {'reservation_id': 'reservation-1'}
+        verify = Mock(return_value={'passed': True, 'identity_unique': True,
+            'evidence': {'readiness': 'default', 'machine_id': '2' * 32,
+                         'ssh_host_key': 'ssh-ed25519 ZGVm probe',
+                         'isolated_bridge': 'crprobe1450'}})
+        journal = Mock()
+        worker = SourceProbeWorker(api, journal, verify, lambda *args: True)
+        result = worker.run(source_node='proxmox1', source_id=8830,
+            datastore_id='local-lvm', job_id='source-probe-1', capture=capture,
+            reservation=reservation)
+        api.request.assert_any_call('POST', '/nodes/proxmox1/qemu/8830/clone', {
+            'newid': 990, 'full': 1, 'storage': 'local-lvm', 'pool': 'crange-probes',
+            'name': 'crange-source-probe-990',
+            'description': 'CRANGE source verification source-probe-1'})
+        api.request.assert_any_call('DELETE', '/nodes/proxmox1/qemu/990', {'purge': 1})
+        self.assertEqual(result['state'], 'source-probed')
+        self.assertTrue(all(t['state'] == 'confirmed-terminal' for t in result['provider_tasks']))
+        self.assertEqual(verify.call_args.args[1:], ('proxmox1', 'qemu', 990))
+
+    def test_probe_requires_exact_captured_source_before_mutation(self):
+        api = Mock()
+        api.request.side_effect = lambda method, path, fields=None: (
+            source if path.endswith('/config') else
+            {'status': 'stopped'} if path.endswith('/status/current') else
+            {'members': [{'type': 'qemu', 'node': 'proxmox1', 'vmid': 8830}]}
+            if path == '/pools/crange-probes' else 990)
+        worker = SourceProbeWorker(api, Mock(), Mock(), lambda *args: True)
+        source = {'tags': 'crange-image', 'template': 1, 'memory': 1024, 'cores': 2,
+             'scsi0': 'local-lvm:base-8830-disk-0,size=12G'}
+        capture = {'job_id': 'capture', 'source_config_sha256': 'f' * 64,
+                   'source_identity': {'machine_id': '1' * 32,
+                                       'ssh_host_key': 'ssh-ed25519 key'}}
+        with self.assertRaisesRegex(DistributionError, 'changed'):
+            worker.run(source_node='proxmox1', source_id=8830,
+                datastore_id='local-lvm', job_id='source-probe-1', capture=capture,
+                reservation={'reservation_id': 'x'})
+        self.assertEqual([call.args[0] for call in api.request.call_args_list], ['GET', 'GET', 'GET'])
+
+    def test_qemu_capacity_requires_disk_size_for_reservation(self):
+        self.assertEqual(_qemu_capacity({'memory': 512, 'cores': 2,
+            'scsi0': 'local-lvm:vm-8830-disk-0,size=10G'}),
+            {'memory_mb': 512, 'cpu_cores': 2, 'disk_gb': 11.0})
+        with self.assertRaisesRegex(DistributionError, 'disk size'):
+            _qemu_capacity({'memory': 512, 'cores': 2, 'scsi0': 'local-lvm:vm-8830-disk-0'})
 
     def test_ct_cross_node_requires_complete_capture_archive(self):
         self.catalog['images']['base-v1']['kind'] = 'container'
@@ -343,6 +416,20 @@ class PublicationTests(unittest.TestCase):
             publish_exported_image({'schema_version': 1, 'images': {}}, 'vm-v2', record, **arguments)
 
 class ProbeTests(unittest.TestCase):
+    def test_probe_attempts_stop_even_when_start_task_times_out(self):
+        api = Mock()
+        api.request.side_effect = lambda method, path, fields=None: (
+            {'members': [{'type': 'qemu', 'node': 'proxmox1', 'vmid': 990}]}
+            if path == '/pools/crange-probes' else
+            {'tags': 'crange-image', 'net0': 'virtio=aa:bb:cc:dd:ee:ff,bridge=old'}
+            if method == 'GET' else 'UPID:probe')
+        api.task.side_effect = [TimeoutError('start uncertain'), None]
+        verifier = ProbeVerifier('crprobe1450', ['crprobe1450'],
+            {'machine_id': 'a' * 32, 'ssh_host_key': 'ssh-ed25519 oldkey source'})
+        with self.assertRaises(TimeoutError):
+            verifier(api, 'proxmox1', 'qemu', 990)
+        api.request.assert_any_call('POST', '/nodes/proxmox1/qemu/990/status/stop', {})
+
     def test_ct_probe_uses_disconnected_approved_network_and_real_identities(self):
         api = Mock()
         api.request.side_effect = lambda method, path, fields=None: (

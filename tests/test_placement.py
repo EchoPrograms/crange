@@ -21,6 +21,33 @@ def fixtures():
 
 
 class PlacementTests(unittest.TestCase):
+    def test_source_probe_reservation_is_project_scoped_and_reconciles_only_explicitly(self):
+        _, inv, _, pol = fixtures()
+        for node in inv['nodes'].values():
+            node['architectures'] = ['amd64']
+        pol.update(revision='source-probe-v1', allowed_nodes=['n1'],
+                   allowed_storages=['local'], max_inventory_age_seconds=120,
+                   review_ttl_seconds=3600, max_reviewed_plans=2, max_load=1)
+        with tempfile.TemporaryDirectory() as temp:
+            ledger = ReservationLedger(pathlib.Path(temp) / 'ledger')
+            allocation = ledger.reserve_source_probe(project_id=3, job_id='probe-1',
+                owner='cli', source_ref='source:n1:qemu:8830', source_sha256='b' * 64,
+                node_name='n1', datastore_id='local',
+                capacity={'memory_mb': 1024, 'cpu_cores': 2, 'disk_gb': 13.2},
+                inventory=inv, policy=pol, now=100)
+            self.assertEqual(allocation['operation'], 'source_probe')
+            self.assertEqual(allocation['project_id'], 3)
+            self.assertEqual(allocation['artifact_sha256'], 'b' * 64)
+            ledger.mark_running('probe-1', now=101)
+            with self.assertRaises(PlacementError):
+                ledger.reconcile_job('probe-1', operation_terminal=False,
+                                     allocations_reconciled=False)
+            self.assertEqual(len(ledger.active_reservations()), 1)
+            ledger.reconcile_job('probe-1', operation_terminal=True,
+                                 allocations_reconciled=True)
+            self.assertEqual(ledger.active_reservations(), [])
+            ledger.close()
+
     def test_universal_image_scope_still_uses_project_scoped_scheduler_check(self):
         r, inv, cat, pol = fixtures()
         cat['images']['base-v1']['approved_projects'] = ['*']

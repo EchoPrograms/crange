@@ -291,6 +291,106 @@ class ReplicaWorker:
         return updated
 
 
+class SourceProbeWorker:
+    """Verify one captured source by cloning it into the isolated probe pool."""
+    def __init__(self, api, journal, verify, reservation_validator):
+        self.api, self.journal, self.verify = api, journal, verify
+        self.reservation_validator = reservation_validator
+
+    def run(self, *, source_node, source_id, datastore_id, job_id, capture,
+            reservation):
+        if (source_node not in {f'proxmox{i}' for i in range(1, 7)} or
+                type(source_id) is not int or source_id < 100 or
+                not re.fullmatch(r'[a-zA-Z0-9-]{1,64}', job_id)):
+            raise DistributionError('Invalid source-probe scope.')
+        _require_probe_pool(self.api, source_node, 'qemu', source_id)
+        base = f'/nodes/{source_node}/qemu/{source_id}'
+        source = self.api.request('GET', base + '/config')
+        _owned(source)
+        if (int(source.get('template', 0)) != 1 or
+                self.api.request('GET', base + '/status/current').get('status') != 'stopped' or
+                _source_config_identity(source, source_id) != capture.get('source_config_sha256')):
+            raise DistributionError('Captured source template identity changed or is not stopped.')
+        capacity = _qemu_capacity(source)
+        source_ref = f'source:{source_node}:qemu:{source_id}'
+        if (self.reservation_validator is None or not self.reservation_validator(
+                reservation, source_node, datastore_id, capacity)):
+            raise DistributionError('A valid shared-ledger source-probe reservation is required.')
+        marker = f'crange-job-{job_id}'
+        vmid = int(self.api.request('GET', '/cluster/nextid'))
+        record = {'job_id': job_id, 'image_id': source_ref, 'node': source_node,
+                  'datastore_id': datastore_id, 'state': 'allocated', 'kind': 'vm',
+                  'source_node': source_node, 'source_id': source_id,
+                  'source_config_sha256': capture['source_config_sha256'],
+                  'artifact_sha256': capture['source_config_sha256'],
+                  'source_capture_job_id': capture['job_id'],
+                  'reservation': reservation, 'probe_id': vmid,
+                  'probe_pool': PROBE_POOL, 'probe_marker': marker}
+        self.journal(dict(record))
+        clone_fields = {'newid': vmid, 'full': 1, 'storage': datastore_id,
+                        'pool': PROBE_POOL, 'name': f'crange-source-probe-{vmid}',
+                        'description': f'CRANGE source verification {job_id}'}
+        upid = self.api.request('POST', base + '/clone', clone_fields)
+        record.setdefault('provider_tasks', []).append(
+            {'path': base + '/clone', 'upid': upid, 'state': 'running'})
+        self.journal(dict(record))
+        self.api.task(source_node, upid, timeout=1800)
+        record['provider_tasks'][-1]['state'] = 'confirmed-terminal'
+        self.journal(dict(record))
+        probe_path = f'/nodes/{source_node}/qemu/{vmid}'
+        probe = self.api.request('GET', probe_path + '/config')
+        _owned(probe)
+        if int(probe.get('template', 0)) == 1:
+            raise DistributionError('Disposable source clone unexpectedly remains a template.')
+        tags = set(str(probe.get('tags', '')).split(';')) | {'crange-image', marker}
+        self.api.request('PUT', probe_path + '/config', {'tags': ';'.join(sorted(tags))})
+        record['state'] = 'verifying'
+        self.journal(dict(record))
+        result = self.verify(_JournaledProbeAPI(self.api, record, self.journal),
+                             source_node, 'qemu', vmid)
+        if not isinstance(result, dict) or result.get('passed') is not True or result.get('identity_unique') is not True:
+            record['state'] = 'failed-verification'
+            self.journal(dict(record))
+            raise DistributionError('Source clone readiness/identity verification failed.')
+        current = self.api.request('GET', probe_path + '/config')
+        _owned(current, marker)
+        if self.api.request('GET', probe_path + '/status/current').get('status') != 'stopped':
+            raise DistributionError('Verified source probe did not stop cleanly.')
+        _require_probe_pool(self.api, source_node, 'qemu', vmid)
+        delete_upid = self.api.request('DELETE', probe_path, {'purge': 1})
+        record.setdefault('provider_tasks', []).append(
+            {'path': probe_path, 'upid': delete_upid, 'state': 'running'})
+        self.journal(dict(record))
+        self.api.task(source_node, delete_upid, timeout=1800)
+        record['provider_tasks'][-1]['state'] = 'confirmed-terminal'
+        record.update(state='source-probed', verification=result)
+        self.journal(dict(record))
+        return record
+
+
+def _qemu_capacity(config):
+    """Return conservative full-clone plus write allowance from PVE config."""
+    try:
+        memory = int(config['memory'])
+        cpu = int(config['cores']) * int(config.get('sockets', 1))
+    except (KeyError, TypeError, ValueError) as exc:
+        raise DistributionError('Source VM has no defensible RAM/CPU allocation.') from exc
+    disk_bytes = 0
+    for key, value in config.items():
+        if not re.fullmatch(r'(?:scsi|sata|virtio|ide)[0-9]+', key) or ',media=cdrom' in str(value):
+            continue
+        match = re.search(r'(?:^|,)size=([0-9]+(?:\.[0-9]+)?)([KMGT])(?:i?B)?(?:,|$)', str(value), re.I)
+        if not match:
+            raise DistributionError('Source VM disk size is not available for safe capacity reservation.')
+        amount = float(match.group(1))
+        scale = {'K': 1024, 'M': 1024**2, 'G': 1024**3, 'T': 1024**4}[match.group(2).upper()]
+        disk_bytes += amount * scale
+    if disk_bytes <= 0:
+        raise DistributionError('Source VM has no measurable disk for safe capacity reservation.')
+    return {'memory_mb': memory, 'cpu_cores': cpu,
+            'disk_gb': disk_bytes / (1024**3) * 1.1}
+
+
 def shared_reservation_validator(ledger, job_id, allocation, image_id, artifact_sha256):
     """Bind a worker operation to its exact running shared-ledger reservation."""
     def validate(proof, node, storage, required):
@@ -313,10 +413,11 @@ class FileJournal:
         'identity-captured': {'identity-captured'},
         'exporting': {'exporting', 'exported'},
         'exported': {'exported'},
-        'allocated': {'allocated', 'converting-template', 'cancelled-uncertain'},
+        'allocated': {'allocated', 'converting-template', 'verifying', 'cancelled-uncertain'},
         'converting-template': {'converting-template', 'verifying', 'failed-verification', 'cancelled-uncertain'},
-        'verifying': {'verifying', 'ready', 'failed-verification', 'cancelled-uncertain'},
+        'verifying': {'verifying', 'ready', 'source-probed', 'failed-verification', 'cancelled-uncertain'},
         'failed-verification': {'failed-verification'},
+        'source-probed': {'source-probed'},
         'ready': {'ready', 'evicted'},
         'evicting': {'evicting', 'evicted', 'cancelled-uncertain'},
         'evicted': {'evicted'},
@@ -694,8 +795,22 @@ class ProbeVerifier:
                 fields[key] = f'name=eth{key[3:]},bridge={self.bridge},ip=manual,ip6=manual,link_down=1,type=veth'
         fields['onboot'] = 0
         api.request('PUT', f'/nodes/{node}/{kind}/{vmid}/config', fields)
-        upid = api.request('POST', f'/nodes/{node}/{kind}/{vmid}/status/start', {})
-        api.task(node, upid, timeout=self.timeout)
+        start_requested = False
+        try:
+            upid = api.request('POST', f'/nodes/{node}/{kind}/{vmid}/status/start', {})
+            start_requested = True
+            api.task(node, upid, timeout=self.timeout)
+            return self._check_guest(api, node, kind, vmid)
+        finally:
+            # A timeout or failed guest-agent check must still attempt to stop
+            # the disposable guest. Its caller retains the reservation if this
+            # provider task cannot be confirmed terminal.
+            if start_requested:
+                upid = api.request('POST', f'/nodes/{node}/{kind}/{vmid}/status/stop', {})
+                api.task(node, upid, timeout=self.timeout)
+
+    def _check_guest(self, api, node, kind, vmid):
+        import time
         def read(command):
             if kind == 'lxc':
                 if self.ct_exec is None:
@@ -732,8 +847,6 @@ class ProbeVerifier:
         unique = (valid_id and machine_id != self.source['machine_id'] and
                   key_identity(ssh_host_key) != key_identity(self.source['ssh_host_key']) and
                   ssh_host_key.startswith('ssh-ed25519 '))
-        upid = api.request('POST', f'/nodes/{node}/{kind}/{vmid}/status/stop', {})
-        api.task(node, upid, timeout=self.timeout)
         return {'passed': unique, 'identity_unique': unique,
                 'evidence': {'readiness': readiness, 'machine_id': machine_id,
                              'ssh_host_key': ssh_host_key, 'isolated_bridge': self.bridge}}
@@ -826,6 +939,12 @@ def main(argv=None):
     replica.add_argument('--source-id', type=int, required=True)
     replica.add_argument('--source-identity', type=Path, required=True)
     replica.add_argument('--archive', type=Path)
+    source_probe = commands.add_parser('source-probe')
+    for field in ('source-node', 'datastore-id', 'job-id', 'isolated-bridge'):
+        source_probe.add_argument('--' + field, required=True)
+    source_probe.add_argument('--project', type=int, required=True)
+    source_probe.add_argument('--source-id', type=int, required=True)
+    source_probe.add_argument('--identity-record', type=Path, required=True)
     args = parser.parse_args(argv)
     policy = json.loads(args.policy.read_text())
     api = ProxmoxAPI()
@@ -862,6 +981,68 @@ def main(argv=None):
                 approved_projects=_project_approval_scope(args), disk_gb=args.disk_gb, expected_sha256=args.sha256,
                 hash_volume=SSHVolumeHasher(), verification=verification))
         print('Published immutable stock archive ' + args.image_id)
+    elif args.action == 'source-probe':
+        if not policy.get('enabled'):
+            raise DistributionError('Image distribution is disabled by administrator policy.')
+        if args.source_node not in policy.get('allowed_nodes', []):
+            raise DistributionError('Source-probe node is not enabled by administrator policy.')
+        if (args.source_node, args.datastore_id) not in set(map(tuple, policy.get('approved_storage', []))):
+            raise DistributionError('Source-probe datastore is not approved on the selected node.')
+        if args.isolated_bridge not in policy.get('isolated_bridges', []):
+            raise DistributionError('Probe bridge is not approved by administrator policy.')
+        from crange_placement import PlacementError, ReservationLedger
+        import crange_scheduling as scheduling
+        from crange_catalog import validate_source_identity
+        capture = json.loads(args.identity_record.read_text())
+        validate_source_identity(capture.get('source_identity'))
+        if ((capture.get('state'), capture.get('node'), capture.get('kind'), capture.get('source_id')) !=
+                ('identity-captured', args.source_node, 'vm', args.source_id) or
+                capture.get('init_system') not in ('systemd', 'openrc') or
+                capture.get('readiness') != ('running' if capture['init_system'] == 'systemd' else 'default') or
+                not capture.get('job_id')):
+            raise DistributionError('Identity record is not bound to the selected captured source.')
+        verify = ProbeVerifier(args.isolated_bridge, policy.get('isolated_bridges', []),
+            capture['source_identity'], ct_exec=SSHContainerExec(), init_system=capture['init_system'])
+        ledger = ReservationLedger(scheduling.DATA / 'reservations.sqlite3')
+        source_ref = f'source:{args.source_node}:qemu:{args.source_id}'
+        source_sha = capture['source_config_sha256']
+        try:
+            with node_locks([args.source_node]), journal.allocation_lock():
+                _require_probe_pool(api, args.source_node, 'qemu', args.source_id)
+                source = api.request('GET', f'/nodes/{args.source_node}/qemu/{args.source_id}/config')
+                _owned(source)
+                if (int(source.get('template', 0)) != 1 or
+                        api.request('GET', f'/nodes/{args.source_node}/qemu/{args.source_id}/status/current').get('status') != 'stopped' or
+                        _source_config_identity(source, args.source_id) != source_sha):
+                    raise DistributionError('Captured source template identity changed or is not stopped.')
+                capacity = _qemu_capacity(source)
+                inventory = discover(api, policy)
+                try:
+                    allocation = ledger.reserve_source_probe(project_id=args.project,
+                        job_id=args.job_id, owner='cli', source_ref=source_ref,
+                        source_sha256=source_sha, node_name=args.source_node,
+                        datastore_id=args.datastore_id, capacity=capacity,
+                        inventory=inventory, policy=policy)
+                    ledger.mark_running(args.job_id)
+                except PlacementError as exc:
+                    raise DistributionError('Shared-ledger source-probe reservation failed.') from exc
+                validator = shared_reservation_validator(ledger, args.job_id,
+                    allocation, source_ref, source_sha)
+                worker = SourceProbeWorker(api, journal, verify, validator)
+                record = worker.run(source_node=args.source_node, source_id=args.source_id,
+                    datastore_id=args.datastore_id, job_id=args.job_id,
+                    capture=capture, reservation=allocation)
+                inventory = discover(api, policy)
+                if (record.get('state') != 'source-probed' or
+                        str(record.get('probe_id')) in inventory.get('guests', {}) or
+                        any(task.get('state') != 'confirmed-terminal'
+                            for task in record.get('provider_tasks', []))):
+                    raise DistributionError('Source probe or provider task remains uncertain; reservation retained.')
+                ledger.reconcile_job(args.job_id, operation_terminal=True,
+                                     allocations_reconciled=True)
+            print('Verified and cleaned isolated source probe ' + args.job_id)
+        finally:
+            ledger.close()
     else:
         if not policy.get('enabled'):
             raise DistributionError('Image distribution is disabled by administrator policy.')
