@@ -99,7 +99,8 @@ def ensure(spec):
     # Check route conflicts before creating a gateway so refusal leaves no orphan.
     route_doc = api("GET", "/api/routes/routes/get")
     routes = route_doc.get("route", {}).get("route", {})
-    matches = [(uuid, item) for uuid, item in routes.items() if item.get("network") == network]
+    route_items = routes.items() if isinstance(routes, dict) else enumerate(routes)
+    matches = [(uuid, item) for uuid, item in route_items if item.get("network") == network]
     if len(matches) > 1:
         raise RuntimeError(f"Found multiple routes for {network}; refusing ambiguous changes.")
     if matches:
@@ -193,7 +194,8 @@ def remove_project_route(project_id, allow_unmanaged=False, dry_run=False):
     gateway_name = f"P{pid:03d}"
     route_doc = api("GET", "/api/routes/routes/get")
     routes = route_doc.get("route", {}).get("route", {})
-    matches = [(uuid, item) for uuid, item in routes.items() if item.get("network") == network]
+    route_items = routes.items() if isinstance(routes, dict) else enumerate(routes)
+    matches = [(uuid, item) for uuid, item in route_items if item.get("network") == network]
     if not matches:
         print(f"No OPNsense route exists for {network}")
         return
@@ -206,7 +208,7 @@ def remove_project_route(project_id, allow_unmanaged=False, dry_run=False):
     if not allow_unmanaged and not str(item.get("descr", "")).startswith("CRANGE managed project "):
         raise RuntimeError(f"Route {network} is not marked CRANGE-managed; pass explicit allow_unmanaged only for reviewed legacy cleanup")
     other_refs = [
-        route.get("network") for route in routes.values()
+        route.get("network") for route in (routes.values() if isinstance(routes, dict) else routes)
         if route.get("network") != network and selected_choice(route.get("gateway")) == gateway_name
     ]
     if other_refs:
@@ -217,7 +219,8 @@ def remove_project_route(project_id, allow_unmanaged=False, dry_run=False):
     api("POST", f"/api/routes/routes/delroute/{uuid}")
     api("POST", "/api/routes/routes/reconfigure", {})
     after = api("GET", "/api/routes/routes/get").get("route", {}).get("route", {})
-    if any(route.get("network") == network for route in after.values()):
+    after_routes = after.values() if isinstance(after, dict) else after
+    if any(route.get("network") == network for route in after_routes):
         raise RuntimeError(f"OPNsense still reports a route for {network} after deletion")
     print(f"Removed and reconfigured OPNsense route {network}")
 
