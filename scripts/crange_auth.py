@@ -6,6 +6,7 @@ import os
 from pathlib import Path
 import secrets
 import sqlite3
+import stat
 import time
 from contextlib import contextmanager
 
@@ -14,7 +15,17 @@ class AuthStore:
     def __init__(self, path):
         self.path = Path(path)
         self.path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
-        mode = 0o660 if os.environ.get('CRANGE_SHARED_DB') == '1' else 0o600
+        shared = os.environ.get('CRANGE_SHARED_DB') == '1'
+        # The dashboard and worker deliberately share this database.  Keep an
+        # already shared file group-readable even when a maintenance command
+        # is invoked without the service environment; otherwise that command
+        # could silently downgrade the file to 0600 and break Guacamole.
+        try:
+            existing_mode = stat.S_IMODE(self.path.stat().st_mode)
+        except FileNotFoundError:
+            existing_mode = 0
+        shared = shared or bool(existing_mode & 0o060 == 0o060)
+        mode = 0o660 if shared else 0o600
         fd = os.open(self.path, os.O_CREAT | os.O_RDWR, mode)
         os.close(fd)
         if self.path.stat().st_uid == os.geteuid():
