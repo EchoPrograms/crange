@@ -64,8 +64,14 @@ class CacheJobTests(unittest.TestCase):
                         'state': 'ready', 'verified_at': 'now', 'artifact_sha256': 'a'*64,
                         'cache_local': True, 'clone_modes_verified': ['linked'], 'job_id': 'prepare'}
                     catalog['images']['base-v1']['replicas'].append(replica)
-                    journal({'job_id': 'prepare', 'state': 'ready', 'template_id': 200, 'probe_id': 201,
-                             'provider_tasks': [], 'image_id': image_id, 'node': 'proxmox2', 'datastore_id': 'local-lvm'})
+                    initial = {'job_id': 'prepare', 'state': 'allocated', 'template_id': 200, 'probe_id': 201,
+                               'provider_tasks': [], 'image_id': image_id, 'node': 'proxmox2', 'datastore_id': 'local-lvm'}
+                    journal(initial)
+                    converting = {**initial, 'state': 'converting-template'}
+                    journal(converting)
+                    verifying = {**converting, 'state': 'verifying'}
+                    journal(verifying)
+                    journal({**verifying, 'state': 'ready'})
                     return catalog
                 worker.prepare.side_effect = prepare
                 return worker

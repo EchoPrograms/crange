@@ -293,9 +293,73 @@ class ReplicaWorker:
 
 class FileJournal:
     """Controller-owned durable journal and cooperative allocation lock."""
+    _INITIAL_STATES = {'identity-captured', 'exporting', 'allocated', 'evicting'}
+    _MUTABLE_FIELDS = {'state', 'provider_tasks', 'upid', 'eviction'}
+    _TRANSITIONS = {
+        'identity-captured': {'identity-captured'},
+        'exporting': {'exporting', 'exported'},
+        'exported': {'exported'},
+        'allocated': {'allocated', 'converting-template', 'cancelled-uncertain'},
+        'converting-template': {'converting-template', 'verifying', 'failed-verification', 'cancelled-uncertain'},
+        'verifying': {'verifying', 'ready', 'failed-verification', 'cancelled-uncertain'},
+        'failed-verification': {'failed-verification'},
+        'ready': {'ready', 'evicted'},
+        'evicting': {'evicting', 'evicted', 'cancelled-uncertain'},
+        'evicted': {'evicted'},
+        'cancelled-uncertain': {'cancelled-uncertain'},
+    }
+
     def __init__(self, directory: Path):
         self.directory = directory
         directory.mkdir(mode=0o700, parents=True, exist_ok=True)
+
+    @classmethod
+    def _validate_update(cls, previous, incoming):
+        if previous.get('job_id') != incoming.get('job_id'):
+            raise DistributionError('Journal update cannot change job identity.')
+        old_state, new_state = previous.get('state'), incoming.get('state')
+        if new_state not in cls._TRANSITIONS.get(old_state, set()):
+            raise DistributionError('Journal state transition is not permitted.')
+        for key, value in previous.items():
+            if key in cls._MUTABLE_FIELDS:
+                continue
+            if key not in incoming or incoming[key] != value:
+                raise DistributionError('Journal update changed or removed immutable job identity.')
+        if 'upid' in previous and incoming.get('upid') != previous['upid']:
+            raise DistributionError('Journal provider task identity cannot be changed.')
+        if 'upid' in incoming and not re.fullmatch(
+                r'UPID:[^:]+:[0-9A-F]+:[0-9A-F]+:[0-9A-F]+:[^:]+:[^:]+:[^:]*:',
+                str(incoming['upid']), re.IGNORECASE):
+            raise DistributionError('Journal provider task ID is invalid.')
+        old_tasks, new_tasks = previous.get('provider_tasks', []), incoming.get('provider_tasks', [])
+        if not isinstance(old_tasks, list) or not isinstance(new_tasks, list) or len(new_tasks) < len(old_tasks):
+            raise DistributionError('Journal provider task history cannot be removed.')
+        for task in new_tasks:
+            if (not isinstance(task, dict) or
+                    not re.fullmatch(r'UPID:[^:]+:[0-9A-F]+:[0-9A-F]+:[0-9A-F]+:[^:]+:[^:]+:[^:]*:',
+                                     str(task.get('upid', '')), re.IGNORECASE) or
+                    task.get('state') not in {'running', 'confirmed-terminal'}):
+                raise DistributionError('Journal provider task history is malformed.')
+        for index, old_task in enumerate(old_tasks):
+            new_task = new_tasks[index]
+            if not isinstance(old_task, dict) or not isinstance(new_task, dict):
+                raise DistributionError('Journal provider task history is malformed.')
+            if any(new_task.get(key) != value for key, value in old_task.items() if key != 'state'):
+                raise DistributionError('Journal provider task identity cannot be changed.')
+            allowed = {'running': {'running', 'confirmed-terminal'},
+                       'confirmed-terminal': {'confirmed-terminal'}}
+            if new_task.get('state') not in allowed.get(old_task.get('state'), set()):
+                raise DistributionError('Journal provider task state cannot move backwards.')
+        if new_state == 'exported':
+            if (not incoming.get('volume_id') or
+                    not re.fullmatch(r'[a-zA-Z0-9_.-]+:backup/vzdump-(?:qemu|lxc)-[a-zA-Z0-9_.-]+',
+                                     str(incoming.get('volume_id'))) or
+                    not re.fullmatch(r'[a-f0-9]{64}', str(incoming.get('artifact_sha256', ''))) or
+                    incoming.get('verified') is not True or incoming.get('complete_capture') is not True or
+                    not incoming.get('upid')):
+                raise DistributionError('Completed export requires one verified artifact and terminal UPID.')
+        if 'eviction' in previous and incoming.get('eviction') != previous['eviction']:
+            raise DistributionError('Journal eviction receipt cannot be changed.')
 
     @contextlib.contextmanager
     def allocation_lock(self):
@@ -333,8 +397,14 @@ class FileJournal:
                 if ((other.get('image_id'), other.get('node'), other.get('datastore_id')) == key and
                         other.get('state') not in ('reconciled-absent', 'cleaned-owned', 'evicted')):
                     raise DistributionError('Cache generation has an existing inflight/uncertain job; reconcile or attach.')
-        if record['state'] in ('allocated', 'exporting') and destination.exists():
-            raise DistributionError('Existing job must be reconciled, never blindly restarted.')
+        if destination.exists():
+            try:
+                previous = json.loads(destination.read_text())
+            except (OSError, ValueError) as exc:
+                raise DistributionError('Existing journal is unreadable; reconcile before updating.') from exc
+            self._validate_update(previous, record)
+        elif record.get('state') not in self._INITIAL_STATES:
+            raise DistributionError('Unknown initial journal state.')
         fd, temporary = tempfile.mkstemp(dir=self.directory)
         try:
             with os.fdopen(fd, 'w') as stream:
