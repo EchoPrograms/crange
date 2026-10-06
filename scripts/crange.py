@@ -1479,6 +1479,8 @@ def template_identity(reference: dict) -> dict:
     result = {field: reference.get(field) for field in ('template_id', 'template_node')}
     if 'profile' in reference:
         result['profile'] = reference['profile']
+    if 'image_id' in reference:
+        result['image_id'] = reference['image_id']
     return result
 
 
@@ -1498,6 +1500,9 @@ def release_scenario_boxes(path: Path, release: dict, team_id: str, prefix: str,
         if len(key) > 63:
             key = f"{prefix[:16]}-{hashlib.sha1(key.encode()).hexdigest()[:10]}-t{int(team_id):03d}"
         item = {k: source[k] for k in ("name", "ip_last_octet", "template", "node_name", "cores", "memory_mb", "full_clone", "started", "health_checks")}
+        # A staging guest's base image is not the captured release image.
+        # Legacy captures also have a stable alias suitable for publication.
+        item['image'] = pinned.get('image_id', template_key)
         version_identity = f"{release.get('release_id', release.get('version', 'release'))}:{source['name']}"
         version_mark = hashlib.sha1(version_identity.encode()).hexdigest()[:8]
         prefix_slug = re.sub(r"[^a-z0-9-]+", "-", prefix.lower()).strip("-")
@@ -1536,6 +1541,7 @@ def release_scenario_containers(path: Path, release: dict, team_id: str, prefix:
             "guac_protocol": source.get("guac_protocol", "ssh"),
             'release_id': release.get('release_id', release.get('version')),
             'release_scope': 'test' if prefix.startswith('test') else 'team',
+            'image': pinned.get('image_id', source['template']),
         }
         result[key].update({k: source[k] for k in ("display_name", "is_jumpbox", "guac_services", "guac_credentials") if k in source})
         result[key].update(release_attachment(source, team_id, network_map or {}))
@@ -2030,7 +2036,7 @@ def cmd_release_capture(args: argparse.Namespace) -> None:
                     status = api.status(node, vmid) if box["kind"] == "vm" else api.container_status(node, vmid)
                     if status == "stopped":
                         (api.start if box["kind"] == "vm" else api.container_start)(node, vmid)
-                reference = {"template_id": image_id, "template_node": node, "kind": box["kind"]}
+                reference = {"template_id": image_id, "template_node": node, "kind": box["kind"], "image_id": alias}
                 if box["kind"] == "vm":
                     reference['profile'] = {**source_profile, 'upgrade_packages': False}
                 references[alias] = reference
@@ -2038,6 +2044,7 @@ def cmd_release_capture(args: argparse.Namespace) -> None:
                 box["source_template"] = original_template
                 box["source_vm_id"] = vmid
                 box["template"] = alias
+                box["image"] = alias
                 box["full_clone"] = True
             permutations = [entry.strip().split(",") for entry in getattr(args, "boot_order", [])]
             scenario_names = {box["name"] for box in boxes}
@@ -2105,6 +2112,63 @@ def cmd_release_capture(args: argparse.Namespace) -> None:
 def cmd_release_show(args: argparse.Namespace) -> None:
     release = load_release(int(args.project), args.version)
     print(json.dumps(release, indent=2, sort_keys=True))
+
+
+def cmd_release_publish(args: argparse.Namespace) -> None:
+    """Administrator publication from protected, completed worker journals."""
+    from crange_catalog import publish_release_image
+    from crange_distribution import catalog_transaction, SSHVolumeHasher, _source_config_identity
+    from crange_scheduling import CONFIG, DATA, node_locks, disk_allocations
+    from crange_placement import ReservationLedger
+    release = load_release(int(args.project), args.version)
+    if int(release['project_id']) != int(args.project):
+        raise CrangeError('Release publication project scope does not match.')
+    reference = release['scenario']['templates'].get(args.template)
+    if not reference:
+        raise CrangeError('Choose a captured template alias from release-show.')
+    def journal_record(job):
+        if not re.fullmatch(r'[A-Za-z0-9-]{1,64}', job):
+            raise CrangeError('Invalid distribution job ID.')
+        file = DATA / 'source-journal' / (job + '.json')
+        info = file.lstat()
+        if file.is_symlink() or info.st_uid not in (0, os.geteuid()) or info.st_mode & 0o022:
+            raise CrangeError('Publication requires protected controller-owned worker journals.')
+        record = json.loads(file.read_text())
+        if record.get('job_id') != job:
+            raise CrangeError('Worker journal job identity does not match.')
+        return record
+    export = journal_record(args.export_job)
+    probe = journal_record(args.probe_job)
+    ledger = ReservationLedger(DATA / 'reservations.sqlite3')
+    try:
+        job = ledger.get_job(args.probe_job)
+        if (job['state'] != 'released' or job['project_id'] != int(args.project)
+                or job['allocations'] != [probe.get('reservation')]):
+            raise CrangeError('Source probe capacity reservation has not been reconciled exactly.')
+    finally:
+        ledger.close()
+    node, vmid = reference['template_node'], int(reference['template_id'])
+    kind = reference.get('kind', 'vm')
+    with node_locks([node], library=True):
+        api = ProxmoxAPI()
+        config = api.vm(node, vmid) if kind == 'vm' else api.container(node, vmid)
+        status = api.status(node, vmid) if kind == 'vm' else api.container_status(node, vmid)
+        if (int(config.get('template', 0)) != 1 or status != 'stopped'
+                or _source_config_identity(config, vmid) != export.get('identity_capture', {}).get('source_config_sha256')):
+            raise CrangeError('Captured release template changed since worker verification.')
+        # Validate all evidence before asking a node to read an archive path.
+        datastores = disk_allocations(config)
+        if len(datastores) != 1:
+            raise CrangeError('Release publication requires one defensible source datastore.')
+        source_datastore = next(iter(datastores))
+        publish_release_image({'schema_version': 1, 'images': {}}, release, args.template, export, probe,
+                              source_datastore=source_datastore)
+        if SSHVolumeHasher()(node, export['volume_id']) != export['artifact_sha256']:
+            raise CrangeError('Release artifact checksum changed since export.')
+        catalog_transaction(CONFIG / 'image-catalog.json', lambda catalog:
+            publish_release_image(catalog, release, args.template, export, probe,
+                                  source_datastore=source_datastore))
+    print(f"Published project-scoped immutable release image {reference.get('image_id', args.template)}.")
 
 
 def cmd_release_deploy(args: argparse.Namespace) -> None:
@@ -2818,6 +2882,10 @@ def make_parser() -> argparse.ArgumentParser:
     q = sub.add_parser("container-health"); q.add_argument("project"); q.add_argument("name", nargs="?"); q.set_defaults(func=cmd_container_health)
     q = sub.add_parser("scenario-health"); q.add_argument("project"); q.add_argument("name", nargs="?"); q.set_defaults(func=cmd_scenario_health)
     q = sub.add_parser("release-capture"); q.add_argument("project"); q.add_argument("version"); q.add_argument("--boot-order", action="append", default=[], help="Comma-separated staging VM start order; repeat to record permutations"); q.set_defaults(func=cmd_release_capture)
+    q = sub.add_parser('release-publish', help='Publish a captured release image from completed protected distribution journals')
+    q.add_argument('project'); q.add_argument('version'); q.add_argument('template')
+    q.add_argument('--export-job', required=True); q.add_argument('--probe-job', required=True)
+    q.set_defaults(func=cmd_release_publish)
     q = sub.add_parser("release-show"); q.add_argument("project"); q.add_argument("version"); q.set_defaults(func=cmd_release_show)
     q = sub.add_parser("release-deploy", help="Declare fresh release clones for selected teams")
     q.add_argument("project"); q.add_argument("version"); q.add_argument("--teams", type=int, nargs="+", required=True); q.add_argument("--team-override", action="append", default=[], help="TEAM:BOX:FIELD=VALUE; fields: ip_last_octet, cores, memory_mb, node_name, started"); q.set_defaults(func=cmd_release_deploy)

@@ -152,6 +152,50 @@ def publish_replica(catalog, image_id, replica):
     return validate_catalog(result)
 
 
+def publish_release_image(catalog, release, alias, export, probe, *, source_datastore):
+    """Bind completed worker evidence to one immutable release guest image.
+
+    The caller reads administrator-owned journals. Staging health checks alone
+    cannot substitute for a fresh, isolated source-clone identity test.
+    """
+    from crange_distribution import publish_exported_image
+    reference = release.get('scenario', {}).get('templates', {}).get(alias)
+    if not reference:
+        raise CatalogError('Unknown release template alias')
+    if export.get('verified') is not True or not export.get('upid'):
+        raise CatalogError('Completed verified export task evidence required')
+    image_id = reference.get('image_id', alias)
+    kind = reference.get('kind', 'vm')
+    source = (reference['template_node'], kind, int(reference['template_id']))
+    if (export.get('node'), export.get('kind'), export.get('source_id')) != source:
+        raise CatalogError('Export does not match the immutable release template')
+    capture = export.get('identity_capture', {})
+    tasks = probe.get('provider_tasks', [])
+    reservation = probe.get('reservation', {})
+    if (probe.get('state') != 'source-probed'
+            or (probe.get('source_node'), probe.get('kind'), probe.get('source_id')) != source
+            or probe.get('source_config_sha256') != capture.get('source_config_sha256')
+            or probe.get('source_capture_job_id') != capture.get('job_id')
+            or reservation.get('operation') != 'source_probe'
+            or reservation.get('project_id') != int(release['project_id'])
+            or reservation.get('artifact_sha256') != capture.get('source_config_sha256')
+            or not probe.get('probe_id') or probe['probe_id'] == source[2]
+            or not tasks or any(t.get('state') != 'confirmed-terminal' for t in tasks)
+            or tasks[-1].get('path') != f'/nodes/{source[0]}/{"qemu" if kind == "vm" else "lxc"}/{probe["probe_id"]}'
+            or probe.get('verification', {}).get('identity_unique') is not True):
+        raise CatalogError('Completed matching source-clone verification and cleanup required')
+    if not export.get('volume_id', '').startswith('crange-library:backup/'):
+        raise CatalogError('Release distribution requires a complete central library artifact')
+    updated = publish_exported_image(catalog, image_id, export, architecture='amd64',
+        source_revision=release['source_revision'], approved_projects=[int(release['project_id'])],
+        datastore_id=source_datastore, verification=probe['verification'])
+    updated['images'][image_id]['release'] = {
+        'release_id': release['release_id'], 'manifest_sha256': release['integrity_sha256'],
+        'template_alias': alias, 'export_job_id': export['job_id'], 'probe_job_id': probe['job_id']}
+    updated['images'][image_id]['retained_release_references'] = [release['release_id']]
+    return validate_catalog(updated)
+
+
 def retire_image(catalog, image_id, linked_references=()):
     if any(r.get('cache_local') for r in catalog['images'][image_id].get('replicas', [])):
         raise CatalogError('evict local cache generations with dependency proof before retirement')
