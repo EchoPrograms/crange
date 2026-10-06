@@ -68,6 +68,7 @@ class AdapterTests(unittest.TestCase):
 
     def test_unprotected_real_file_rejects(self):
         with tempfile.NamedTemporaryFile() as stream:
+            pathlib.Path(stream.name).chmod(0o666)
             with self.assertRaises(ValueError):adapters.protected(stream.name)
 
     def test_saved_plan_digests_and_configuration_boundary(self):
