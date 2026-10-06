@@ -73,6 +73,22 @@ class AdapterTests(unittest.TestCase):
             with self.assertRaises(ValueError):adapters.OwnedQGADiagnostics(transport).run(self.fixture.scope,diagnostic,timeout=timeout)
         self.assertEqual(transport.calls,[])
 
+    def test_bounded_http_failure_keeps_status_without_private_details(self):
+        import urllib.error
+        import time
+        class API:
+            endpoint='https://proxmox.invalid/api2/json'
+            token='private-token'
+            ssl_context=None
+        def denied(*args,**kwargs):
+            raise urllib.error.HTTPError('https://private.invalid',403,'private detail',{},None)
+        backend=adapters.BoundedPVE(API(),open_url=denied)
+        with self.assertRaises(ValueError) as caught:
+            backend.request('POST','/nodes/proxmox1/qemu/9911/agent/exec',
+                            {'command':['/bin/busybox','true']},deadline=time.monotonic()+10)
+        self.assertEqual(caught.exception.safe_cause,'guest_api_http_403')
+        self.assertNotIn('private',str(caught.exception))
+
     def test_unprotected_real_file_rejects(self):
         with tempfile.NamedTemporaryFile() as stream:
             pathlib.Path(stream.name).chmod(0o666)

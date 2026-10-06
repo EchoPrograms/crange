@@ -52,6 +52,9 @@ def probe_from_plan(plan, operation, expected):
             'Plan must contain only the reviewed probe create or delete.')
     value = row['change'].get('after' if operation == 'create' else 'before')
     require(isinstance(value, dict), 'Probe identity must be known.')
+    if operation == 'create':
+        require(value.get('pool_id') == 'crange-probes',
+                'New network probes must use the dedicated guest-agent execution pool.')
     require(value.get('node_name') == expected['node'] and value.get('vm_id') == expected['vmid'],
             'Probe node/VMID mismatch.')
     require(expected['job_id'] in value.get('tags', []) and 'crange-network-probe' in value.get('tags', []),

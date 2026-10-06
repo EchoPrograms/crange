@@ -21,6 +21,7 @@ import subprocess
 import time
 import urllib.parse
 import urllib.request
+import urllib.error
 
 from crange_network_acceptance import PROBE_ADDRESS, probe_from_plan, require, scope
 from crange_network_runner import plan_digest
@@ -193,6 +194,10 @@ class BoundedPVE:
         try:
             with self.open_url(request,context=self.api.ssl_context,timeout=min(10,remaining)) as response:
                 body=json.load(response)
+        except urllib.error.HTTPError as failure:
+            error=ValueError('Bounded probe API request failed.')
+            error.safe_cause=f'guest_api_http_{failure.code}' if 400 <= failure.code <= 599 else 'guest_api_http_error'
+            raise error from None
         except Exception:
             raise ValueError('Bounded probe API request failed.') from None
         require(isinstance(body,dict) and 'data' in body, 'Probe API response missing data.')

@@ -12,7 +12,7 @@ import crange_network_acceptance as acceptance
 class NetworkAcceptanceTests(unittest.TestCase):
     def setUp(self):
         self.scope = acceptance.scope(240, 'proxmox2', 'p240t254', '10.240.254.98/24', 9911, 'network-' + 'a'*32)
-        self.value = {'node_name':'proxmox2', 'vm_id':9911,
+        self.value = {'node_name':'proxmox2', 'vm_id':9911, 'pool_id':'crange-probes',
                       'tags':['crange-network-probe', self.scope['job_id']],
                       'network_device':[{'bridge':'p240t254'}],
                       'initialization':[{'ip_config':[{'ipv4':[{'address':'10.240.254.98/24','gateway':'10.240.254.1'}]}]}]}
@@ -33,6 +33,14 @@ class NetworkAcceptanceTests(unittest.TestCase):
 
     def test_complete_project240_tuple_passes_without_policy_write(self):
         self.assertEqual(acceptance.validate_receipt(self.report,self.create,self.delete),self.scope)
+
+    def test_create_requires_probe_pool_but_owned_legacy_delete_remains_possible(self):
+        for pool in (None,'crange-iac','other-pool'):
+            with self.subTest(pool=pool):
+                self.value['pool_id']=pool
+                with self.assertRaises(ValueError):
+                    acceptance.probe_from_plan(self.plan('create'),'create',self.scope)
+                self.assertEqual(acceptance.probe_from_plan(self.plan('delete'),'delete',self.scope)['pool_id'],pool)
 
     def test_cross_project_or_node_or_address_proof_rejected(self):
         for key, value in [('node_name','proxmox3'),('vm_id',9912)]:

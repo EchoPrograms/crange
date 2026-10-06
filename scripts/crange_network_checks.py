@@ -41,7 +41,9 @@ class FixedGuestNetworkChecks:
         def read(method,path,fields=None):
             try:
                 return self.transport.request(method,path,fields,deadline=deadline)
-            except Exception:
+            except Exception as error:
+                if re.fullmatch(r'guest_api_http_(?:[45]\d\d|error)',str(getattr(error,'safe_cause',''))):
+                    raise
                 require_diagnostic(False,'guest_api_request_failed')
         class DeadlineAPI:
             def request(self,method,path,fields=None):return read(method,path,fields)
