@@ -50,6 +50,7 @@ class ReplicaTests(unittest.TestCase):
         self.assertEqual(replica['state'], 'ready')
         self.api.request.assert_any_call('DELETE', '/nodes/proxmox2/qemu/201', {'purge': 1})
         self.assertEqual(self.journal.call_args.args[0]['state'], 'ready')
+        self.assertEqual(self.journal.call_args.args[0]['probe_pool'], 'crange-probes')
 
     def test_missing_cache_reservation_has_no_provider_mutations(self):
         self.worker.reservation_validator = None
@@ -86,7 +87,7 @@ class ReplicaTests(unittest.TestCase):
     def test_linked_probe_and_upid_are_recorded_before_wait(self):
         self.prepare()
         self.api.request.assert_any_call('POST', '/nodes/proxmox2/qemu/200/clone',
-            {'newid': 201, 'full': 0, 'pool': 'crange-iac',
+            {'newid': 201, 'full': 0, 'pool': 'crange-probes',
              'description': 'CRANGE verification test', 'name': 'crange-probe-201'})
         self.assertEqual(self.journal.call_args.args[0]['provider_tasks'][-1]['state'], 'confirmed-terminal')
 
@@ -234,6 +235,7 @@ class ProbeTests(unittest.TestCase):
     def test_ct_probe_uses_disconnected_approved_network_and_real_identities(self):
         api = Mock()
         api.request.side_effect = lambda method, path, fields=None: (
+            {'members':[{'type':'lxc','node':'proxmox2','vmid':201}]} if path == '/pools/crange-probes' else
             {'tags': 'crange-image', 'net0': 'name=eth0,bridge=p003t254'}
             if method == 'GET' else 'UPID:probe')
         execute = Mock(side_effect=['running', 'b'*32, 'ssh-ed25519 newkey guest'])
@@ -241,10 +243,19 @@ class ProbeTests(unittest.TestCase):
             {'machine_id': 'a'*32, 'ssh_host_key': 'ssh-ed25519 oldkey source'}, ct_exec=execute)
         result = verifier(api, 'proxmox2', 'lxc', 201)
         self.assertTrue(result['identity_unique'])
-        update = api.request.call_args_list[1]
+        update = api.request.call_args_list[2]
         self.assertIn('link_down=1', update.args[2]['net0'])
         self.assertIn('bridge=vmbrtest', update.args[2]['net0'])
         self.assertEqual(result['evidence']['machine_id'], 'b'*32)
+
+    def test_probe_outside_dedicated_pool_is_refused_before_guest_operations(self):
+        api=Mock();api.request.return_value={'members':[]}
+        execute=Mock()
+        verifier=ProbeVerifier('vmbrtest',['vmbrtest'],{'machine_id':'a'*32,'ssh_host_key':'ssh-ed25519 oldkey source'},ct_exec=execute)
+        with self.assertRaisesRegex(DistributionError,'pool membership'):
+            verifier(api,'proxmox2','lxc',201)
+        execute.assert_not_called()
+        api.request.assert_called_once_with('GET','/pools/crange-probes')
 
     def test_command_adapter_rejects_arbitrary_command(self):
         run = Mock()

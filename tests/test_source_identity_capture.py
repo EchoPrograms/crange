@@ -15,6 +15,7 @@ class CaptureTests(unittest.TestCase):
     def fixture(self,kind='container'):
         config={'tags':'crange-image','memory':512,'cores':1,'rootfs':'local-lvm:vm-100-disk-0,size=8G'}
         def request(method,path,fields=None):
+            if path == '/pools/crange-probes':return {'members':[{'type':'qemu' if kind=='vm' else 'lxc','node':'proxmox2','vmid':100}]}
             if path.endswith('/config'):return copy.deepcopy(config)
             if path.endswith('/status/current'):return {'status':'running'}
             raise AssertionError((method,path))
@@ -30,6 +31,17 @@ class CaptureTests(unittest.TestCase):
             ['/usr/bin/systemctl','is-system-running'],['/bin/cat','/etc/machine-id'],['/bin/cat','/etc/ssh/ssh_host_ed25519_key.pub']])
         journal.assert_called_once_with(record)
         self.assertTrue(all(call.args[0]=='GET' for call in api.request.call_args_list))
+
+    def test_source_outside_probe_pool_has_no_execution(self):
+        for members in ([],[{'type':'lxc','node':'proxmox3','vmid':100}],
+                        [{'type':'qemu','node':'proxmox2','vmid':100}]):
+            with self.subTest(members=members):
+                api,config,execute=self.fixture()
+                api.request.side_effect=lambda method,path,fields=None: {'members':members}
+                with self.assertRaisesRegex(DistributionError,'pool membership'):
+                    capture_source_identity(api,node='proxmox2',kind='container',vmid=100,job_id='capture-1',journal=Mock(),ct_exec=execute)
+                execute.assert_not_called()
+                self.assertEqual(api.request.call_count,1)
 
     def test_template_is_never_booted_or_executed(self):
         api,config,execute=self.fixture();config['template']=1
@@ -50,7 +62,7 @@ class CaptureTests(unittest.TestCase):
                 export_image(api,node='proxmox2',kind='container',vmid=100,storage='library',job_id='export-1',journal=Mock(),hash_volume=Mock(),approved_backup_storage=[('proxmox2','library')],identity_record={**record,**change})
 
     def test_vm_capture_uses_fixed_guest_agent_commands(self):
-        api,config,_=self.fixture()
+        api,config,_=self.fixture('vm')
         original=api.request.side_effect
         outputs=iter(['running','a'*32,KEY])
         def request(method,path,fields=None):

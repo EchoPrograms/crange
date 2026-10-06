@@ -202,3 +202,63 @@ New automatic jumpboxes initially prefer proxmox4 as a soft suggestion. Explicit
 empty preference means no preference; saved legacy pins and existing placement
 remain unchanged. Eligibility and headroom can override this suggestion, including
 proxmox4's configured overcommitment. Reviewed placement reports the fallback.
+
+### Dedicated disposable identity-probe pool
+
+The fixed replica verifier creates disposable VM/CT clones in `crange-probes`.
+Base cache templates, range guests, release clones and existing resources keep
+their existing `crange-iac` pool. Identity capture and the fixed verifier check
+`GET /pools/crange-probes` for the exact node, guest type and VMID before any
+in-guest execution. Missing pool, unreadable membership or a different member
+fails closed. The `crange-image` ownership tag remains required independently;
+a tag alone never authorizes execution. CT verification still uses the existing
+fixed, allowlisted host adapter; it receives no QGA privilege.
+
+Administrator deployment checklist (not performed by these source changes):
+
+1. Create `crange-probes` as a dedicated pool. Keep ordinary guests and source
+   templates outside it; place only temporary bootstrap guests and disposable
+   verification clones there. Never grant guest-agent execution on `/vms`, `/`,
+   or `crange-iac`, and do not edit the existing `CrangeDeploy` role.
+2. Grant a separate probe role on `/pool/crange-probes` to the worker principal
+   and effective token as required by the existing token's privilege separation.
+   The fixed operations require `Pool.Audit`, `VM.Allocate`, `VM.Audit`,
+   `VM.Config.Network`, `VM.Config.Options`, `VM.PowerMgmt` and
+   `VM.GuestAgent.Unrestricted`. A reviewed reduced probe profile additionally
+   needs `VM.Config.CPU` and `VM.Config.Memory` (including the VM sockets setting).
+   Do not add hardware, disk, console, migration or general administration
+   privileges unless a separately reviewed operation actually needs them.
+3. On each exact source/cache template `/vms/<template-id>`, grant `VM.Audit` and
+   `VM.Clone`; these authorize inspection and cloning without QGA execution on
+   the source. Preserve existing narrowly scoped destination-storage
+   `Datastore.AllocateSpace` and required network `SDN.Use` permissions. If the
+   installed API requires `Pool.Allocate` to assign a new clone to this pool,
+   grant it only on `/pool/crange-probes` after observing that exact denial.
+4. Bootstrap missing source identity using an administrator-created, owned full
+   clone in `crange-probes`, on an approved disconnected bridge. Boot that
+   temporary clone, run the fixed `identity-capture`, then stop and convert it
+   into a new immutable template without changing its disk/configuration. Export
+   with `--identity-record` pointing to its protected capture journal. Publication
+   also requires the existing reviewed acceptance record. `VM.Backup` is needed
+   only on this exact new source VM/template for export. No original template is
+   booted, edited or replaced. After publication, move the retained template out
+   of the probe pool and remove any temporary explicit guest-agent/backup grants.
+5. Before enabling the workflow, use the actual worker token to prove: pool
+   membership read succeeds; clone into `crange-probes` succeeds; fixed QGA
+   `exec` and `exec-status` succeed only for the owned disposable QEMU probe;
+   the same endpoints are denied on an ordinary `crange-iac` guest and source
+   template. On the measured PVE API these endpoints require
+   `VM.GuestAgent.Unrestricted`, not just guest-agent audit. Check effective ACLs:
+   an existing inherited grant would invalidate the denial test. The current
+   shared Terraform token is not a dedicated probe credential.
+6. Verify probe stop/delete completes, the journal records `probe_pool`, and
+   catalog readiness follows confirmed deletion. Retain failed probes/journals
+   for controlled reconciliation. Recheck source-template and pool permissions
+   after removing bootstrap grants; do not enable automatic placement merely
+   because a role can be installed.
+
+The execution privilege is inherently broad within a guest, so pool isolation
+and the fixed controller code are both required. The upstream API permission
+checks for `exec` and `exec-status` can be inspected in
+[Proxmox QEMU Agent API source](https://git.proxmox.com/?p=qemu-server.git;a=blob;f=src/PVE/API2/Qemu/Agent.pm;hb=HEAD);
+confirm the installed node version before assigning a role.

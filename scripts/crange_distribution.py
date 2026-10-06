@@ -68,6 +68,22 @@ def publish_artifact(source: Path, library: Path, expected_sha256: str) -> Path:
         Path(temporary).unlink(missing_ok=True)
 
 
+PROBE_POOL = 'crange-probes'
+
+
+def _require_probe_pool(api, node, kind, vmid):
+    """Never use guest execution against ordinary range/template resources."""
+    try:
+        pool = api.request('GET', '/pools/' + PROBE_POOL)
+        members = pool.get('members', [])
+        present = any(member.get('type') == kind and member.get('node') == node
+                      and str(member.get('vmid')) == str(vmid) for member in members)
+    except Exception as exc:
+        raise DistributionError('Cannot verify dedicated probe pool membership.') from exc
+    if not present:
+        raise DistributionError('Identity execution requires dedicated crange-probes pool membership.')
+
+
 def _owned(config: dict, marker: str | None = None) -> None:
     tags = set(str(config.get('tags', '')).split(';'))
     if 'crange-image' not in tags or (marker and marker not in tags):
@@ -241,12 +257,12 @@ class ReplicaWorker:
         if int(config.get('template', 0)) != 1:
             raise DistributionError('Replica conversion did not produce a template.')
         probe_id = int(self.api.request('GET', '/cluster/nextid'))
-        record.update(state='verifying', probe_id=probe_id)
+        record.update(state='verifying', probe_id=probe_id, probe_pool=PROBE_POOL)
         self.journal(dict(record))
         self._task(node, 'POST', f'/nodes/{node}/{kind}/{vmid}/clone',
                    {'newid': probe_id, 'full': int(clone_mode == 'full'),
                     **({'storage': datastore_id} if clone_mode == 'full' else {}),
-                    'pool': 'crange-iac', 'description': f'CRANGE verification {job_id}',
+                    'pool': PROBE_POOL, 'description': f'CRANGE verification {job_id}',
                     'name' if kind == 'qemu' else 'hostname': f'crange-probe-{probe_id}'})
         probe_config = {'tags': owned_tags}
         if image.get('probe_resources'):
@@ -368,6 +384,7 @@ def capture_source_identity(api, *, node, kind, vmid, job_id, journal, ct_exec=N
         raise DistributionError('Invalid source identity capture scope.')
     guest_type = 'qemu' if kind == 'vm' else 'lxc'
     base = f'/nodes/{node}/{guest_type}/{vmid}'
+    _require_probe_pool(api, node, guest_type, vmid)
     config = api.request('GET', base + '/config')
     _owned(config)
     if int(config.get('template', 0)) or api.request('GET', base + '/status/current').get('status') != 'running':
@@ -550,6 +567,7 @@ class ProbeVerifier:
 
     def __call__(self, api, node, kind, vmid):
         import time
+        _require_probe_pool(api, node, kind, vmid)
         config = api.request('GET', f'/nodes/{node}/{kind}/{vmid}/config')
         _owned(config)
         networks = [key for key in config if re.fullmatch(r'net[0-9]+', key)]
