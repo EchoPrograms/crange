@@ -120,3 +120,56 @@ timeouts and cleanup internally. It must derive policy candidates from reviewed
 receipts for one tuple at a time, preserve existing grants, and leave capacity,
 quota, image, provider and storage gates intact. This CLI deliberately does not
 synthesize `network_attestations` or widen `allowed_nodes`.
+
+## Fixed lifecycle foundation and blocked queue integration
+
+`scripts/crange_network_runner.py` now implements a source-only lifecycle with a
+`ProbeBackend` interface. It claims a protected durable journal exclusively,
+reserves resources, gates the exact create plan on an administrator-reviewed
+SHA-256, applies the saved plan, installs only the scoped controller/Guac TCP/22
+rule specification, dispatches six fixed check names with a 60-second deadline,
+and attempts independent rule/probe cleanup even after partial create or test
+failure. Destroy also requires an exact reviewed saved-plan digest. Only
+confirmed guest/state/rule absence permits reservation release; only complete
+valid evidence after cleanup permits a receipt. Provider exception text is not
+persisted. All retries with an existing journal are rejected.
+
+There is deliberately no production backend or queue operation yet. The
+`ProbeBackend` is a typed contract, not a guest-command execution adapter.
+Tests exercise the lifecycle with a fake backend; they do not claim live
+Terraform/SSH/firewall acceptance. Adapters still need to enforce approved
+immutable image/resource constraints, atomic project/address/VMID reservations,
+actual saved-plan file hashes, provider task completion, exact live ownership,
+fixed guest/management tests with subprocess/API deadlines, and retained
+artifacts. Calling this module with an untrusted backend would defeat its trust
+boundary; it belongs exclusively in the privileged reviewed worker.
+
+Queue integration is blocked by the current `JobStore.cancel` process-group
+termination and the worker's interrupted-job recovery: process termination can
+skip Python cleanup. Do not expose this runner through a GUI or add an operation
+that assumes `finally` is cancellation-safe. The safe integration requires:
+
+1. An administrator-only typed operation containing a reviewed manifest ID and
+   scope, never commands, template code, arbitrary endpoint sets or file paths.
+2. Cooperative cancellation: set a durable cancellation request, stop starting
+   tests, and enter owned cleanup. Keep the queue job and reservation nonterminal
+   while cleanup is uncertain. The cancellation handler must not kill this
+   operation as it currently kills ordinary worker processes.
+3. Startup recovery and manual reconcile: load the exact journal scope, stored
+   rule specification and saved-plan identities; independently query cluster
+   guest ownership and provider tasks. Remove only the recorded rule; review a
+   fresh single-probe destroy plan when an owned probe remains. Never destroy an
+   untagged or mismatched VMID. Mark uncertain outcomes for administrator action.
+   Verify all absence conditions before releasing reservations or retrying.
+4. Keep each lifecycle transition durable by syncing files and parent
+   directories, as this runner does. Production adapters must also persist
+   reservation and provider-task journals durably before acknowledging mutations.
+5. A receipt publisher that retains logs and plan/provider artifacts and validates
+   the complete bundle before any separate exact-tuple policy review. It must
+   never infer zone-wide trust or change `allowed_nodes` from test success.
+
+Journal states cover reservation, create pending/created, rule pending/testing,
+rule cleanup/destroy pending, cleanup uncertainty, confirmed cleanup with pending
+reservation release, and terminal failed/accepted cleanup. A crash at any
+nonterminal phase therefore blocks blind reallocation and identifies the exact
+owned guest/rule to reconcile.
