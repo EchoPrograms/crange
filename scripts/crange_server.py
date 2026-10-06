@@ -254,6 +254,9 @@ def serve(host='127.0.0.1', port=8000):
                                             rows_provider=broker_rows)
                     return self.reply(status, result)
                 except (ValueError, BridgeError, TicketError) as exc:
+                    # Keep the browser response generic, but leave one
+                    # actionable line in the controller journal for operators.
+                    print(f'crange: guac bridge rejected: {exc}', flush=True)
                     return self.reply(403, {'error': str(exc)})
             origin = self.headers.get('Origin')
             if origin and urlsplit(origin).netloc != self.headers.get('Host'):
