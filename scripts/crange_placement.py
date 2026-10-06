@@ -299,7 +299,8 @@ class ReservationLedger:
         storage = node.get('storages', {}).get(datastore_id, {})
         if node_name not in policy.get('allowed_nodes', []) or not node.get('online') or node.get('draining') or node.get('load', 0) > policy.get('max_load', 1):
             raise PlacementError('cache destination node is unavailable or excluded')
-        if datastore_id not in policy.get('allowed_storages', []) or not storage.get('available') or image['kind'] not in storage.get('guest_types', []) or image['architecture'] not in node.get('architectures', []) or image['kind'] not in node.get('guest_types', []):
+        if datastore_id not in policy.get('allowed_storages', []) or not storage.get('available') or image['kind'] not in storage.get('guest_types', []) or image['architecture'] not in node.get('architectures', []) or (image['kind'] not in node.get('guest_types', []) and not (image['kind'] == 'container' and
+                policy.get('nodes', {}).get(node_name, {}).get('container_cache_preparation_allowed') is True)):
             raise PlacementError('cache destination datastore or guest capability unavailable')
         mode = capacity.get('clone_mode', 'linked')
         if mode not in ('linked', 'full') or (mode == 'linked' and (storage.get('shared') or not storage.get('snapshots_verified') or 'linked' not in storage.get('clone_modes', []))):

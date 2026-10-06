@@ -14,6 +14,32 @@ from crange_jobs import command
 from test_placement import fixtures
 
 class CacheStagingTests(unittest.TestCase):
+    def test_acceptance_policy_requires_root_owned_exact_node_and_storage(self):
+        from crange_cache_jobs import acceptance_policy
+        from crange_distribution import DistributionError
+        from unittest.mock import Mock
+        policy = {'enabled':True,'allowed_nodes':['proxmox2'],
+            'approved_storage':[['proxmox2','local-lvm']],
+            'nodes':{'proxmox2':{'container_cache_preparation_allowed':True}}}
+        path = Mock(); path.stat.return_value = SimpleNamespace(st_uid=0, st_mode=0o640)
+        path.is_symlink.return_value = False; path.read_text.return_value = json.dumps(policy)
+        with patch('crange_cache_jobs.Path',return_value=path):
+            self.assertEqual(acceptance_policy('/policy','proxmox2','local-lvm'),policy)
+            for values in [(1000,0o640),(0,0o666)]:
+                path.stat.return_value = SimpleNamespace(st_uid=values[0],st_mode=values[1])
+                with self.assertRaises(DistributionError): acceptance_policy('/policy','proxmox2','local-lvm')
+            path.stat.return_value = SimpleNamespace(st_uid=0,st_mode=0o640)
+            with self.assertRaises(DistributionError): acceptance_policy('/policy','proxmox1','local-lvm')
+            with self.assertRaises(DistributionError): acceptance_policy('/policy','proxmox2','hdd-lvm')
+            path.is_symlink.return_value = True
+            with self.assertRaises(DistributionError): acceptance_policy('/policy','proxmox2','local-lvm')
+
+    def test_gui_cache_job_cannot_supply_acceptance_policy_or_identity(self):
+        for field in ['acceptance_policy','acceptance_job_id']:
+            with self.assertRaises(ValueError):
+                command('template-distribution-prepare',3,{'image':'base-v1','node':'proxmox2',
+                    'storage':'local-lvm',field:'/policy'})
+
     def test_terraform_override_follows_protected_environment_load(self):
         with patch('crange_proxmox_compat.reviewed_identity', return_value={'enabled':True,'endpoint':'http://127.0.0.1:18766/'}), patch.object(crange,'run') as run:
             crange.tf_run(Path('/project'), ['plan'])

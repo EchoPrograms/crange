@@ -90,6 +90,27 @@ class PlacementTests(unittest.TestCase):
             self.assertEqual(allocation['resolved']['clone_mode'], 'linked')
             ledger.close()
 
+    def test_admin_ct_cache_flag_does_not_enable_production_guest_placement(self):
+        r, inv, cat, pol = fixtures(); r['kind'] = 'container'; r['memory_mb'] = 512
+        cat['images']['base-v1']['kind'] = 'container'
+        node = inv['nodes']['n1']; node['storages']['local']['guest_types'] = ['container']
+        pol['allowed_nodes'] = ['n1']
+        with tempfile.TemporaryDirectory() as temp:
+            ledger = ReservationLedger(pathlib.Path(temp) / 'ledger')
+            fields = dict(project_id=3, job_id='ct-cache', owner='cli', image_id='base-v1', catalog=cat,
+                node_name='n1', datastore_id='local', capacity={'memory_mb':512,'cpu_cores':1,'disk_gb':12},
+                inventory=inv, policy=pol, now=100)
+            with self.assertRaises(PlacementError): ledger.reserve_preparation(**fields)
+            pol['nodes'] = {'n1': {'container_cache_preparation_allowed': True}}
+            with self.assertRaises(PlacementError): schedule_batch([r], inv, cat, pol, now=100)
+            node['storages']['local']['available'] = False
+            with self.assertRaises(PlacementError): ledger.reserve_preparation(**fields)
+            node['storages']['local']['available'] = True
+            allocation = ledger.reserve_preparation(**fields)
+            self.assertEqual(allocation['resources']['disk_gb'], 12)
+            self.assertNotIn('container', node['guest_types'])
+            ledger.close()
+
     def test_universal_image_scope_still_uses_project_scoped_scheduler_check(self):
         r, inv, cat, pol = fixtures()
         cat['images']['base-v1']['approved_projects'] = ['*']

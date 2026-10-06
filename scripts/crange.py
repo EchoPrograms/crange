@@ -2621,9 +2621,13 @@ def cmd_distribution_inventory(args):
 
 
 def cmd_distribution_prepare(args):
+    if bool(getattr(args, 'acceptance_policy', None)) != bool(getattr(args, 'acceptance_job_id', None)):
+        raise CrangeError('Isolated acceptance requires both protected policy and explicit job ID.')
     from crange_cache_jobs import prepare_cache
     prepare_cache(project_id=int(args.project), image_id=args.image, node_name=args.node,
-                  datastore_id=args.storage, owner=os.environ.get('CRANGE_ACTOR', f'cli:{os.getuid()}'))
+                  datastore_id=args.storage, owner=os.environ.get('CRANGE_ACTOR', f'cli:{os.getuid()}'),
+                  acceptance_policy_path=getattr(args, 'acceptance_policy', None),
+                  job_id=getattr(args, 'acceptance_job_id', None))
 
 
 def cmd_cache_gc_review(args):
@@ -2662,6 +2666,8 @@ def make_parser() -> argparse.ArgumentParser:
     q.add_argument('--project', required=True, type=int, help='Authorized project whose approved image/cache quota is charged')
     q.add_argument('--node', required=True, choices=sorted(NODES))
     q.add_argument('--storage', required=True, choices=['local-lvm', 'ssd-lvm', 'hdd-lvm'])
+    q.add_argument('--acceptance-policy', type=Path, help='Admin-only root-owned one-node isolated CT cache policy')
+    q.add_argument('--acceptance-job-id', type=lambda v:v if re.fullmatch(r'[a-zA-Z0-9-]{1,64}',v) else (_ for _ in ()).throw(argparse.ArgumentTypeError('Invalid acceptance job ID')))
     q.set_defaults(func=cmd_distribution_prepare)
     q = sub.add_parser('cache-gc-review', help='Admin: retain an exact local-cache eviction review')
     q.add_argument('image'); q.add_argument('--node', required=True, choices=sorted(NODES)); q.add_argument('--template-id',required=True,type=int); q.set_defaults(func=cmd_cache_gc_review)

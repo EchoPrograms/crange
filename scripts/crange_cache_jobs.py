@@ -32,6 +32,20 @@ def _settings():
     return policy, catalog
 
 
+def acceptance_policy(path, node_name, datastore_id):
+    """Load an administrator-owned, one-node cache-only acceptance policy."""
+    path = Path(path)
+    stat = path.stat()
+    if path.is_symlink() or stat.st_uid != 0 or stat.st_mode & 0o022:
+        raise DistributionError('Acceptance policy must be root-owned and not writable by others.')
+    policy = json.loads(path.read_text())
+    if (not policy.get('enabled') or policy.get('allowed_nodes') != [node_name] or
+            policy.get('approved_storage') != [[node_name, datastore_id]] or
+            policy.get('nodes', {}).get(node_name, {}).get('container_cache_preparation_allowed') is not True):
+        raise DistributionError('Acceptance policy must approve only this exact isolated CT cache destination.')
+    return policy
+
+
 def _root():
     scheduling.DATA.mkdir(parents=True, exist_ok=True, mode=0o700)
     return scheduling.DATA
@@ -112,7 +126,7 @@ def _prove_absent_cache_allocation(api, node, template_id, created_at):
 
 
 def prepare_cache(*, project_id, image_id, node_name, datastore_id='local-lvm',
-                  additional_capacity=None, owner='cli', job_id=None):
+                  additional_capacity=None, owner='cli', job_id=None, acceptance_policy_path=None):
     """Admit cache/probe plus optional imminent guest demand, then verify local base.
 
     Failure retains reservations, provider IDs/tasks and artifact pin. Success
@@ -120,7 +134,13 @@ def prepare_cache(*, project_id, image_id, node_name, datastore_id='local-lvm',
     The caller must immediately obtain the guest deployment's reviewed plan.
     """
     job_id = job_id or 'cache-' + uuid.uuid4().hex
+    if not re.fullmatch(r'[a-zA-Z0-9-]{1,64}', job_id):
+        raise DistributionError('Invalid cache preparation job ID.')
     policy, _ = _settings()
+    if acceptance_policy_path is not None:
+        if additional_capacity:
+            raise DistributionError('Acceptance cache preparation cannot include guest deployment demand.')
+        policy = acceptance_policy(acceptance_policy_path, node_name, datastore_id)
     api = ProxmoxAPI()
     journal = FileJournal(_root() / 'cache-journal')
     ledger = ReservationLedger(_root() / 'reservations.sqlite3')
@@ -132,6 +152,8 @@ def prepare_cache(*, project_id, image_id, node_name, datastore_id='local-lvm',
                 image = catalog['images'].get(image_id)
                 if not image or ('*' not in image['approved_projects'] and project_id not in image['approved_projects']):
                     raise DistributionError('Image is not approved for the selected project.')
+                if acceptance_policy_path is not None and image['kind'] != 'container':
+                    raise DistributionError('Acceptance cache policy is restricted to container images.')
                 ready = _ready(image, node_name, datastore_id)
                 if ready:
                     if len(ready) != 1: raise DistributionError('Ambiguous cache generation; reconcile.')
