@@ -19,7 +19,7 @@ import uuid
 from crange import ProxmoxAPI
 from crange_distribution import (DistributionError, FileJournal, ProbeVerifier,
     ReplicaWorker, SSHContainerExec, SSHVolumeHasher, catalog_transaction, required_capacity,
-    shared_reservation_validator)
+    shared_reservation_validator, UnixContainerBackingVerifier)
 from crange_image_cache import CacheError, build_eviction_plan, apply_eviction_plan
 from crange_placement import ReservationLedger
 import crange_scheduling as scheduling
@@ -205,7 +205,7 @@ def prepare_cache(*, project_id, image_id, node_name, datastore_id='local-lvm',
                     approved_storage=[(node_name, datastore_id)],
                     tested_paths=settings.get('tested_paths', []),
                     allocation_lock=journal.allocation_lock, hash_volume=SSHVolumeHasher(),
-                    reservation_validator=validator)
+                    reservation_validator=validator, backing_verifier=UnixContainerBackingVerifier())
                 with artifact_pin(artifact.get('volume_id'), image['artifact_sha256'], job_id):
                     updated = worker.prepare(catalog, image_id, source_node=artifact.get('node'),
                         source_id=artifact.get('source_id'), node=node_name, datastore_id=datastore_id,
@@ -684,7 +684,7 @@ def resume_cache_template(job_id):
                 approved_storage=[('proxmox2', 'local-lvm')],
                 tested_paths=settings.get('tested_paths', []),
                 allocation_lock=journal.allocation_lock,
-                reservation_validator=validator)
+                reservation_validator=validator, backing_verifier=UnixContainerBackingVerifier())
             # The existing restore already created a template; resume only performs
             # disposable identity verification, exact probe cleanup, then publish.
             updated = worker.resume_template(catalog, image_id, record=record)

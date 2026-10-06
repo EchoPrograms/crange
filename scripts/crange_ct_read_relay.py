@@ -57,7 +57,7 @@ def validate_guest(config, members, node, vmid, marker):
         raise ValueError('Probe must remain disconnected on the approved bridge.')
 
 
-def host_read(request, marker, source_marker=None):
+def host_read(request, marker, source_marker=None, source_pool='crange-probes'):
     node, vmid, command = request['node'], request['vmid'], request['command']
     if socket.gethostname().split('.')[0] != node:
         raise ValueError('Relay reached a different cluster node.')
@@ -68,7 +68,9 @@ def host_read(request, marker, source_marker=None):
     if command == 'linked-backing':
         source_id = request['source_id']
         source = get(f'/nodes/{node}/lxc/{source_id}/config')
-        members = get('/pools/crange-probes')['members']
+        if source_pool not in ('crange-probes', 'crange-iac'):
+            raise ValueError('Unapproved backing source pool.')
+        members = get('/pools/' + source_pool)['members']
         if (len([r for r in members if r.get('type') == 'lxc' and r.get('node') == node and r.get('vmid') == source_id]) != 1 or
                 not source_marker or source_marker not in str(source.get('tags', '')).split(';') or
                 'crange-image' not in str(source.get('tags', '')).split(';') or
@@ -105,7 +107,8 @@ def dispatch(value, config, peer_uid, run=subprocess.run):
     # The remote program is fixed source plus serialized validated data, never shell input.
     program = Path(__file__).read_text().split("\nif __name__ == '__main__':")[0]
     source_marker = config['allowed_guests'].get(node, {}).get(str(value.get('source_id')))
-    program += '\nprint(json.dumps({"value":host_read(' + repr(value) + ',' + repr(marker) + ',' + repr(source_marker) + ')}))\n'
+    source_pool = config.get('source_pools', {}).get(node, {}).get(str(value.get('source_id')), 'crange-probes')
+    program += '\nprint(json.dumps({"value":host_read(' + repr(value) + ',' + repr(marker) + ',' + repr(source_marker) + ',' + repr(source_pool) + ')}))\n'
     target = config['node_addresses'][node]
     if not re.fullmatch(r'10\.0\.0\.10[1-5]', target):
         raise ValueError('Unapproved cluster SSH address.')

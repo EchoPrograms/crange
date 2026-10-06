@@ -99,6 +99,22 @@ class ReplicaTests(unittest.TestCase):
              'description': 'CRANGE verification test', 'name': 'crange-probe-201'})
         self.assertEqual(self.journal.call_args.args[0]['provider_tasks'][-1]['state'], 'confirmed-terminal')
 
+    def test_linked_ct_cache_publication_requires_physical_snapshot_origin(self):
+        self.catalog['images']['base-v1']['kind'] = 'container'
+        self.worker.tested_paths = {'local-linked-container'}
+        backing = Mock(return_value={'verified': True, 'origin': 'base-200-disk-0'})
+        self.worker.backing_verifier = backing
+        result = self.prepare()
+        backing.assert_called_once_with('proxmox2', 200, 201)
+        self.assertEqual(result['images']['base-v1']['replicas'][-1]['clone_modes_verified'], ['linked'])
+        self.assertTrue(self.journal.call_args.args[0]['linked_backing']['verified'])
+        self.ids = iter([200, 201]); self.verify.reset_mock(); self.api.request.reset_mock()
+        backing.return_value = {'verified': False}
+        with self.assertRaisesRegex(DistributionError, 'backing relation'):
+            self.prepare()
+        self.verify.assert_not_called()
+        self.assertFalse(any(c.args[0] == 'DELETE' for c in self.api.request.call_args_list))
+
     def test_archive_cache_restore_does_not_create_source_local_temporary_copy(self):
         volume = 'crange-library:backup/vzdump-qemu-100.vma.zst'
         self.catalog['images']['base-v1']['artifact'] = {

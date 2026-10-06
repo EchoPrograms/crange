@@ -117,7 +117,8 @@ class ReplicaWorker:
     must run reviewed disposable-clone readiness and identity checks and return
     {passed: true, identity_unique: true, ...}. It cannot be supplied by GUI input.
     """
-    def __init__(self, api, journal, verify, *, approved_storage, tested_paths=(), allocation_lock=None, hash_volume=None, reservation_validator=None):
+    def __init__(self, api, journal, verify, *, approved_storage, tested_paths=(), allocation_lock=None, hash_volume=None, reservation_validator=None, backing_verifier=None):
+        self.backing_verifier = backing_verifier
         self.api, self.journal, self.verify = api, journal, verify
         self.allocation_lock = allocation_lock
         self.hash_volume = hash_volume
@@ -224,7 +225,7 @@ class ReplicaWorker:
             if kind == 'qemu':
                 fields.update(archive=archive['volume_id'], name=f'crange-replica-{vmid}')
             else:
-                fields.update(ostemplate=archive['volume_id'], restore=1,
+                fields.update(ostemplate=archive['volume_id'], restore=1, unprivileged=1,
                               hostname=f'crange-replica-{vmid}')
             self._task(node, 'POST', f'/nodes/{node}/{kind}', fields)
         else:
@@ -286,6 +287,8 @@ class ReplicaWorker:
         _owned(config, marker)
         if int(config.get('template', 0)) != 1:
             raise DistributionError('Replica conversion did not produce a template.')
+        if kind == 'lxc' and clone_mode == 'linked' and self.backing_verifier is None:
+            raise DistributionError('Linked CT cache publication requires physical backing verification.')
         probe_id = int(self.api.request('GET', '/cluster/nextid'))
         record.update(state='verifying', probe_id=probe_id, probe_pool=PROBE_POOL)
         self.journal(dict(record))
@@ -303,6 +306,12 @@ class ReplicaWorker:
             record['probe_resources'] = dict(profile)
             self.journal(dict(record))
         self.api.request('PUT', f'/nodes/{node}/{kind}/{probe_id}/config', probe_config)
+        if kind == 'lxc' and clone_mode == 'linked':
+            proof = self.backing_verifier(node, vmid, probe_id)
+            if not isinstance(proof, dict) or proof.get('verified') is not True:
+                raise DistributionError('Linked CT cache clone backing relation is unverified.')
+            record['linked_backing'] = proof
+            self.journal(dict(record))
         result = self.verify(_JournaledProbeAPI(self.api, record, self.journal), node, kind, probe_id)
         if not isinstance(result, dict) or result.get('passed') is not True or result.get('identity_unique') is not True:
             record['state'] = 'failed-verification'
@@ -1500,7 +1509,7 @@ def main(argv=None):
                         approved_storage=map(tuple, policy.get('approved_storage', [])),
                         tested_paths=policy.get('tested_paths', []),
                         allocation_lock=journal.allocation_lock, hash_volume=SSHVolumeHasher(),
-                        reservation_validator=validator)
+                        reservation_validator=validator, backing_verifier=UnixContainerBackingVerifier())
                     if archive:
                         with artifact_pin(archive['volume_id'], image['artifact_sha256'], args.job_id):
                             return worker.prepare(catalog, args.image_id,
