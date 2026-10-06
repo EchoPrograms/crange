@@ -263,3 +263,34 @@ and the fixed controller code are both required. The upstream API permission
 checks for `exec` and `exec-status` can be inspected in
 [Proxmox QEMU Agent API source](https://git.proxmox.com/?p=qemu-server.git;a=blob;f=src/PVE/API2/Qemu/Agent.pm;hb=HEAD);
 confirm the installed node version before assigning a role.
+
+### Fixed container identity relay
+
+An administrator may install `scripts/crange_ct_read_relay.py` as a root host
+service on the Proxmox node hosting controller CT114. Its protected mode-0600
+policy names the shifted controller worker UID, exact node/CT IDs and ownership
+job markers, and fixed cluster management addresses. It exposes no network port.
+The host binds `/run/crange-ct-read/socket` inside CT114; the directory is owned
+by `crange` with mode0700 and the socket has mode0600. `SO_PEERCRED` authenticates
+the exact worker UID. Restart the host relay after the controller restarts.
+
+The relay permits only fixed readiness, machine-ID and SSH-public-key reads, plus
+an exact local thin-LVM backing inspection. Each request requires matching
+`crange-probes` membership, `crange-image` and the approved job marker, an
+unprivileged non-template CT without external mounts/devices, and disconnected
+interfaces on `crprobe1450`. The host checks configuration before and after the
+read. Backing inspection additionally validates the exact immutable stopped
+source and actual LVM origin. Cluster SSH uses existing root host keys solely
+inside this guarded host service; the controller receives no host login key.
+Audit records contain request scope and outcome, never guest identities or keys.
+
+`source-probe --clone-mode linked` is an explicit administrator CT-only operation.
+Its captured source must be a stopped immutable local template and its datastore
+must have fresh complete discovery and verified local snapshot capability. The
+shared ledger reserves the full declared clone disk growth plus overhead under
+the approved linked-disk ratio. Physical source/clone backing proof must pass
+before readiness and identity checks. The fixed workflow verifies source
+configuration remains unchanged, deletes the exact owned disposable clone and
+releases its reservation only after confirmed terminal tasks and refreshed
+absence. This does not enable `provider_container_verified`: each node still
+requires separate pinned Terraform provider acceptance before CT placement.
