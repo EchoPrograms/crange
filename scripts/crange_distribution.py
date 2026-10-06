@@ -1043,6 +1043,26 @@ class SSHContainerExec:
                    ['/bin/cat', '/etc/ssh/ssh_host_ed25519_key.pub']]
         if command not in allowed or node not in {f'proxmox{i}' for i in range(1, 7)} or int(vmid) < 100:
             raise DistributionError('Unsupported CT verification command.')
+        relay = Path('/run/crange-host-read.sock')
+        if relay.exists():
+            import socket
+            from crange_ct_read_relay import COMMANDS
+            request = {'node': node, 'vmid': int(vmid),
+                       'command': next(key for key, value in COMMANDS.items() if value == command)}
+            with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as client:
+                client.settimeout(65); client.connect(str(relay))
+                client.sendall(json.dumps(request).encode() + b'\n')
+                data = b''
+                while not data.endswith(b'\n') and len(data) <= 8192:
+                    chunk = client.recv(8193 - len(data))
+                    if not chunk: break
+                    data += chunk
+            if len(data) > 8192 or not data.endswith(b'\n'):
+                raise DistributionError('Fixed CT relay response is invalid.')
+            response = json.loads(data)
+            if set(response) != {'value'} or not isinstance(response['value'], str):
+                raise DistributionError('Fixed CT relay denied the identity read.')
+            return response['value']
         result = self.run(['ssh', '-o', 'BatchMode=yes', node,
                           shlex.join(['pct', 'exec', str(int(vmid)), '--'] + command)],
                          check=True, capture_output=True, text=True, timeout=60)
