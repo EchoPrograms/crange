@@ -188,6 +188,7 @@ def serve():
                 else:
                     raise TicketError('Invalid launch request.')
             except (TicketError, ValueError, TypeError, OSError, RuntimeError, KeyError) as exc:
+                print(f'crange: guac broker request failed: {exc}', flush=True)
                 reply = {'error': str(exc) if isinstance(exc, (TicketError, ValueError)) else 'Guacamole service request failed.'}
             self.wfile.write(json.dumps(reply, separators=(',', ':')).encode() + b'\n')
 
