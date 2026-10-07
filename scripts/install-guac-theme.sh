@@ -7,7 +7,15 @@ if [ "$(id -u)" -ne 0 ]; then
 fi
 
 source_jar=${1:-/opt/crange/guacamole/crange-theme.jar}
-guacamole_home=${GUACAMOLE_HOME:-/etc/guacamole}
+if [ -n "${GUACAMOLE_HOME:-}" ]; then
+    guacamole_home=$GUACAMOLE_HOME
+elif [ -f /opt/guacamole/compose.yaml ] && [ -d /opt/guacamole/extensions ]; then
+    # The range's Docker deployment bind-mounts this host directory into the
+    # container's GUACAMOLE_HOME/extensions path.
+    guacamole_home=/opt/guacamole
+else
+    guacamole_home=/etc/guacamole
+fi
 extension_dir="$guacamole_home/extensions"
 target="$extension_dir/crange-theme.jar"
 
@@ -35,6 +43,14 @@ fi
 
 url=${GUACAMOLE_URL:-http://127.0.0.1:8080/}
 if command -v curl >/dev/null 2>&1; then
-    curl --fail --silent --show-error --max-time 15 "$url" >/dev/null
+    attempts=0
+    until curl --fail --silent --show-error --max-time 5 "$url" >/dev/null; do
+        attempts=$((attempts + 1))
+        if [ "$attempts" -ge 12 ]; then
+            echo "crange: Guacamole did not become healthy at $url" >&2
+            exit 1
+        fi
+        sleep 2
+    done
 fi
 echo "Installed and restarted the CRANGE Guacamole theme."

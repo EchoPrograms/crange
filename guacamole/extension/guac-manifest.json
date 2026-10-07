@@ -4,6 +4,9 @@
   "namespace": "crange-theme",
   "css": ["theme.css"],
   "js": ["ui.js"],
+  "resources": {
+    "assets/remote-access.svg": "image/svg+xml"
+  },
   "authProviders": ["org.crange.guac.CrangeBridgeProvider"],
   "translations": ["translations/en.json"]
 }

@@ -1,6 +1,23 @@
 (function () {
     'use strict';
 
+    /* Guacamole has no extension hook for the document favicon. Point the
+       browser tab at an extension resource without replacing the login UI. */
+    function setCRANGEFavicon() {
+        var href = new URL('app/ext/crange-theme/assets/remote-access.svg', window.location.href).href;
+        var icon = document.querySelector('link[rel~="icon"]');
+        if (!icon) {
+            icon = document.createElement('link');
+            icon.rel = 'icon';
+            document.head.appendChild(icon);
+        }
+        icon.type = 'image/svg+xml';
+        icon.href = href;
+    }
+
+    if (document.head) setCRANGEFavicon();
+    else document.addEventListener('DOMContentLoaded', setCRANGEFavicon, { once: true });
+
     var home = [
         '<div class="cr-home" ng-class="{loading: !isLoaded()}">',
         '  <header class="cr-home-header">',

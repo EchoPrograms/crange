@@ -1,10 +1,15 @@
 # CRANGE Guacamole interface extension
 
 This directory is a Guacamole extension source artifact. Build a JAR whose
-root contains `guac-manifest.json`, `theme.css`, and `ui.js`, then install it in the
+root contains `guac-manifest.json`, `theme.css`, `ui.js`, and the declared `assets/`
+resources, then install it in the
 Guacamole `GUACAMOLE_HOME/extensions` directory. The manifest is pinned to
 Guacamole 1.6.0, matching the live range deployment. Update the version field
 when the Guacamole host is upgraded.
+
+The extension registers `assets/remote-access.svg` as a web resource and sets
+it as the browser favicon. The login-page logo remains Guacamole's own markup;
+the existing dark theme and authentication flow are unchanged.
 
 The interface uses Guacamole's current session token to call its same-origin
 `/api/ext/crange-control/control` endpoint. The Guacamole server verifies that

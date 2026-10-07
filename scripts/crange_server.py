@@ -232,13 +232,13 @@ def serve(host='127.0.0.1', port=8000):
                 if not user['admin']:
                     return self.reply(403, {'error': 'Administrator access required.'})
                 return self.reply(200, {'events': auth.list_audit()})
-            names = {'/': 'index.html', '/app.js': 'app.js', '/styles.css': 'styles.css', '/users.js': 'users.js', '/templates.js':'templates.js'}
+            names = {'/': 'index.html', '/app.js': 'app.js', '/styles.css': 'styles.css', '/users.js': 'users.js', '/templates.js':'templates.js', '/favicon.svg':'favicon.svg'}
             if path not in names:
                 return self.reply(404, {'error': 'Not found.'})
             file = ROOT / 'gui' / names[path]
             body = file.read_bytes()
             self.send_response(200)
-            self.send_header('Content-Type', {'html': 'text/html', 'js': 'text/javascript', 'css': 'text/css'}[file.suffix[1:]])
+            self.send_header('Content-Type', {'html': 'text/html', 'js': 'text/javascript', 'css': 'text/css', 'svg': 'image/svg+xml'}[file.suffix[1:]])
             self.send_header('Content-Length', str(len(body)))
             self.send_header('Cache-Control', 'no-cache')
             self.send_header('Content-Security-Policy', "default-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'")

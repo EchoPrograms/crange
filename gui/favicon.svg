@@ -1,0 +1,4 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 48 48" role="img" aria-label="CRANGE Control">
+  <rect x="3.5" y="3.5" width="41" height="41" fill="#0b0c0d" stroke="#f1f1f1" stroke-width="3"/>
+  <path d="M21 15h-5l-3 3v12l3 3h5M26 33V15h5c5 0 5 9 0 9h-5m5 0 6 9" fill="none" stroke="#f1f1f1" stroke-width="3.2" stroke-linecap="square" stroke-linejoin="miter"/>
+</svg>
