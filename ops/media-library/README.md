@@ -38,16 +38,17 @@ manually after urgent uploads.
 The initial audit found live ISO CD-ROM references on VMs 112, 146, 110, 104, 102,
 and 105 on proxmox4. After verifying the primary copies, all seven CD-ROM device
 references were changed to `crange-library:iso/...`; the guests were not rebooted
-and no disks were detached. The local originals remain available. Twelve proxmox4
-ISO/archive files are hard-linked into the mirror4 tree on the same filesystem,
-so both storage IDs can use them without consuming duplicate blocks. Other mirror4
-files were copied from the verified primary and SHA256 checked. The invalid
-zero-byte Debian 13.4 ISO remains local and is excluded from the library manifest.
+and no disks were detached. After clearing the current project defaults,
+reservations, and jobs, all nonzero local ISO/archive source files were removed.
+Twelve proxmox4 files were hard-linked into the mirror4 tree before their local
+paths were unlinked, so the mirror retained those bytes without a second copy.
+Other mirror4 files were copied from the verified primary and SHA256 checked. The
+invalid zero-byte Debian 13.4 ISO remains local and is excluded from the manifest.
 
 The first consolidation pass verified all 23 usable unique ISO/archive files on
 the primary, mirror1, and mirror4 against the source inventory. The status manifest
-is also published to controller CT114 for media selection fallback. Local archive
-files remain in place for any future or retired `local:` references.
+is also published to controller CT114 for media selection fallback. Project-003
+and project-240 router archive defaults now point to the shared library.
 
 Scoped controller permissions: reuse `CrangeISOUpload` (only
 `Datastore.AllocateTemplate`) on `/storage/crange-library` for both the service user
