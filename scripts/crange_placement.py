@@ -257,6 +257,17 @@ class ReservationLedger:
         os.chmod(self.path, 0o600)
         self.db.execute('PRAGMA busy_timeout=30000')
         self.db.execute('CREATE TABLE IF NOT EXISTS jobs (job_id TEXT PRIMARY KEY, project_id INTEGER, owner TEXT, state TEXT, expires REAL, heartbeat REAL, allocations TEXT)')
+        self.db.execute('BEGIN IMMEDIATE')
+        try:
+            columns = {row[1] for row in self.db.execute('PRAGMA table_info(jobs)')}
+            if 'released_at' not in columns:
+                self.db.execute('ALTER TABLE jobs ADD COLUMN released_at REAL')
+            if 'released_reason' not in columns:
+                self.db.execute('ALTER TABLE jobs ADD COLUMN released_reason TEXT')
+            self.db.execute('COMMIT')
+        except Exception:
+            self.db.execute('ROLLBACK')
+            raise
 
     def active_reservations(self, exclude_job_id=None, exclude_job_ids=()):
         excluded = set(exclude_job_ids)
@@ -313,7 +324,7 @@ class ReservationLedger:
                                         known_existing_allocations, bootstrap=bootstrap)
             for item in placements:
                 item['reservation_id'] = str(uuid.uuid4())
-            self.db.execute('INSERT INTO jobs VALUES (?, ?, ?, ?, ?, ?, ?)', (job_id, project_id, owner, 'reviewed', now + policy.get('review_ttl_seconds', 3600), now, json.dumps(placements, sort_keys=True)))
+            self.db.execute('INSERT INTO jobs (job_id,project_id,owner,state,expires,heartbeat,allocations) VALUES (?, ?, ?, ?, ?, ?, ?)', (job_id, project_id, owner, 'reviewed', now + policy.get('review_ttl_seconds', 3600), now, json.dumps(placements, sort_keys=True)))
             self.db.execute('COMMIT')
             return placements
         except Exception:
@@ -341,7 +352,8 @@ class ReservationLedger:
                 if not old or old[0] != project_id or old[1] != owner or old[2] != 'reviewed':
                     raise PlacementError('prior bootstrap review was claimed or changed; replacement was not committed')
             for old_id in old_ids:
-                changed = self.db.execute("UPDATE jobs SET state='released' WHERE job_id=? AND state='reviewed'", (old_id,)).rowcount
+                changed = self.db.execute("UPDATE jobs SET state='released', released_at=?, released_reason=? WHERE job_id=? AND state='reviewed'",
+                                          (now, 'superseded_by:'+new_job_id, old_id)).rowcount
                 if changed != 1:
                     raise PlacementError('prior bootstrap review was claimed or changed; replacement was not committed')
             self.db.execute('COMMIT')
@@ -404,7 +416,7 @@ class ReservationLedger:
                   'resources':demand,'headroom':{key:available[key]-demand[key] for key in demand},
                   'policy_revision':policy['revision'],'reservation_id':str(uuid.uuid4()),
                   'reason':'Cache base, disposable verification and transfer capacity reserved'}
-            self.db.execute('INSERT INTO jobs VALUES (?, ?, ?, ?, ?, ?, ?)',(job_id,project_id,owner,'reviewed',now+policy.get('review_ttl_seconds',3600),now,json.dumps([item],sort_keys=True)))
+            self.db.execute('INSERT INTO jobs (job_id,project_id,owner,state,expires,heartbeat,allocations) VALUES (?, ?, ?, ?, ?, ?, ?)',(job_id,project_id,owner,'reviewed',now+policy.get('review_ttl_seconds',3600),now,json.dumps([item],sort_keys=True)))
             self.db.execute('COMMIT')
             return item
         except Exception:
@@ -508,7 +520,7 @@ class ReservationLedger:
                 allocation.update(operation='network_probe', network_scope=network_scope,
                     resource_key='network-probe:' + network_scope['vnet'],
                     reason='Fixed owned disposable network acceptance probe')
-            self.db.execute('INSERT INTO jobs VALUES (?, ?, ?, ?, ?, ?, ?)',
+            self.db.execute('INSERT INTO jobs (job_id,project_id,owner,state,expires,heartbeat,allocations) VALUES (?, ?, ?, ?, ?, ?, ?)',
                 (job_id, project_id, owner, 'reviewed', now + policy.get('review_ttl_seconds', 3600), now,
                  json.dumps([allocation], sort_keys=True)))
             self.db.execute('COMMIT')
@@ -642,7 +654,8 @@ class ReservationLedger:
             job = self.get_job(job_id)
             if job['state'] != 'reviewed' or job['expires'] >= now or not operation_terminal or not no_allocations_confirmed or provider_tasks_running:
                 raise PlacementError('expired reviewed operation requires confirmed terminal/no-allocation evidence')
-            self.db.execute("UPDATE jobs SET state='released' WHERE job_id=?", (job_id,))
+            self.db.execute("UPDATE jobs SET state='released', released_at=?, released_reason=? WHERE job_id=?",
+                            (now, 'expired_review_no_allocation_confirmed', job_id))
             self.db.execute('COMMIT')
         except Exception:
             self.db.execute('ROLLBACK')

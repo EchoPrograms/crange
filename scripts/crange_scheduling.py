@@ -478,6 +478,69 @@ def reviewed_bootstrap_replacements(path, project_id, owner, bootstrap_node, req
     return replacements
 
 
+def purge_expired_bootstrap_reviews(path, project_id, owner, api, ledger, now=None):
+    """Release only expired, unapplied bootstrap reviews with negative PVE evidence."""
+    now = time.time() if now is None else now
+    root = Path(path)
+    if any((root / name).exists() for name in ('terraform.tfstate', 'terraform.tfstate.backup', '.terraform.tfstate.lock.info')):
+        return []
+    manifests = root / '.crange-plans'
+    if not manifests.is_dir():
+        return []
+    try:
+        resources = api.request('GET', '/cluster/resources', {'type': 'vm'})
+        if not isinstance(resources, list):
+            return []
+    except Exception:
+        return []
+    prefix = f'p{int(project_id):03d}'
+    project_guests = [resource for resource in resources
+                      if prefix in str(resource.get('tags', '')).split(';')
+                      or str(resource.get('name', '')).startswith(prefix + '-')]
+    if project_guests:
+        return []
+    released = []
+    for manifest in manifests.glob('*.json'):
+        try:
+            record = json.loads(manifest.read_text())
+            plan_id = record.get('plan_id')
+            if (not record.get('bootstrap') or record.get('applied_at') or
+                    plan_id != manifest.stem or now - float(record.get('created', now)) <= 3600):
+                continue
+            saved = ledger.get_job(plan_id)
+        except (OSError, ValueError, TypeError, json.JSONDecodeError, PlacementError):
+            continue
+        if (saved['project_id'] != project_id or saved['owner'] != owner or saved['state'] != 'reviewed'
+                or saved['expires'] >= now):
+            continue
+        allocations = saved['allocations']
+        if (not allocations or any(not str(item.get('resource_key', '')).startswith('router:') for item in allocations)
+                or any(item.get('resolved', {}).get('node_name') != record.get('bootstrap_node') for item in allocations)):
+            continue
+        nodes = {item['resolved']['node_name'] for item in allocations}
+        try:
+            active_tasks = []
+            for node in sorted(nodes):
+                tasks = api.request('GET', f'/nodes/{node}/tasks', {'source': 'active', 'limit': 1000})
+                if not isinstance(tasks, list):
+                    raise ValueError('invalid task response')
+                active_tasks.extend(tasks)
+        except Exception:
+            continue
+        if active_tasks:
+            continue
+        try:
+            ledger.purge_reviewed(plan_id, operation_terminal=True, no_allocations_confirmed=True,
+                                  provider_tasks_running=False, now=now)
+        except PlacementError:
+            continue
+        record.update(reservation_state='released', reservation_released_at=now,
+                      reservation_release_reason='expired_bootstrap_review_no_project_guests_or_provider_tasks')
+        atomic_json(manifest, record, 0o640)
+        released.append(plan_id)
+    return released
+
+
 def prepare(path, cfg, plan_id, owner, api=None, *, bootstrap_node=None):
     from crange import ProxmoxAPI, validate_project_quota
     validate_project_quota(path,cfg)
@@ -535,7 +598,8 @@ def prepare(path, cfg, plan_id, owner, api=None, *, bootstrap_node=None):
         if row.get('retained'):
             for field in ('datastore_id','template_id','template_file_id','clone_mode'):
                 if row['retained'].get(field) is not None:requests[-1]['resolved_'+field]=row['retained'][field]
-    inventory=discover(api or ProxmoxAPI(),policy,{n for row in rows for n in row['networks']})
+    api=api or ProxmoxAPI()
+    inventory=discover(api,policy,{n for row in rows for n in row['networks']})
     if bootstrap_node:
         if (cfg.get('jump_boxes') or cfg.get('custom_networks') or cfg.get('scenario_boxes') or
                 cfg.get('scenario_containers')):
@@ -545,8 +609,10 @@ def prepare(path, cfg, plan_id, owner, api=None, *, bootstrap_node=None):
     provider_compat = reviewed_identity()
     ledger=ReservationLedger(DATA/'reservations.sqlite3')
     replacements=[]
+    expired_bootstrap_reviews=[]
     try:
         if requests:
+            expired_bootstrap_reviews=purge_expired_bootstrap_reviews(path,int(cfg['project_id']),owner,api,ledger)
             if bootstrap_node:
                 replacements=reviewed_bootstrap_replacements(path,int(cfg['project_id']),owner,bootstrap_node,requests,policy,ledger)
             placements+=ledger.reserve_batch(requests,inventory,catalog,policy,int(cfg['project_id']),plan_id,owner,
@@ -560,7 +626,8 @@ def prepare(path, cfg, plan_id, owner, api=None, *, bootstrap_node=None):
             'policy_sha256':hashlib.sha256(json.dumps(policy,sort_keys=True).encode()).hexdigest(),
             'catalog_sha256':catalog_identity(catalog),'reservation_ids':[p['reservation_id'] for p in placements if p.get('reservation_id')],
             **({'bootstrap_node':bootstrap_node} if bootstrap_node else {}),
-            **({'replaced_reviewed_plan_ids':replacements} if replacements else {})}
+            **({'replaced_reviewed_plan_ids':replacements} if replacements else {}),
+            **({'purged_expired_bootstrap_plan_ids':expired_bootstrap_reviews} if expired_bootstrap_reviews else {})}
 
 
 def tf_overrides(prepared):

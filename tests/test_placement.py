@@ -8,7 +8,7 @@ import unittest
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1] / 'scripts'))
 from crange_catalog import CatalogError, publish_image, validate_catalog
 from crange_placement import PlacementError, ReservationLedger, capacity_window, schedule_batch
-from crange_scheduling import reviewed_bootstrap_replacements
+from crange_scheduling import purge_expired_bootstrap_reviews, reviewed_bootstrap_replacements
 
 
 def fixtures():
@@ -117,6 +117,40 @@ class PlacementTests(unittest.TestCase):
             if ledger.status('old-plan')['state'] == 'running':
                 ledger.reconcile_job('old-plan',operation_terminal=True,allocations_reconciled=True)
             ledger.close()
+
+    def test_expired_bootstrap_review_cleanup_requires_negative_provider_evidence_and_audits(self):
+        class API:
+            def __init__(self, resources=None, tasks=None): self.resources=resources or []; self.tasks=tasks or []
+            def request(self, method, path, params=None):
+                if path == '/cluster/resources': return self.resources
+                if path == '/nodes/n1/tasks': return self.tasks
+                raise AssertionError(path)
+
+        for evidence in ('clear','guest','task','state'):
+            with self.subTest(evidence=evidence), tempfile.TemporaryDirectory() as temp:
+                _, inv, cat, pol = fixtures(); requests = self.bootstrap_requests(inv,cat,pol)
+                root=pathlib.Path(temp); (root/'.crange-plans').mkdir()
+                if evidence=='state': (root/'terraform.tfstate').write_text('{}')
+                ledger=ReservationLedger(root/'ledger')
+                allocations=ledger.reserve_batch(requests,inv,cat,pol,3,'old-plan','owner',now=100,bootstrap=True)
+                manifest=root/'.crange-plans'/'old-plan.json'
+                manifest.write_text(__import__('json').dumps({'plan_id':'old-plan','created':100,'bootstrap':True,
+                    'bootstrap_node':'n1','bootstrap_networks':['crtrans','p003tr','p003t001','p003t254'],
+                    'placements':allocations}))
+                api=API(resources=[{'name':'p003-guest'}] if evidence=='guest' else (),
+                        tasks=[{'upid':'task'}] if evidence=='task' else ())
+                released=purge_expired_bootstrap_reviews(root,3,'owner',api,ledger,now=4000)
+                if evidence=='clear':
+                    self.assertEqual(released,['old-plan'])
+                    self.assertEqual(ledger.status('old-plan')['state'],'released')
+                    row=ledger.db.execute('select released_reason,released_at from jobs where job_id=?',('old-plan',)).fetchone()
+                    self.assertEqual(row[0],'expired_review_no_allocation_confirmed')
+                    saved=__import__('json').loads(manifest.read_text())
+                    self.assertEqual(saved['reservation_release_reason'],'expired_bootstrap_review_no_project_guests_or_provider_tasks')
+                else:
+                    self.assertEqual(released,[])
+                    self.assertEqual(ledger.status('old-plan')['state'],'reviewed')
+                ledger.close()
 
     def test_bootstrap_admission_is_explicit_router_only_and_transient(self):
         request, inventory, catalog, policy=fixtures()
