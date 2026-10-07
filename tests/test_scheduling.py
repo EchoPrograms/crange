@@ -23,6 +23,11 @@ class API:
         raise AssertionError(path)
 
 class SchedulingTests(unittest.TestCase):
+    def test_container_cpu_request_does_not_require_vm_host_feature(self):
+        self.assertIsNone(scheduling.requested_cpu_type('container', {}))
+        self.assertEqual(scheduling.requested_cpu_type('vm', {}), 'host')
+        self.assertEqual(scheduling.requested_cpu_type('vm', {'cpu_type':'x86-64-v2-AES'}), 'x86-64-v2-AES')
+
     def test_discovery_counts_stopped_guests_and_template_disks_without_double_ram(self):
         policy = dict(scheduling.DEFAULT_POLICY, allowed_nodes=['proxmox2'])
         result = scheduling.discover(API(),policy)

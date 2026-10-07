@@ -166,7 +166,7 @@ def command(operation, project, options):
         "template-publish": ({"build_id": lambda v: __import__('crange_templates').identifier(v), "projects": template_projects,
                               "prepared": template_prepared}, lambda o: ['template-publish', o['build_id'], '--projects', *o['projects'], '--prepared']),
         "template-upload": ({"upload_id": lambda v: __import__('crange_templates').identifier(v), "node": node}, lambda o: ['template-upload', o['upload_id'], '--node', o['node']]),
-        "project-init": ({"transit": transit}, lambda o: ["project-init", p, "--transit", o["transit"]]),
+        "project-init": ({}, lambda o: ["project-init", p]),
         "stage-changes": ({}, lambda o: ["stage-changes", p]),
         "plan": ({}, lambda o: ["infra-plan", p, "--retain"]),
         "plan-sdn-repair": ({}, lambda o: ["infra-plan", p, "--retain", "--replace-sdn-applier"]),

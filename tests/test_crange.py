@@ -2,6 +2,7 @@ import importlib.util
 import json
 from pathlib import Path
 import tempfile
+import threading
 import unittest
 from types import SimpleNamespace
 from unittest.mock import patch
@@ -326,11 +327,51 @@ jump_boxes = {
             crange.cmd_release_capture(SimpleNamespace(project="3", version="2.0.0"))
 
     def test_project_init_copies_scenario_template_allowlist(self):
-        crange.cmd_project_init(SimpleNamespace(project="5", transit="10.60.2.50/24"))
+        with patch.object(crange, "_occupied_project_transit_addresses", return_value={"10.60.2.2", "10.60.2.3"}):
+            crange.cmd_project_init(SimpleNamespace(project="5"))
         created = crange.ENVS / "project-005"
         self.assertTrue((created / "approved-scenario-templates.json").is_file())
         cfg = json.loads((created / "crange.auto.tfvars.json").read_text())
         self.assertEqual(cfg["project_id"], 5)
+        self.assertEqual(cfg["transit_address"], "10.60.2.4/24")
+
+    def test_project_init_transit_allocator_reserves_special_addresses(self):
+        occupied = {f"10.60.2.{octet}" for octet in (2, 3, 4, 5)}
+        self.assertEqual(crange._allocate_project_transit_address(occupied), "10.60.2.6/24")
+        all_addresses = {f"10.60.2.{octet}" for octet in range(2, 255)}
+        with self.assertRaisesRegex(crange.CrangeError, "No unused"):
+            crange._allocate_project_transit_address(all_addresses)
+
+    def test_project_init_reads_live_guest_config_and_opnsense_addresses(self):
+        class API:
+            def request(self, method, path, fields=None):
+                if path == "/cluster/resources":
+                    return [{"node": "proxmox2", "vmid": 122, "type": "lxc"}]
+                if path == "/nodes/proxmox2/lxc/122/config":
+                    return {"net0": "name=eth0,bridge=vmbr0,ip=10.60.2.8/24", "description": "router"}
+                raise AssertionError(path)
+        with patch.object(crange, "ProxmoxAPI", return_value=API()), \
+             patch.object(crange, "run", return_value=SimpleNamespace(stdout='["10.60.2.9"]')):
+            occupied = crange._occupied_project_transit_addresses()
+        self.assertIn("10.60.2.8", occupied)
+        self.assertIn("10.60.2.9", occupied)
+
+    def test_concurrent_project_init_reserves_distinct_transit_addresses(self):
+        with patch.object(crange, "ProxmoxAPI", return_value=SimpleNamespace(
+                request=lambda *args, **kwargs: [])), \
+             patch.object(crange, "run", return_value=SimpleNamespace(stdout="[]")):
+            failures = []
+            def create(project):
+                try:
+                    crange.cmd_project_init(SimpleNamespace(project=str(project)))
+                except Exception as exc:
+                    failures.append(exc)
+            threads = [threading.Thread(target=create, args=(project,)) for project in (5, 6)]
+            for thread in threads: thread.start()
+            for thread in threads: thread.join()
+        self.assertEqual(failures, [])
+        addresses = [json.loads((crange.ENVS / f"project-{project:03d}" / "crange.auto.tfvars.json").read_text())["transit_address"] for project in (5, 6)]
+        self.assertEqual(len(set(addresses)), 2)
 
     def test_nonstandard_environment_is_rejected(self):
         old = crange.ENVS / "project-002"

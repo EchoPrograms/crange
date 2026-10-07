@@ -337,7 +337,7 @@ def declarations(path, cfg):
                      'default_preferred_node': 'proxmox4' if key.startswith('jumpbox:') else None})
     router_node = cfg.get('router_node', 'proxmox4')
     router = {'node_name': router_node, 'placement': cfg.get('router_placement') or placement_intent(router_node), 'cores':1,'memory_mb':512}
-    reference = {'image_id': cfg.get('router_image', 'debian-13-router-v1')}
+    reference = {'image_id': cfg.get('router_image', 'debian-12-router-v1')}
     p = f'p{int(cfg["project_id"]):03d}'
     append('router:project','container',router,reference,['crtrans',p+'tr'])
     append('router:staging','container',router,reference,[p+'tr',p+'t254'])
@@ -359,6 +359,11 @@ def template_profile(path, row):
     except (OSError, json.JSONDecodeError):
         base = {}
     return {**base, **(row['reference'].get('profile') or {})}
+
+
+def requested_cpu_type(kind, profile):
+    """Only QEMU guests can select a host CPU model; LXC uses the host kernel."""
+    return profile.get('cpu_type', 'host') if kind == 'vm' else None
 
 
 def freeze(row, live, previous=None):
@@ -431,7 +436,7 @@ def prepare(path, cfg, plan_id, owner, api=None):
             'kind':row['kind'],'image':row['image'],'placement':intent_for(box,row.get('default_preferred_node')),'networks':row['networks'],
             'memory_mb':int(box.get('memory_mb',512 if row['kind']=='container' else 4096)),
             'cpu_cores':int(box.get('cores',1 if row['kind']=='container' else 2)),
-            'cpu_type':profile.get('cpu_type','host') if row['kind']=='vm' else 'host',
+            'cpu_type':requested_cpu_type(row['kind'], profile),
             'required_features':list(profile.get('required_features',[])),
             'disk_gb':max(size,8 if row['kind']=='container' else size)})
         if row.get('retained'):

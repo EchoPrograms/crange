@@ -24,6 +24,19 @@ class RouteTests(unittest.TestCase):
             return {'route':{'route':{'route-id':{'network':'10.3.0.0/16','gateway':'P003'}}}}
         with patch.object(helper,'api',side_effect=api):helper.ensure(self.spec())
         self.assertTrue(all(method=='GET' for method,_ in calls))
+    def test_occupied_transit_includes_gateway_and_route_endpoints(self):
+        helper = self.helper()
+        def api(method, path, payload=None):
+            if path == '/api/routing/settings/get':
+                return {'gateways': {'gateway_item': {
+                    'gw1': {'name': 'P003', 'gateway': '10.60.2.32', 'interface': 'opt2'},
+                    'gw2': {'name': 'legacy', 'gateway': '10.60.2.44', 'interface': 'opt2'},
+                    'gw3': {'name': 'outside', 'gateway': '192.0.2.1', 'interface': 'wan'},
+                }}}
+            return {'route': {'route': {'r1': {'gateway': {'P004': {'selected': '1'}}},
+                                       'r2': {'gateway': {'P003': {'selected': '1'}}}}}}
+        with patch.object(helper, 'api', side_effect=api):
+            self.assertEqual(helper.occupied_transit_addresses(), ['10.60.2.32', '10.60.2.44'])
     def test_unmanaged_or_duplicate_route_refusal_has_no_mutations(self):
         for routes in ([{'network':'10.3.0.0/16','gateway':'OTHER','descr':'Unmanaged'}],
                        [{'network':'10.3.0.0/16','gateway':'P003'}]*2):
@@ -64,3 +77,8 @@ class RouteTests(unittest.TestCase):
              patch.object(crange,'output_json',return_value={'opnsense_route':{'value':wrong}}),patch.object(crange.subprocess,'run') as process:
             with self.assertRaisesRegex(crange.CrangeError,'approved project topology'):crange.cmd_route_sync(SimpleNamespace(project='3'))
             process.assert_not_called()
+
+    def test_project_init_job_has_no_client_selected_transit(self):
+        self.assertEqual(command('project-init', 5, {}), ['project-init', '5'])
+        with self.assertRaises(ValueError):
+            command('project-init', 5, {'transit': '10.60.2.50/24'})

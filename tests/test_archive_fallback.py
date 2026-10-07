@@ -18,26 +18,26 @@ _spec.loader.exec_module(builder)
 class ArchiveFallbackTests(unittest.TestCase):
     def test_fresh_router_uses_resolved_default_archive(self):
         router = {'resource_key': 'router:project', 'kind': 'container',
-                  'box': {'node_name': 'proxmox4'}, 'reference': {'image_id': 'debian-13-router-v1'}}
+                  'box': {'node_name': 'proxmox4'}, 'reference': {'image_id': 'debian-12-router-v1'}}
         api = Mock()
         with patch('crange_scheduling.declarations', return_value=[router]), \
              patch('crange_scheduling.applied_resources', return_value={}), \
-             patch.object(templates, 'resolve_archive', return_value='media-mirror1:vztmpl/debian-13-standard_13.6-1_amd64.tar.zst') as resolve:
+             patch.object(templates, 'resolve_archive', return_value='media-mirror1:vztmpl/debian-12-standard_12.12-1_amd64.tar.zst') as resolve:
             result = templates.media_tf_overrides(Path('/unused'), {'router_node': 'proxmox4'}, api=api)
-        resolve.assert_called_once_with(api, 'proxmox4', 'crange-library:vztmpl/debian-13-standard_13.6-1_amd64.tar.zst')
+        resolve.assert_called_once_with(api, 'proxmox4', 'crange-library:vztmpl/debian-12-standard_12.12-1_amd64.tar.zst')
         self.assertEqual(result['resolved_placements']['router:project']['template_file_id'],
-                         'media-mirror1:vztmpl/debian-13-standard_13.6-1_amd64.tar.zst')
+                         'media-mirror1:vztmpl/debian-12-standard_12.12-1_amd64.tar.zst')
 
     def test_prepared_archive_cannot_silently_change_after_review(self):
         router = {'resource_key': 'router:project', 'kind': 'container',
-                  'box': {'node_name': 'proxmox4'}, 'reference': {'image_id': 'debian-13-router-v1'}}
+                  'box': {'node_name': 'proxmox4'}, 'reference': {'image_id': 'debian-12-router-v1'}}
         prepared = {'placements': [{'resource_key': 'router:project', 'resolved': {'node_name': 'proxmox4',
-                        'template_file_id': 'crange-library:vztmpl/debian-13-standard_13.6-1_amd64.tar.zst'}}],
+                        'template_file_id': 'crange-library:vztmpl/debian-12-standard_12.12-1_amd64.tar.zst'}}],
                     'resolved_placements': {'router:project': {'node_name': 'proxmox4',
-                        'template_file_id': 'crange-library:vztmpl/debian-13-standard_13.6-1_amd64.tar.zst'}}}
+                        'template_file_id': 'crange-library:vztmpl/debian-12-standard_12.12-1_amd64.tar.zst'}}}
         with patch('crange_scheduling.declarations', return_value=[router]), \
              patch('crange_scheduling.applied_resources', return_value={}), \
-             patch.object(templates, 'resolve_archive', return_value='media-mirror1:vztmpl/debian-13-standard_13.6-1_amd64.tar.zst'), \
+             patch.object(templates, 'resolve_archive', return_value='media-mirror1:vztmpl/debian-12-standard_12.12-1_amd64.tar.zst'), \
              self.assertRaisesRegex(ValueError, 'restage'):
             templates.media_tf_overrides(Path('/unused'), {'router_node': 'proxmox4'}, prepared, Mock())
 

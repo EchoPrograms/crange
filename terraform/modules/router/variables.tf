@@ -23,7 +23,7 @@ variable "router" {
     full_clone    = optional(bool, true)
     template_file_id = optional(
       string,
-      "crange-library:vztmpl/debian-13-standard_13.6-1_amd64.tar.zst"
+      "crange-library:vztmpl/debian-12-standard_12.12-1_amd64.tar.zst"
     )
   })
 

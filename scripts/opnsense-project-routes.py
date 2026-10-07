@@ -62,6 +62,44 @@ def selected_choice(value):
     return None
 
 
+def occupied_transit_addresses():
+    """Return transit-side addresses already present in OPNsense gateways/routes."""
+    occupied = set()
+    gateway_doc = api("GET", "/api/routing/settings/get")
+    gateways = gateway_doc.get("gateways", {}).get("gateway_item", {})
+    values = gateways.values() if isinstance(gateways, dict) else gateways
+    names = {}
+    transit = ipaddress.ip_network("10.60.2.0/24")
+    for item in values:
+        if not isinstance(item, dict):
+            continue
+        name, raw = item.get("name"), item.get("gateway")
+        try:
+            address = ipaddress.ip_address(str(raw).split("%", 1)[0])
+        except ValueError:
+            continue
+        if address in transit:
+            occupied.add(str(address))
+            if name:
+                names[name] = str(address)
+
+    route_doc = api("GET", "/api/routes/routes/get")
+    routes = route_doc.get("route", {}).get("route", {})
+    values = routes.values() if isinstance(routes, dict) else routes
+    for item in values:
+        if not isinstance(item, dict):
+            continue
+        gateway = selected_choice(item.get("gateway"))
+        raw = names.get(gateway, gateway)
+        try:
+            address = ipaddress.ip_address(str(raw).split("%", 1)[0])
+        except ValueError:
+            continue
+        if address in transit:
+            occupied.add(str(address))
+    return sorted(occupied, key=ipaddress.ip_address)
+
+
 def ensure(spec):
     pid = int(spec["project_id"])
     expected_network = f"10.{pid}.0.0/16"
@@ -225,7 +263,9 @@ def remove_project_route(project_id, allow_unmanaged=False, dry_run=False):
     print(f"Removed and reconfigured OPNsense route {network}")
 
 if __name__ == "__main__":
-    if len(sys.argv) >= 2 and sys.argv[1] == "ensure" and len(sys.argv) == 2:
+    if len(sys.argv) == 2 and sys.argv[1] == "occupied-transit":
+        print(json.dumps(occupied_transit_addresses()))
+    elif len(sys.argv) >= 2 and sys.argv[1] == "ensure" and len(sys.argv) == 2:
         ensure(json.load(sys.stdin))
     elif len(sys.argv) >= 3 and sys.argv[1] == "remove":
         pid = int(sys.argv[2])
@@ -233,4 +273,4 @@ if __name__ == "__main__":
         dry = "--dry-run" in sys.argv[3:]
         remove_project_route(pid, allow_unmanaged=allow, dry_run=dry)
     else:
-        raise SystemExit("Usage: terraform output -json opnsense_route | opnsense-project-routes.py ensure | opnsense-project-routes.py remove PROJECT_ID [--allow-unmanaged] [--dry-run]")
+        raise SystemExit("Usage: opnsense-project-routes.py occupied-transit | terraform output -json opnsense_route | opnsense-project-routes.py ensure | opnsense-project-routes.py remove PROJECT_ID [--allow-unmanaged] [--dry-run]")

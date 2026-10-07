@@ -327,7 +327,7 @@ module "project_router" {
     downstream_vnet    = proxmox_sdn_vnet.transit.id
     downstream_address = "10.${var.project_id}.0.1/24"
     dns_servers        = ["10.60.2.1"]
-    template_file_id   = "crange-library:vztmpl/debian-13-standard_13.6-1_amd64.tar.zst"
+    template_file_id   = "crange-library:vztmpl/debian-12-standard_12.12-1_amd64.tar.zst"
     tags               = [local.project]
     }, { for field, value in try(var.resolved_placements["router:project"], {}) : field => value if value != null && field != "clone_mode" }, try(var.resolved_placements["router:project"].clone_mode, null) == null ? {} : {
     full_clone = var.resolved_placements["router:project"].clone_mode == "full"
@@ -351,7 +351,7 @@ module "team_router" {
     downstream_vnet    = proxmox_sdn_vnet.team[each.key].id
     downstream_address = "10.${var.project_id}.${each.value}.1/24"
     dns_servers        = ["10.60.2.1"]
-    template_file_id   = "crange-library:vztmpl/debian-13-standard_13.6-1_amd64.tar.zst"
+    template_file_id   = "crange-library:vztmpl/debian-12-standard_12.12-1_amd64.tar.zst"
     tags               = [local.project, format("%st%03d", local.project, each.value)]
     }, { for field, value in try(var.resolved_placements["router:team:${each.key}"], {}) : field => value if value != null && field != "clone_mode" }, try(var.resolved_placements["router:team:${each.key}"].clone_mode, null) == null ? {} : {
     full_clone = var.resolved_placements["router:team:${each.key}"].clone_mode == "full"
@@ -377,7 +377,7 @@ module "staging_router" {
     downstream_vnet    = proxmox_sdn_vnet.staging.id
     downstream_address = "10.${var.project_id}.254.1/24"
     dns_servers        = ["10.60.2.1"]
-    template_file_id   = "crange-library:vztmpl/debian-13-standard_13.6-1_amd64.tar.zst"
+    template_file_id   = "crange-library:vztmpl/debian-12-standard_12.12-1_amd64.tar.zst"
     tags               = [local.project, local.staging_vnet]
     }, { for field, value in try(var.resolved_placements["router:staging"], {}) : field => value if value != null && field != "clone_mode" }, try(var.resolved_placements["router:staging"].clone_mode, null) == null ? {} : {
     full_clone = var.resolved_placements["router:staging"].clone_mode == "full"
@@ -406,7 +406,7 @@ module "custom_router" {
     cores              = each.value.cores
     memory_mb          = each.value.memory_mb
     dns_servers        = ["10.60.2.1"]
-    template_file_id   = "crange-library:vztmpl/debian-13-standard_13.6-1_amd64.tar.zst"
+    template_file_id   = "crange-library:vztmpl/debian-12-standard_12.12-1_amd64.tar.zst"
     tags               = [local.project, proxmox_sdn_vnet.custom[each.key].id]
     }, { for field, value in try(var.resolved_placements["router:custom:${each.key}"], {}) : field => value if value != null && field != "clone_mode" }, try(var.resolved_placements["router:custom:${each.key}"].clone_mode, null) == null ? {} : {
     full_clone = var.resolved_placements["router:custom:${each.key}"].clone_mode == "full"

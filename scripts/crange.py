@@ -369,36 +369,107 @@ def cmd_guac_json_key(_args: argparse.Namespace) -> None:
     print(f'Generated the protected Guacamole JSON-auth key at {target}.')
 
 
-def cmd_project_init(args: argparse.Namespace) -> None:
-    project = int(args.project)
-    if project < 1 or project > 255 or project in (60, 61):
-        raise CrangeError("Project ID must be 1–255, excluding reserved 60 and 61.")
-    if not re.fullmatch(r"10\.60\.2\.(?:[2-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-4])/24", args.transit):
-        raise CrangeError("Transit address must be a host from 10.60.2.2 through 10.60.2.254 with /24.")
+def _occupied_project_transit_addresses() -> set[str]:
+    """Collect transit addresses from project configs, OPNsense, and live guests."""
+    occupied: set[str] = set()
     for existing in sorted(ENVS.glob("project-*")):
         if not existing.is_dir() or existing.name == "project-template":
             continue
         try:
             other = json_config(existing)
-        except CrangeError:
+        except CrangeError as exc:
+            raise CrangeError(f"Cannot safely allocate transit address: {existing.name} has unreadable project config.") from exc
+        raw = other.get("transit_address")
+        if raw:
+            try:
+                address = ipaddress.ip_interface(raw).ip
+            except (ValueError, TypeError) as exc:
+                raise CrangeError(f"Cannot safely allocate transit address: {existing.name} has an invalid transit address.") from exc
+            if address in ipaddress.ip_network("10.60.2.0/24"):
+                occupied.add(str(address))
+
+    # Both external inventories are authoritative inputs. Fail closed if either
+    # cannot be read so concurrent project creation cannot claim a live address.
+    api = ProxmoxAPI()
+    resources = api.request("GET", "/cluster/resources", {"type": "vm"})
+    for resource in resources:
+        node, vmid, kind = resource.get("node"), resource.get("vmid"), resource.get("type")
+        if not node or not vmid or kind not in ("lxc", "qemu"):
             continue
-        if other.get("transit_address") == args.transit:
-            raise CrangeError(f"Transit address {args.transit} is already assigned to project {int(other['project_id']):03d}.")
+        config = api.request("GET", f"/nodes/{node}/{kind}/{vmid}/config")
+        for value in config.values():
+            if not isinstance(value, str):
+                continue
+            for candidate in re.findall(r"(?<![0-9])10\.60\.2\.(?:[0-9]{1,3})(?![0-9])", value):
+                try:
+                    address = ipaddress.ip_address(candidate)
+                except ValueError:
+                    continue
+                if address in ipaddress.ip_network("10.60.2.0/24"):
+                    occupied.add(str(address))
+
+    credential_file = Path.home() / ".config/crange/opnsense-api.txt"
+    helper = ROOT / "scripts" / "opnsense-project-routes.py"
+    shell = f"set -a; . {shlex.quote(str(credential_file))}; set +a; exec python3 {shlex.quote(str(helper))} occupied-transit"
+    result = run(["bash", "-c", shell], capture=True, timeout=60)
+    try:
+        opnsense_addresses = json.loads(result.stdout)
+    except json.JSONDecodeError as exc:
+        raise CrangeError("OPNsense returned an invalid transit-address inventory.") from exc
+    if not isinstance(opnsense_addresses, list):
+        raise CrangeError("OPNsense returned an invalid transit-address inventory.")
+    for raw in opnsense_addresses:
+        try:
+            address = ipaddress.ip_address(raw)
+        except (ValueError, TypeError) as exc:
+            raise CrangeError("OPNsense returned an invalid transit address.") from exc
+        if address in ipaddress.ip_network("10.60.2.0/24"):
+            occupied.add(str(address))
+    return occupied
+
+
+def _allocate_project_transit_address(occupied: set[str]) -> str:
+    transit = ipaddress.ip_network("10.60.2.0/24")
+    for address in transit.hosts():
+        if address in (transit.network_address + 1, transit.broadcast_address):
+            continue
+        if str(address) not in occupied:
+            return f"{address}/24"
+    raise CrangeError("No unused project transit address remains in 10.60.2.0/24.")
+
+
+def cmd_project_init(args: argparse.Namespace) -> None:
+    project = int(args.project)
+    if project < 1 or project > 255 or project in (60, 61):
+        raise CrangeError("Project ID must be 1–255, excluding reserved 60 and 61.")
     target = ENVS / f"project-{project:03d}"
     if target.exists():
         raise CrangeError(f"{target.name} already exists; refusing to overwrite it or its state.")
     template = ENVS / "project-template"
-    target.mkdir()
-    for filename in ("main.tf", "template-profile.json", "approved-scenario-templates.json", "approved-container-templates.json"):
-        source = template / filename
-        if not source.is_file():
-            raise CrangeError(f"Missing project template file: {source}")
-        (target / filename).write_bytes(source.read_bytes())
-    (target / "terraform.tfvars.example").write_text(
-        f'project_id = {project}\ntransit_address = "{args.transit}"\nteam_ids = ["1"]\n'
-    )
-    save_config(target, {"project_id": project, "transit_address": args.transit, "router_node":"auto", "router_placement":{"mode":"auto","preferred_node":""}, "team_ids": ["1"], "jump_boxes": {}, "custom_networks": {}, "scenario_containers": {}})
-    print(f"Created {target.name} with Team 1 and Team 0 staging. Review transit address, then run: crange infra-plan {project:03d}")
+    lock_path = ENVS / ".project-init.lock"
+    lock_path.touch(mode=0o600, exist_ok=True)
+    with lock_path.open("r+") as lock:
+        fcntl.flock(lock.fileno(), fcntl.LOCK_EX)
+        if target.exists():
+            raise CrangeError(f"{target.name} already exists; refusing to overwrite it or its state.")
+        transit = _allocate_project_transit_address(_occupied_project_transit_addresses())
+        staging = Path(tempfile.mkdtemp(prefix=f".project-{project:03d}-", dir=ENVS))
+        try:
+            for filename in ("main.tf", "template-profile.json", "approved-scenario-templates.json", "approved-container-templates.json"):
+                source = template / filename
+                if not source.is_file():
+                    raise CrangeError(f"Missing project template file: {source}")
+                (staging / filename).write_bytes(source.read_bytes())
+            (staging / "terraform.tfvars.example").write_text(
+                f'project_id = {project}\ntransit_address = "{transit}"\nteam_ids = ["1"]\n'
+            )
+            save_config(staging, {"project_id": project, "transit_address": transit, "router_node":"auto", "router_placement":{"mode":"auto","preferred_node":""}, "team_ids": ["1"], "jump_boxes": {}, "custom_networks": {}, "scenario_containers": {}})
+            os.replace(staging, target)
+        finally:
+            if staging.exists():
+                import shutil
+                shutil.rmtree(staging)
+        print(f"Created {target.name} with transit {transit}, Team 1, and Team 0 staging. Run: crange infra-plan {project:03d}")
 
 
 def mutate_team(args: argparse.Namespace, add: bool) -> None:
@@ -2808,7 +2879,7 @@ def make_parser() -> argparse.ArgumentParser:
     q.set_defaults(func=lambda a: __import__('crange_template_media').transfer(a.upload_id,a.node))
     q = sub.add_parser("projects", help="List Terraform project environments"); q.set_defaults(func=cmd_projects)
     q = sub.add_parser("project-init", help="Create a new standardized project environment from project-template")
-    q.add_argument("project"); q.add_argument("--transit", required=True); q.set_defaults(func=cmd_project_init)
+    q.add_argument("project"); q.set_defaults(func=cmd_project_init)
     q = sub.add_parser("project-show", help="Show declared and applied project resources"); q.add_argument("project"); q.set_defaults(func=cmd_project_show)
     q = sub.add_parser("guac-sync", help="Render reviewed Guacamole access desired state"); q.add_argument("project"); q.set_defaults(func=cmd_guac_sync)
     q = sub.add_parser("guac-apply", help="Apply a Guacamole access manifest through the configured connector"); q.add_argument("project"); q.set_defaults(func=cmd_guac_apply)

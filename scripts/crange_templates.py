@@ -271,7 +271,7 @@ def media_tf_overrides(path, cfg, prepared=None, api=None):
         reference=row['reference']
         archive=placement.get('template_file_id') or reference.get('template_file_id')
         if not archive and key.startswith('router:'):
-            archive='crange-library:vztmpl/debian-13-standard_13.6-1_amd64.tar.zst'
+            archive='crange-library:vztmpl/debian-12-standard_12.12-1_amd64.tar.zst'
         if not archive or reference.get('template_id') is not None:
             continue
         node=placement.get('node_name') or row['box'].get('node_name') or cfg.get('router_node','proxmox4')
