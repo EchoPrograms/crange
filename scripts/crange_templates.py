@@ -9,6 +9,51 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 BUILDS = ROOT / 'templates/builds'
 NODES = {f'proxmox{i}' for i in range(1, 7)}
+MEDIA_STORAGES = ('crange-library', 'media-mirror1', 'media-mirror4', 'local')
+LIBRARY_STATUS = Path('/var/lib/crange-media-library/status.json')
+
+
+def library_status():
+    try:
+        value = json.loads(LIBRARY_STATUS.read_text())
+        return value if isinstance(value, dict) else {}
+    except (OSError, ValueError):
+        return {}
+
+
+def media_inventory(api, node, content='iso'):
+    result = []
+    for storage in MEDIA_STORAGES:
+        try:
+            rows = api.request('GET', f'/nodes/{node}/storage/{storage}/content', {'content': content})
+            if not isinstance(rows, list):
+                continue
+            result.extend({**row, 'storage': storage, 'node': node, 'content': content} for row in rows
+                          if isinstance(row, dict) and int(row.get('size', 0)) > 0 and
+                          str(row.get('volid', '')).startswith(storage + ':' + ('iso/' if content == 'iso' else 'vztmpl/')))
+        except Exception:
+            continue
+    return result
+
+
+def resolve_iso(api, node, volid):
+    available = media_inventory(api, node)
+    if any(row['volid'] == volid for row in available):
+        return volid
+    # A mirror is equivalent only when the synchronizer recorded its content hash.
+    name = volid.split('/')[-1]
+    for item in library_status().get('files', []):
+        if item.get('content') != 'iso' or item.get('name') != name or not item.get('sha256'):
+            continue
+        verified = {copy.get('storage') for copy in item.get('copies', [])
+                    if copy.get('sha256') == item['sha256']}
+        for storage in MEDIA_STORAGES[:3]:
+            candidate = storage + ':iso/' + name
+            if storage in verified and any(row['volid'] == candidate and int(row['size']) == item.get('size') for row in available):
+                return candidate
+    raise ValueError('Selected ISO is unavailable on this node and no verified mirror is available.')
+
+
 MODELS = {'virtio', 'e1000', 'e1000e', 'rtl8139', 'vmxnet3'}
 
 
@@ -39,8 +84,8 @@ def validate(value):
         integer(value[key],low,high,key)
     for key in ('iso','driver_iso'):
         if key == 'driver_iso' and not value[key]:continue
-        if not isinstance(value[key],str) or not re.fullmatch(r'local:iso/[a-zA-Z0-9][a-zA-Z0-9_.-]{0,159}\.iso', value[key], re.IGNORECASE):
-            raise ValueError('Choose an ISO on the selected node’s local storage.')
+        if not isinstance(value[key],str) or not re.fullmatch(r'(?:local|crange-library|media-mirror1|media-mirror4):iso/[a-zA-Z0-9][a-zA-Z0-9_.-]{0,159}\.iso', value[key], re.IGNORECASE):
+            raise ValueError('Choose an ISO from the shared library or an approved local mirror.')
     if not isinstance(value['nic_models'],list) or not 1 <= len(value['nic_models']) <= 8 or any(m not in MODELS for m in value['nic_models']):
         raise ValueError('Configure 1–8 supported network adapters.')
     for key in ('agent','cloud_init','tpm'):
@@ -80,12 +125,21 @@ def options(api=None):
     from crange import ProxmoxAPI
     api=api or ProxmoxAPI()
     nodes=[]
+    archives={}
+    try:
+        online={row['node'] for row in api.request('GET','/nodes') if row.get('status')=='online'}
+    except Exception:
+        online=set()
     for node in sorted(NODES):
-        try:
-            media=api.request('GET',f'/nodes/{node}/storage/local/content',{'content':'iso'})
-            nodes.append({'name':node,'isos':[m['volid'] for m in media if m.get('volid','').lower().endswith('.iso') and int(m.get('size',0))>0]})
-        except Exception:
-            nodes.append({'name':node,'isos':[],'unavailable':True})
+        media=media_inventory(api,node)
+        containers=media_inventory(api,node,'vztmpl')
+        nodes.append({'name':node,'isos':[m['volid'] for m in media],
+                      'container_archives':[m['volid'] for m in containers],
+                      'unavailable':node not in online if online else not media and not containers})
+        for row in media+containers:
+            key=(row['content'],row['volid'].split('/')[-1],int(row['size']))
+            item=archives.setdefault(key,{'content':key[0],'name':key[1],'size':key[2],'locations':[]})
+            item['locations'].append({'node':node,'storage':row['storage'],'volid':row['volid']})
     try:
         resources=api.request('GET','/cluster/resources',{'type':'vm'})
     except Exception:
@@ -109,16 +163,16 @@ def options(api=None):
             except Exception:
                 record['error']='Installer VM is missing or no longer matches this build record.'
         builds.append(record)
-    return {'nodes':nodes,'builds':builds}
+    return {'nodes':nodes,'builds':builds,'media':list(archives.values()),'library':library_status(),
+            'library_storage':'crange-library','mirror_storages':['media-mirror1','media-mirror4']}
 
 
 def create(definition,api=None):
     from crange import ProxmoxAPI
     value=validate(definition);api=api or ProxmoxAPI();node=value['node']
-    inventory=api.request('GET',f'/nodes/{node}/storage/local/content',{'content':'iso'})
-    media={m['volid'] for m in inventory if int(m.get('size',0))>0}
-    if any(iso and iso not in media for iso in (value['iso'],value['driver_iso'])):
-        raise ValueError('Selected installation media is not on this node.')
+    value=dict(value)
+    for key in ('iso','driver_iso'):
+        if value[key]:value[key]=resolve_iso(api,node,value[key])
     if not any(n.get('vnet')=='craccess' and n.get('zone')=='crange' for n in api.request('GET','/cluster/sdn/vnets')):
         raise ValueError('Approved installer network craccess is unavailable on this node.')
     guests=api.request('GET','/cluster/resources',{'type':'vm'})

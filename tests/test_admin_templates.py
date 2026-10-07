@@ -107,3 +107,26 @@ class AdminTemplateTests(unittest.TestCase):
             self.assertEqual(t.validate({**DEFINITION,'iso':'local:iso/WINDOWS.ISO'})['os'],'windows')
 
 if __name__=='__main__':unittest.main()
+
+class SharedLibraryTests(unittest.TestCase):
+    def test_shared_iso_allowed_but_unapproved_storage_rejected(self):
+        t.validate({**DEFINITION,'iso':'crange-library:iso/windows.iso','driver_iso':'media-mirror1:iso/virtio.iso'})
+        with self.assertRaises(ValueError):t.validate({**DEFINITION,'iso':'arbitrary:iso/windows.iso'})
+
+    def test_mirror_fallback_requires_matching_manifest_hash_and_size(self):
+        api=Mock()
+        api.request.side_effect=lambda method,path,fields: ([{'volid':'media-mirror4:iso/windows.iso','size':4096}]
+            if '/media-mirror4/' in path else [])
+        with patch.object(t,'library_status',return_value={}):
+            with self.assertRaisesRegex(ValueError,'no verified mirror'):t.resolve_iso(api,'proxmox4','crange-library:iso/windows.iso')
+        status={'files':[{'content':'iso','name':'windows.iso','size':4096,'sha256':'abc',
+                         'copies':[{'storage':'media-mirror4','sha256':'abc'}]}]}
+        with patch.object(t,'library_status',return_value=status):
+            self.assertEqual(t.resolve_iso(api,'proxmox4','crange-library:iso/windows.iso'),'media-mirror4:iso/windows.iso')
+        status['files'][0]['copies'][0]['sha256']='different'
+        with patch.object(t,'library_status',return_value=status),self.assertRaises(ValueError):
+            t.resolve_iso(api,'proxmox4','crange-library:iso/windows.iso')
+
+    def test_zero_byte_images_are_not_offered(self):
+        api=Mock();api.request.return_value=[{'volid':'crange-library:iso/empty.iso','size':0}]
+        self.assertEqual(t.media_inventory(api,'proxmox1'),[])

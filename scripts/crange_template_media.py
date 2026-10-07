@@ -56,9 +56,9 @@ def transfer(upload,node,api=None):
     meta,file=record(upload);info=json.loads(meta.read_text())
     if info['status']!='ready' or file.stat().st_size!=info['size']:raise ValueError('ISO upload is not ready.')
     api=api or ProxmoxAPI()
-    existing=api.request('GET',f'/nodes/{node}/storage/local/content',{'content':'iso'})
-    volid='local:iso/'+info['name']
-    if any(m.get('volid')==volid for m in existing):raise ValueError('An ISO with this filename already exists on the node; choose a unique name.')
+    existing=api.request('GET',f'/nodes/{node}/storage/crange-library/content',{'content':'iso'})
+    volid='crange-library:iso/'+info['name']
+    if any(m.get('volid')==volid for m in existing):raise ValueError('An ISO with this filename already exists in the shared library; choose a unique name.')
     boundary='crange'+uuid.uuid4().hex
     head=(f'--{boundary}\r\nContent-Disposition: form-data; name="content"\r\n\r\niso\r\n'
           f'--{boundary}\r\nContent-Disposition: form-data; name="filename"; filename="{info["name"]}"\r\nContent-Type: application/octet-stream\r\n\r\n').encode()
@@ -66,7 +66,7 @@ def transfer(upload,node,api=None):
     target=urlsplit(api.endpoint)
     connection=http.client.HTTPSConnection(target.hostname,target.port or 443,context=api.ssl_context,timeout=600) if target.scheme=='https' else http.client.HTTPConnection(target.hostname,target.port or 80,timeout=600)
     try:
-        connection.putrequest('POST',target.path+f'/nodes/{node}/storage/local/upload')
+        connection.putrequest('POST',target.path+f'/nodes/{node}/storage/crange-library/upload')
         connection.putheader('Authorization','PVEAPIToken='+api.token)
         connection.putheader('Content-Type','multipart/form-data; boundary='+boundary)
         connection.putheader('Content-Length',str(len(head)+info['size']+len(tail)))
