@@ -25,7 +25,8 @@ class CacheJobTests(unittest.TestCase):
             (root / 'image-catalog.json').write_text(json.dumps(catalog))
             api = Mock()
             api.request.side_effect = lambda method, path, fields=None: (
-                {'template': 1, 'tags': 'crange-image;crange-job-prepare'}
+                {'template': 1, 'tags': 'crange-image;crange-cache-200',
+                 'description': 'CRANGE distribution prepare image base-v1'}
                 if path.endswith('/config') else {'status': 'stopped'})
             with patch.object(jobs.scheduling, 'DATA', root), patch.object(jobs.scheduling, 'CONFIG', root), \
                  patch.object(jobs, '_settings', return_value=({'enabled': True}, catalog)), \

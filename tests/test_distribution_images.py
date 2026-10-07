@@ -40,6 +40,15 @@ class ReplicaTests(unittest.TestCase):
             if method == 'GET': return {'tags': 'crange-image;crange-job-test;crange-job-archive', 'template': 1}
             return 'UPID:test'
         self.api.request.side_effect = request
+        self.configs = {}
+        original_request = self.api.request.side_effect
+        def owned_request(method, path, fields=None):
+            if method == 'PUT' and path.endswith('/config'):
+                self.configs.setdefault(path, {'template': 1}).update(fields)
+            if method == 'GET' and path in self.configs:
+                return self.configs[path]
+            return original_request(method, path, fields)
+        self.api.request.side_effect = owned_request
         self.journal = Mock()
         self.verify = Mock(return_value={'passed': True, 'identity_unique': True})
         self.worker = ReplicaWorker(self.api, self.journal, self.verify,
@@ -56,6 +65,10 @@ class ReplicaTests(unittest.TestCase):
         replica = result['images']['base-v1']['replicas'][-1]
         self.assertEqual(replica['template_id'], 200)
         self.assertEqual(replica['state'], 'ready')
+        self.assertEqual(replica['job_id'], 'test')
+        self.assertEqual(self.configs['/nodes/proxmox2/qemu/200/config']['tags'], 'crange-cache-200;crange-image')
+        self.assertEqual(self.configs['/nodes/proxmox2/qemu/200/config']['description'],
+                         'CRANGE distribution test image base-v1')
         self.api.request.assert_any_call('DELETE', '/nodes/proxmox2/qemu/201', {'purge': 1})
         self.assertEqual(self.journal.call_args.args[0]['state'], 'ready')
         self.assertEqual(self.journal.call_args.args[0]['probe_pool'], 'crange-probes')
@@ -82,7 +95,8 @@ class ReplicaTests(unittest.TestCase):
         self.assertEqual(len(updates), 1)
         self.assertEqual({key: updates[0][key] for key in ('memory', 'cores', 'sockets')},
                          {'memory': 512, 'cores': 1, 'sockets': 1})
-        self.assertIn('crange-job-test', updates[0]['tags'].split(';'))
+        self.assertEqual(updates[0]['tags'], 'crange-cache-201;crange-image')
+        self.assertEqual(updates[0]['description'], 'CRANGE verification test')
 
     def test_unverified_reduced_probe_profile_fails_before_allocation(self):
         self.catalog['images']['base-v1']['probe_resources'] = {
@@ -127,7 +141,7 @@ class ReplicaTests(unittest.TestCase):
             node='proxmox2', datastore_id='local-lvm', job_id='archive', archive=archive)
         self.api.request.assert_any_call('POST', '/nodes/proxmox2/qemu',
             {'vmid': 200, 'storage': 'local-lvm', 'pool': 'crange-iac', 'unique': 1,
-             'tags': 'crange-image;crange-job-archive', 'archive': volume, 'name': 'crange-replica-200'})
+             'tags': 'crange-cache-200;crange-image', 'archive': volume, 'name': 'crange-replica-200'})
         self.assertFalse(any(call.args[:2] == ('POST', '/nodes/proxmox2/qemu/200/template')
                              for call in self.api.request.call_args_list))
         self.assertFalse(any('/nodes/proxmox1/' in c.args[1] for c in self.api.request.call_args_list))

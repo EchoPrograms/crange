@@ -49,6 +49,23 @@ class CacheTests(unittest.TestCase):
         self.assertEqual(result['images']['base-v1']['replicas'], [])
         self.assertEqual(len(self.catalog['images']['base-v1']['replicas']), 1)
 
+    def test_compact_cache_marker_requires_exact_job_before_deletion(self):
+        for job, allowed in [('prepare', True), ('other-job', False)]:
+            with self.subTest(job=job):
+                self.api.reset_mock()
+                self.api.request.side_effect = lambda method, path, fields=None: (
+                    {'template': 1, 'tags': 'crange-image;crange-cache-200',
+                     'description': f'CRANGE distribution {job} image base-v1',
+                     'scsi0': 'local-lvm:base-200-disk-0,size=8G'} if path.endswith('/config') else
+                    {'status': 'stopped'} if path.endswith('/status/current') else 'UPID:gc')
+                if allowed:
+                    self.apply(self.plan())
+                    self.api.request.assert_any_call('DELETE', '/nodes/proxmox2/qemu/200', {'purge': 1})
+                else:
+                    with self.assertRaisesRegex(CacheError, 'ownership'):
+                        self.apply(self.plan())
+                    self.assertFalse(any(c.args[0] == 'DELETE' for c in self.api.request.call_args_list))
+
     def test_central_unavailable_never_deletes(self):
         plan = self.plan()
         self.hash.side_effect = OSError('library offline')

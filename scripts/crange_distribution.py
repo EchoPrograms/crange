@@ -21,6 +21,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from crange_catalog import publish_replica, validate_catalog
+from crange_cache_ownership import cache_owned, cache_tags, cache_description
 
 
 class DistributionError(ValueError):
@@ -162,7 +163,8 @@ class ReplicaWorker:
             raise DistributionError('Ambiguous cache generation; reconcile before preparation.')
         if reusable:
             config = self._config(node, kind, reusable[0]['template_id'])
-            _owned(config, f'crange-job-{reusable[0].get("job_id", "")}')
+            if not cache_owned(config, reusable[0]['template_id'], reusable[0].get('job_id')):
+                raise DistributionError('Image is not owned by this distribution job.')
             if int(config.get('template', 0)) != 1 or config.get('lock'):
                 raise DistributionError('Published cache generation changed; fixed repair required.')
             return catalog
@@ -205,14 +207,13 @@ class ReplicaWorker:
         if (self.reservation_validator is None or
                 not self.reservation_validator(reservation, node, datastore_id, capacity)):
             raise DistributionError('A valid shared-ledger cache preparation reservation is required.')
-        marker = f'crange-job-{job_id}'
-        owned_tags = ';'.join(sorted(set(str(source.get('tags', '')).split(';')) | {'crange-image', marker}))
         record = dict(job_id=job_id, image_id=image_id, node=node,
                       datastore_id=datastore_id, state='allocated', kind=kind,
                       source_node=source_node, source_id=source_id,
                       artifact_sha256=image['artifact_sha256'], reservation=reservation,
                       created_at=datetime.now(timezone.utc).timestamp())
         vmid = int(self.api.request('GET', '/cluster/nextid'))
+        owned_tags = cache_tags(source, vmid)
         record['template_id'] = vmid
         record['allocation_node'] = node
         self.journal(dict(record))
@@ -235,7 +236,7 @@ class ReplicaWorker:
                         'name' if kind == 'qemu' else 'hostname': f'crange-replica-{vmid}',
                         'description': f'CRANGE distribution {job_id} image {image_id}'})
         self.api.request('PUT', f'/nodes/{node}/{kind}/{vmid}/config',
-                         {'tags': owned_tags})
+                         {'tags': owned_tags, 'description': cache_description(job_id, image_id)})
         record['state'] = 'converting-template'
         self.journal(dict(record))
         if kind == 'qemu':
@@ -275,16 +276,15 @@ class ReplicaWorker:
                 record.get('artifact_sha256') != image.get('artifact_sha256')):
             raise DistributionError('Cache resume identity is incomplete or outside approved scope.')
         self._active_record = record
-        source_tags = {'crange-image', f'crange-job-{job_id}'}
-        owned_tags = ';'.join(sorted(source_tags))
+        owned_tags = cache_tags({}, vmid)
         return self._verify_and_publish(catalog, image_id, image, kind, node, datastore_id,
                                         job_id, vmid, clone_mode, owned_tags, record)
 
     def _verify_and_publish(self, catalog, image_id, image, kind, node, datastore_id,
                             job_id, vmid, clone_mode, owned_tags, record):
-        marker = f'crange-job-{job_id}'
         config = self._config(node, kind, vmid)
-        _owned(config, marker)
+        if not cache_owned(config, vmid, job_id):
+            raise DistributionError('Image is not owned by this distribution job.')
         if int(config.get('template', 0)) != 1:
             raise DistributionError('Replica conversion did not produce a template.')
         if kind == 'lxc' and clone_mode == 'linked' and self.backing_verifier is None:
@@ -297,7 +297,8 @@ class ReplicaWorker:
                     **({'storage': datastore_id} if clone_mode == 'full' else {}),
                     'pool': PROBE_POOL, 'description': f'CRANGE verification {job_id}',
                     'name' if kind == 'qemu' else 'hostname': f'crange-probe-{probe_id}'})
-        probe_config = {'tags': owned_tags}
+        probe_config = {'tags': cache_tags({}, probe_id),
+                        'description': f'CRANGE verification {job_id}'}
         if image.get('probe_resources'):
             profile = image['probe_resources']
             probe_config.update(memory=profile['memory_mb'], cores=profile['cpu_cores'])
@@ -318,7 +319,8 @@ class ReplicaWorker:
             self.journal(dict(record))
             raise DistributionError('Disposable clone readiness/identity verification failed.')
         # Probe deletion is guarded and must complete before publication.
-        _owned(self._config(node, kind, probe_id), marker)
+        if not cache_owned(self._config(node, kind, probe_id), probe_id, job_id):
+            raise DistributionError('Probe is not owned by this distribution job.')
         self._task(node, 'DELETE', f'/nodes/{node}/{kind}/{probe_id}', {'purge': 1})
         replica = dict(node=node, template_id=vmid, datastore_id=datastore_id,
                        state='ready', artifact_sha256=image['artifact_sha256'],

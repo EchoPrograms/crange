@@ -21,6 +21,7 @@ from crange_distribution import (DistributionError, FileJournal, ProbeVerifier,
     ReplicaWorker, SSHContainerExec, SSHVolumeHasher, catalog_transaction, required_capacity,
     shared_reservation_validator, UnixContainerBackingVerifier)
 from crange_image_cache import CacheError, build_eviction_plan, apply_eviction_plan
+from crange_cache_ownership import cache_owned
 from crange_placement import ReservationLedger
 import crange_scheduling as scheduling
 
@@ -164,8 +165,7 @@ def prepare_cache(*, project_id, image_id, node_name, datastore_id='local-lvm',
                     kind = 'qemu' if image['kind'] == 'vm' else 'lxc'
                     config = api.request('GET', f'/nodes/{node_name}/{kind}/{replica["template_id"]}/config')
                     if int(config.get('template', 0)) != 1 or config.get('lock') or (
-                            f'crange-job-{replica["job_id"]}' not in str(config.get('tags', '')).split(';') or
-                            'crange-image' not in str(config.get('tags', '')).split(';')):
+                            not cache_owned(config, replica['template_id'], replica.get('job_id'))):
                         raise DistributionError('Existing cache changed; owned repair required.')
                     status = api.request('GET', f'/nodes/{node_name}/{kind}/{replica["template_id"]}/status/current')
                     if status.get('status') != 'stopped':
@@ -569,7 +569,8 @@ def reconcile_cache_job(job_id):
             inventory = scheduling.discover(api, policy)
             actual = inventory['guests'].get(str(record['template_id']))
             if (not actual or actual['node_name'] != node or not actual.get('template') or
-                    f'crange-job-{job_id}' not in actual.get('tags', '').split(';') or
+                    not cache_owned(api.request('GET', f'/nodes/{node}/{record["kind"]}/{record["template_id"]}/config'),
+                                    record['template_id'], job_id) or
                     str(record.get('probe_id')) in inventory['guests']):
                 raise DistributionError('Actual cache/probe ownership reconciliation is incomplete.')
             ledger.reconcile_job(job_id, operation_terminal=True, allocations_reconciled=True)
@@ -653,11 +654,9 @@ def resume_cache_template(job_id):
             if len(active) >= 1000 or any(str(t.get('id')) == str(vmid) for t in active):
                 raise DistributionError('A provider task for the restored cache VM is active or ambiguous.')
             config = api.request('GET', f'/nodes/proxmox2/qemu/{vmid}/config')
-            marker = f'crange-job-{job_id}'
-            tags = set(str(config.get('tags', '')).split(';'))
             scsi_parts = config.get('scsi0', '').split(',')
             configured_disks = {k for k in config if re.fullmatch(r'(?:scsi|sata|virtio|ide)\d+', k)}
-            if ('crange-image' not in tags or marker not in tags or config.get('lock') or
+            if (not cache_owned(config, vmid, job_id) or config.get('lock') or
                     int(config.get('template', 0)) != 1 or
                     configured_disks != {'scsi0', 'ide2'} or
                     not scsi_parts or scsi_parts[0] != f'local-lvm:base-{vmid}-disk-0' or

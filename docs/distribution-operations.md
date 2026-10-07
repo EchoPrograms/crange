@@ -311,3 +311,5 @@ local datastore pass current placement gates. The fixed worker reserves capacity
 prepares the replica, and verifies it before discovery reports it as ready. Staging
 uses the same fixed preparation path when a required cache is missing. No images are
 copied by browsing or refreshing the view.
+
+Local cache templates use `crange-cache-<VMID>` alongside `crange-image`. Full job IDs remain in the catalog and journal, and in the provider description; compact labels require an exact matching job description before reuse, resume, reconciliation or eviction. Legacy `crange-job-<job-id>` labels remain supported. Do not remove ownership labels without migrating their matching provenance.

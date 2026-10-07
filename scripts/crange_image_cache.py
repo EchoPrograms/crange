@@ -11,6 +11,7 @@ import re
 import time
 
 from crange_catalog import validate_catalog
+from crange_cache_ownership import cache_owned
 
 
 class CacheError(ValueError):
@@ -122,10 +123,8 @@ def apply_eviction_plan(api, plan, *, refresh, hash_volume, journal, lock,
         node, vmid = plan['node'], plan['template_id']
         kind = 'qemu' if plan['kind'] == 'vm' else 'lxc'
         config = api.request('GET', f'/nodes/{node}/{kind}/{vmid}/config')
-        marker = f'crange-job-{replica.get("job_id", "")}'
         if (int(config.get('template', 0)) != 1 or config.get('lock') or
-                marker not in str(config.get('tags', '')).split(';') or
-                'crange-image' not in str(config.get('tags', '')).split(';')):
+                not cache_owned(config, vmid, replica.get('job_id'))):
             raise CacheError('Candidate template ownership, lock or identity changed.')
         actual_volumes = sorted(str(value).split(',')[0] for field, value in config.items()
             if re.fullmatch(r'(?:scsi|sata|virtio|ide|efidisk|tpmstate|mp)\d+|rootfs|unused\d+', field)
