@@ -163,6 +163,7 @@ def command(operation, project, options):
         "template-distribution-inventory": ({}, lambda o: ['distribution-inventory']),
         "template-distribution-prepare": ({"image": lambda v: v if isinstance(v, str) and re.fullmatch(r'[a-zA-Z0-9][a-zA-Z0-9_.-]{0,127}',v) else (_ for _ in ()).throw(ValueError('Invalid immutable image ID')), "node": node, "storage": lambda v: choice(v, ('local-lvm','ssd-lvm','hdd-lvm'))}, lambda o: ['distribution-prepare',o['image'],'--project',p,'--node',o['node'],'--storage',o['storage']]),
         "template-create": ({"definition": lambda v: json.dumps(__import__('crange_templates').validate(v))}, lambda o: ['template-create', '--definition', o['definition']]),
+        "template-approve-image": ({"image_id": lambda v: v if isinstance(v, str) and re.fullmatch(r'[a-zA-Z0-9][a-zA-Z0-9_.-]{0,127}', v) else (_ for _ in ()).throw(ValueError('Invalid logical image ID')), "projects": template_projects}, lambda o: ['template-approve-image', o['image_id'], '--projects', *o['projects']]),
         "template-publish": ({"build_id": lambda v: __import__('crange_templates').identifier(v), "projects": template_projects,
                               "prepared": template_prepared}, lambda o: ['template-publish', o['build_id'], '--projects', *o['projects'], '--prepared']),
         "template-upload": ({"upload_id": lambda v: __import__('crange_templates').identifier(v), "node": node}, lambda o: ['template-upload', o['upload_id'], '--node', o['node']]),

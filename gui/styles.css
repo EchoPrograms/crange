@@ -41,3 +41,4 @@ input[type=checkbox],input[type=radio]{accent-color:#ffffff;color-scheme:dark}
 .resource-dialog{box-sizing:border-box;max-height:calc(100vh - 40px)}.resource-form{min-height:0;overflow:auto;padding-right:4px;flex:1}.resource-dialog>.error{flex:none;margin:10px 0 0}.resource-form>button{flex:none}
 
 .cluster-node{margin-top:18px}.cluster-node h4{margin-top:20px}.cluster-node .error{white-space:normal}
+.template-readiness-warning{margin:8px 0 14px;padding:10px 12px;border-left:3px solid #d48b67;background:#251b17;color:#ffd4bf;font-size:13px}.template-readiness-ready{margin:8px 0 14px;padding:10px 12px;border-left:3px solid #7f9a86;background:#171d19;color:#d1ecd6;font-size:13px}

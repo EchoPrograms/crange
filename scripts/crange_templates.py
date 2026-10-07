@@ -178,8 +178,183 @@ def options(api=None):
             except Exception:
                 record['error']='Installer VM is missing or no longer matches this build record.'
         builds.append(record)
+    try:
+        from crange_scheduling import read_settings
+        catalog = read_settings()[1]
+        logical_images = []
+        for image_id, image in sorted(catalog['images'].items()):
+            replicas = [replica for replica in image.get('replicas', []) if replica.get('state') == 'ready']
+            logical_images.append({'image_id': image_id, 'kind': image['kind'],
+                                   'approved_projects': image['approved_projects'],
+                                   'ready_nodes': sorted({replica['node'] for replica in replicas}),
+                                   'source_type': image.get('source_type', 'published_template')})
+    except Exception:
+        logical_images = None
     return {'nodes':nodes,'builds':builds,'media':list(archives.values()),'library':library_status(),
+            'logical_images':logical_images,
             'library_storage':'crange-library','mirror_storages':['media-mirror1','media-mirror4']}
+
+
+def project_image_readiness(project_id):
+    """Return only this project's approved-template to logical-image readiness."""
+    from crange import project_dir, templates_for, container_templates_for
+    from crange_scheduling import read_settings
+    path = project_dir(str(project_id))
+    catalog = read_settings()[1]
+    result = {}
+    for key, filename, approved in (
+            ('vm_templates', 'approved-scenario-templates.json', templates_for(path)),
+            ('container_templates', 'approved-container-templates.json', container_templates_for(path))):
+        result[key] = {}
+        for alias, reference in sorted(approved.items()):
+            image_id = reference.get('image_id')
+            image = catalog['images'].get(image_id) if image_id else None
+            ready_nodes = []
+            if image and image.get('kind') == ('vm' if key == 'vm_templates' else 'container'):
+                scope = image.get('approved_projects', [])
+                if '*' in scope or int(project_id) in scope:
+                    ready_nodes = sorted({replica['node'] for replica in image.get('replicas', [])
+                                          if replica.get('state') == 'ready'})
+            if not image_id:
+                status, reason = 'missing-image-id', 'Approved Proxmox template has no logical image ID.'
+            elif not image:
+                status, reason = 'missing-catalog-image', 'Logical image ID is absent from the verified image catalog.'
+            elif image.get('kind') != ('vm' if key == 'vm_templates' else 'container'):
+                status, reason = 'kind-mismatch', 'Catalog image type does not match this template.'
+            elif not ('*' in image.get('approved_projects', []) or int(project_id) in image.get('approved_projects', [])):
+                status, reason = 'not-approved', 'Catalog image is not approved for this project.'
+            elif not ready_nodes:
+                status, reason = 'no-ready-replica', 'Catalog image has no verified ready replica.'
+            else:
+                status, reason = 'ready', 'Verified catalog image is approved for this project.'
+            result[key][alias] = {'status': status, 'reason': reason, 'image_id': image_id,
+                                  'display_name': reference.get('display_name') or alias,
+                                  'template_id': reference.get('template_id'),
+                                  'template_node': reference.get('template_node'),
+                                  'ready_nodes': ready_nodes}
+    catalog_images = []
+    for image_id, image in sorted(catalog['images'].items()):
+        scope = image.get('approved_projects', [])
+        ready_nodes = sorted({replica['node'] for replica in image.get('replicas', [])
+                              if replica.get('state') == 'ready'})
+        if ready_nodes and ('*' in scope or int(project_id) in scope):
+            catalog_images.append({'image_id': image_id, 'kind': image['kind'],
+                                   'ready_nodes': ready_nodes})
+    result['catalog_images'] = catalog_images
+    return result
+
+
+def approve_catalog_image(image_id, projects, api=None):
+    """Link a verified, ready VM image into selected projects under a new alias.
+
+    This does not publish evidence or mutate the image catalog. It only grants
+    project-local template selection for an already globally approved image.
+    """
+    from crange import ProxmoxAPI, project_dir, templates_for
+    from crange_scheduling import read_settings
+
+    if not isinstance(image_id, str) or not re.fullmatch(r'[a-zA-Z0-9][a-zA-Z0-9_.-]{0,127}', image_id):
+        raise ValueError('Invalid logical image ID.')
+    if not isinstance(projects, list) or not projects:
+        raise ValueError('Choose one or more projects.')
+    normalized = []
+    for project in projects:
+        if isinstance(project, bool) or not isinstance(project, int) or not 1 <= project <= 255:
+            raise ValueError('Choose a valid project.')
+        if project in normalized:
+            raise ValueError('Duplicate project selection.')
+        normalized.append(project)
+
+    catalog = read_settings()[1]
+    image = catalog.get('images', {}).get(image_id)
+    if not image or image.get('kind') != 'vm' or image.get('verified') is not True:
+        raise ValueError('Choose a verified VM image from the protected catalog.')
+    if '*' not in image.get('approved_projects', []):
+        raise ValueError('This action only links images already approved for all projects.')
+    digest = image.get('artifact_sha256')
+    identity = image.get('identity_capture') or {}
+    source_identity = identity.get('source_identity') or {}
+    if (not isinstance(digest, str) or not re.fullmatch(r'[0-9a-f]{64}', digest) or
+            identity.get('state') != 'identity-captured' or identity.get('kind') != 'vm' or
+            not re.fullmatch(r'[0-9a-f]{64}', str(identity.get('source_config_sha256', ''))) or
+            not source_identity.get('machine_id') or
+            not source_identity.get('ssh_host_key')):
+        raise ValueError('Image provenance or captured guest identity is incomplete.')
+
+    ready = []
+    for replica in image.get('replicas', []):
+        evidence = (replica.get('verification') or {}).get('evidence') or {}
+        replica_identity = (evidence.get('machine_id'), evidence.get('ssh_host_key'))
+        if (replica.get('state') == 'ready' and replica.get('artifact_sha256') == digest and
+                replica.get('cache_local') is True and 'linked' in replica.get('clone_modes_verified', []) and
+                (replica.get('verification') or {}).get('passed') is True and
+                replica_identity[0] and replica_identity[1] and
+                replica_identity[0] != source_identity['machine_id'] and
+                replica_identity[1] != source_identity['ssh_host_key'] and replica.get('template_id')):
+            ready.append(replica)
+    if not ready:
+        raise ValueError('Image has no verified local linked-clone replica.')
+    # Prefer the verified P2 replica called out in the publication record, then
+    # use the lowest numbered matching node. Never fall back to the source VM.
+    ready.sort(key=lambda row: (row['node'] != 'proxmox2', row['node'], row['template_id']))
+    replica = ready[0]
+    if api is None:
+        api = ProxmoxAPI()
+    config = api.request('GET', f"/nodes/{replica['node']}/qemu/{int(replica['template_id'])}/config")
+    tags = str(config.get('tags', '')).split(';') if isinstance(config, dict) else []
+    if (not isinstance(config, dict) or str(config.get('template', '0')) not in ('1', 'true', 'True') or
+            'crange-image' not in tags or f"crange-cache-{int(replica['template_id'])}" not in tags):
+        raise ValueError('The catalog replica is not an owned Proxmox image template.')
+
+    alias = image_id.removesuffix('-20261005')
+    alias = re.sub(r'[^a-z0-9-]+', '-', alias.lower()).strip('-')
+    if not alias or not re.fullmatch(r'[a-z][a-z0-9-]{0,39}', alias):
+        raise ValueError('Logical image ID cannot form a safe template alias.')
+    profile = {}
+    for source_key, profile_key in (('bios', 'bios'), ('machine', 'machine'),
+                                    ('scsihw', 'scsi_hardware'), ('ostype', 'os_type'),
+                                    ('cpu', 'cpu_type')):
+        if isinstance(config.get(source_key), str) and config[source_key]:
+            profile[profile_key] = config[source_key]
+    agent = config.get('agent')
+    if isinstance(agent, (str, int)):
+        profile['agent_enabled'] = str(agent) == '1' or str(agent).startswith('enabled=1')
+    profile['cloud_init'] = any(str(config.get(key, '')).endswith('cloudinit') for key in ('ide0', 'sata0', 'scsi0'))
+    boot = str(config.get('boot', ''))
+    if boot.startswith('order='):
+        profile['boot_order'] = [part for part in boot[6:].split(';') if part]
+    network_models = []
+    for key in sorted((key for key in config if re.fullmatch(r'net[0-9]+', key)),
+                      key=lambda value: int(value[3:])):
+        model = str(config[key]).partition('=')[0]
+        if model:
+            network_models.append(model)
+    if network_models:
+        profile['network_models'] = network_models
+    reference = {'template_id': int(replica['template_id']), 'template_node': replica['node'],
+                 'display_name': image.get('display_name') or 'Alpine 3.24 portable',
+                 'image_id': image_id, 'image_artifact_sha256': digest,
+                 'source_config_sha256': identity['source_config_sha256'],
+                 'replica_datastore': replica.get('datastore_id'),
+                 'replica_clone_modes': ['linked'], 'profile': profile}
+    paths = [project_dir(str(project)) for project in normalized]
+    for path in paths:
+        previous = templates_for(path).get(alias)
+        if previous and (previous.get('image_id') != image_id or
+                         previous.get('template_id') != reference['template_id'] or
+                         previous.get('template_node') != reference['template_node']):
+            raise ValueError(f'Template alias {alias!r} already refers to a different image in one selected project.')
+    for path in paths:
+        file = path / 'approved-scenario-templates.json'
+        approved = templates_for(path)
+        approved[alias] = reference
+        temp = file.with_suffix('.tmp')
+        temp.write_text(json.dumps(approved, indent=2) + '\n')
+        temp.chmod(0o640)
+        temp.replace(file)
+    print(f'Linked verified image {image_id} as {alias} for projects {", ".join(map(str, normalized))}.')
+    return {'alias': alias, 'image_id': image_id, 'template_id': reference['template_id'],
+            'template_node': reference['template_node'], 'projects': normalized}
 
 
 def create(definition,api=None):

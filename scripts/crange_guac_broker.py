@@ -126,6 +126,14 @@ def serve():
                 session_token = data.get('session')
                 if not isinstance(session_token, str) or not 32 <= len(session_token) <= 256:
                     raise TicketError('Sign in required.')
+                if operation == 'template-readiness':
+                    session = auth.session(session_token)
+                    if not session or (not session['admin'] and str(project_id) not in session['managed_projects']):
+                        raise TicketError('Project manager access required.')
+                    from crange_templates import project_image_readiness
+                    reply = {'templates': project_image_readiness(project_id)}
+                    self.wfile.write(json.dumps(reply, separators=(',', ':')).encode() + b'\n')
+                    return
                 if operation == 'template-options':
                     session = auth.session(session_token)
                     if not session or not session['admin']:raise TicketError('Administrator access required.')

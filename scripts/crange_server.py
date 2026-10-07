@@ -101,6 +101,14 @@ def serve(host='127.0.0.1', port=8000):
                                 approved = json.loads(source.read_text()) if source.is_file() else {}
                                 record[kind] = sorted(approved)
                                 record.setdefault('template_labels', {}).update({key: value.get('display_name') or ('ParrotOS Jump Box' if kind == 'vm_templates' and value.get('template_id') == 112 else 'Debian 13 · CRANGE base container' if kind == 'container_templates' and key == 'approved-ct-base' else 'Debian 13 · Proxmox system template' if kind == 'container_templates' and key == 'debian-13' else key) for key, value in approved.items()})
+                            try:
+                                from crange_guac_ticket import request_broker
+                                record['template_readiness'] = request_broker({
+                                    'operation': 'template-readiness', 'project': int(project),
+                                    'session': self.token()}).get('templates', {})
+                            except Exception:
+                                record['template_readiness'] = {}
+                                record['template_readiness_error'] = 'Image readiness could not be verified.'
                             from crange_jumpboxes import presets
                             record['jumpbox_templates'] = presets(int(project))
                             record['quota'] = project_quota(directory)
