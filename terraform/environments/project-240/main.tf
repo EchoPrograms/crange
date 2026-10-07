@@ -327,7 +327,7 @@ module "project_router" {
     downstream_vnet    = proxmox_sdn_vnet.transit.id
     downstream_address = "10.${var.project_id}.0.1/24"
     dns_servers        = ["10.60.2.1"]
-    template_file_id   = "local:vztmpl/debian-13-standard_13.6-1_amd64.tar.zst"
+    template_file_id   = "crange-library:vztmpl/debian-13-standard_13.6-1_amd64.tar.zst"
     tags               = [local.project]
   }
 
@@ -349,7 +349,7 @@ module "team_router" {
     downstream_vnet    = proxmox_sdn_vnet.team[each.key].id
     downstream_address = "10.${var.project_id}.${each.value}.1/24"
     dns_servers        = ["10.60.2.1"]
-    template_file_id   = "local:vztmpl/debian-13-standard_13.6-1_amd64.tar.zst"
+    template_file_id   = "crange-library:vztmpl/debian-13-standard_13.6-1_amd64.tar.zst"
     tags               = [local.project, format("%st%03d", local.project, each.value)]
   }
 
@@ -373,7 +373,7 @@ module "staging_router" {
     downstream_vnet    = proxmox_sdn_vnet.staging.id
     downstream_address = "10.${var.project_id}.254.1/24"
     dns_servers        = ["10.60.2.1"]
-    template_file_id   = "local:vztmpl/debian-13-standard_13.6-1_amd64.tar.zst"
+    template_file_id   = "crange-library:vztmpl/debian-13-standard_13.6-1_amd64.tar.zst"
     tags               = [local.project, local.staging_vnet]
   }
 
@@ -400,7 +400,7 @@ module "custom_router" {
     cores              = each.value.cores
     memory_mb          = each.value.memory_mb
     dns_servers        = ["10.60.2.1"]
-    template_file_id   = "local:vztmpl/debian-13-standard_13.6-1_amd64.tar.zst"
+    template_file_id   = "crange-library:vztmpl/debian-13-standard_13.6-1_amd64.tar.zst"
     tags               = [local.project, proxmox_sdn_vnet.custom[each.key].id]
   }
 
