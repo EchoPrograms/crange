@@ -232,6 +232,8 @@ def command(operation, project, options):
         # Concrete legacy nodes remain hard pins; absent nodes are Automatic.
         options = {'node': 'auto', 'preferred_node': 'proxmox4' if operation=='box-add' and options.get('node','auto')=='auto' else '', **options}
         fields['preferred_node'] = lambda v: '' if v == '' else node(v)
+    elif placement_edit and 'preferred_node' in options:
+        fields['preferred_node'] = lambda v: '' if v == '' else node(v)
     if set(options) != set(fields):
         raise ValueError("Unexpected or missing operation fields.")
     validated = {key: validate(options[key]) for key, validate in fields.items()}
@@ -245,10 +247,10 @@ def command(operation, project, options):
         __import__('crange_guac_boxes').snapshot_name(options['snapshot'],
                                                     required=options['action'] != 'list')
     result = build(validated)
-    if placement_add:
+    if placement_add or (placement_edit and 'preferred_node' in validated):
         from crange_scheduling import placement_intent
         placement_intent(validated['node'], validated['preferred_node'])
-        if validated['preferred_node'] or (operation=='box-add' and validated['node']=='auto'):
+        if placement_edit or validated['preferred_node'] or (operation=='box-add' and validated['node']=='auto'):
             result.extend(['--preferred-node', validated['preferred_node']])
     return result
 

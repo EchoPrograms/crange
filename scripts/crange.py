@@ -560,8 +560,8 @@ def cmd_network_edit(args: argparse.Namespace) -> None:
         raise CrangeError(f"Parent-side router address .{args.uplink} is already assigned to a container.")
     if any(str(box.get("team_id")) == owner and not box.get("network_key") and 10 + int(box.get("jump_number", 0)) == args.uplink for box in cfg.get("jump_boxes", {}).values()):
         raise CrangeError(f"Parent-side router address .{args.uplink} is already assigned to a jump box.")
-    if args.node != net.get('node_name'):
-        net['placement']=__import__('crange_scheduling').placement_intent(args.node)
+    if args.node != net.get('node_name') or getattr(args, 'preferred_node', None) is not None:
+        net['placement']=__import__('crange_scheduling').placement_intent(args.node, getattr(args, 'preferred_node', None) or '')
     net.update({"network_id": args.id, "node_name": args.node,
                 "uplink_last_octet": args.uplink, "cores": args.cores,
                 "memory_mb": args.memory})
@@ -1713,8 +1713,8 @@ def cmd_scenario_edit(args: argparse.Namespace) -> None:
     if network_key is not None:
         box['network_key'] = network_key
     box['network_id'] = guest_network_id(cfg, str(box['team_id']), box.get('network_key', ''))
-    if args.node != box.get('node_name'):
-        box['placement']=__import__('crange_scheduling').placement_intent(args.node)
+    if args.node != box.get('node_name') or getattr(args, 'preferred_node', None) is not None:
+        box['placement']=__import__('crange_scheduling').placement_intent(args.node, getattr(args, 'preferred_node', None) or '')
     if args.template != box.get("template"):
         reference = templates_for(path)[args.template]
         box.pop("image", None)
@@ -1805,8 +1805,8 @@ def cmd_container_edit(args: argparse.Namespace) -> None:
         checks = validate_health_checks(json.loads(args.health))
     except json.JSONDecodeError as exc:
         raise CrangeError(f"Health checks are not valid JSON: {exc}") from exc
-    if args.node != box.get('node_name'):
-        box['placement']=__import__('crange_scheduling').placement_intent(args.node)
+    if args.node != box.get('node_name') or getattr(args, 'preferred_node', None) is not None:
+        box['placement']=__import__('crange_scheduling').placement_intent(args.node, getattr(args, 'preferred_node', None) or '')
     if args.template != box.get("template"):
         reference = container_templates_for(path)[args.template]
         box.pop("image", None)
@@ -2834,7 +2834,7 @@ def make_parser() -> argparse.ArgumentParser:
         q.set_defaults(func=lambda a, add=add: mutate_custom_network(a, add))
     q = sub.add_parser("network-edit", help="Edit a custom routed network's subnet, router node, uplink, and size")
     q.add_argument("project"); q.add_argument("name"); q.add_argument("--id", type=int, required=True)
-    q.add_argument("--node", default="auto", choices=sorted(NODES | {"auto"}), help="Legacy explicit node pin; defaults to Automatic"); q.add_argument("--preferred-node", default="", choices=["",*sorted(NODES)], help="Soft suggestion with Automatic"); q.add_argument("--uplink", type=int, required=True)
+    q.add_argument("--node", default="auto", choices=sorted(NODES | {"auto"}), help="Legacy explicit node pin; defaults to Automatic"); q.add_argument("--preferred-node", default=None, choices=["",*sorted(NODES)], help="Soft suggestion with Automatic"); q.add_argument("--uplink", type=int, required=True)
     q.add_argument("--cores", type=int, required=True); q.add_argument("--memory", type=int, required=True)
     q.set_defaults(func=cmd_network_edit)
     q = sub.add_parser('box-users', help='Manage Linux accounts on one deployed project box')
@@ -2887,7 +2887,7 @@ def make_parser() -> argparse.ArgumentParser:
     q = sub.add_parser("scenario-edit", help="Edit a declared scenario VM and its health checks")
     q.add_argument("project"); q.add_argument("name")
     q.add_argument("--ip", type=int); q.add_argument("--network", default=None, help="Custom network; empty restores standard team subnet")
-    q.add_argument("--template", required=True); q.add_argument("--node", default="auto", choices=sorted(NODES | {"auto"}), help="Legacy explicit node pin; defaults to Automatic"); q.add_argument("--preferred-node", default="", choices=["",*sorted(NODES)], help="Soft suggestion with Automatic")
+    q.add_argument("--template", required=True); q.add_argument("--node", default="auto", choices=sorted(NODES | {"auto"}), help="Legacy explicit node pin; defaults to Automatic"); q.add_argument("--preferred-node", default=None, choices=["",*sorted(NODES)], help="Soft suggestion with Automatic")
     q.add_argument("--cores", type=int, required=True); q.add_argument("--memory", type=int, required=True)
     q.add_argument("--health", required=True, help="JSON ping/TCP/HTTP health checks; empty uses ping")
     q.add_argument("--guac-protocol", choices=("ssh", "rdp"), default=None)
@@ -2901,7 +2901,7 @@ def make_parser() -> argparse.ArgumentParser:
     q.add_argument("--memory", type=int, default=1024); q.add_argument("--health", default="[]", help="JSON ping/TCP/HTTP readiness checks; empty uses ping"); q.add_argument("--guac-protocol", choices=("ssh", "rdp"), default="ssh"); q.set_defaults(func=cmd_container_add)
     q = sub.add_parser("container-edit", help="Edit a declared scenario CT and its health checks")
     q.add_argument("project"); q.add_argument("name"); q.add_argument("--template", required=True)
-    q.add_argument("--node", default="auto", choices=sorted(NODES | {"auto"}), help="Legacy explicit node pin; defaults to Automatic"); q.add_argument("--preferred-node", default="", choices=["",*sorted(NODES)], help="Soft suggestion with Automatic"); q.add_argument("--ip", type=int, required=True)
+    q.add_argument("--node", default="auto", choices=sorted(NODES | {"auto"}), help="Legacy explicit node pin; defaults to Automatic"); q.add_argument("--preferred-node", default=None, choices=["",*sorted(NODES)], help="Soft suggestion with Automatic"); q.add_argument("--ip", type=int, required=True)
     q.add_argument("--network", default="", help="Custom network key, or empty for the team's standard subnet")
     q.add_argument("--cores", type=int, required=True); q.add_argument("--memory", type=int, required=True)
     q.add_argument("--health", required=True, help="JSON ping/TCP/HTTP health checks; empty uses ping"); q.add_argument("--guac-protocol", choices=("ssh", "rdp"), default=None)

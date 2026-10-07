@@ -15,6 +15,31 @@ class VMNetworkTests(unittest.TestCase):
         crange.mutate_custom_network(SimpleNamespace(project='3',name='lab',team=0,
             network_id=100,node='proxmox4'),True)
 
+    def test_vm_preferences_can_be_changed_or_cleared_without_changing_team(self):
+        self.add_vm(network='')
+        def edit(preferred):
+            crange.cmd_scenario_edit(SimpleNamespace(project='3',name='t254-svc',
+                template='approved-base',node='auto',preferred_node=preferred,
+                cores=2,memory=1024,health='[]',ip=22,network=''))
+            return crange.json_config(self.project)['scenario_boxes']['t254-svc']
+        box=edit('proxmox2')
+        self.assertEqual(box['placement'], {'mode':'auto','preferred_node':'proxmox2'})
+        self.assertEqual(box['team_id'], '254')
+        box=edit('')
+        self.assertEqual(box['placement'], {'mode':'auto','preferred_node':''})
+
+    def test_container_preferences_can_be_changed_or_cleared(self):
+        crange.cmd_container_add(SimpleNamespace(project='3',name='ct',team=0,ip=23,
+            network='',template='approved-ct-base',node='proxmox4',cores=1,
+            memory=512,health='[]'))
+        for preferred in ['proxmox3','']:
+            crange.cmd_container_edit(SimpleNamespace(project='3',name='t254-ct',
+                template='approved-ct-base',node='auto',preferred_node=preferred,
+                cores=1,memory=512,health='[]',ip=23,network=''))
+            box=crange.json_config(self.project)['scenario_containers']['t254-ct']
+            self.assertEqual(box['placement'], {'mode':'auto','preferred_node':preferred})
+            self.assertEqual(box['team_id'],'254')
+
     def test_vm_on_custom_network_keeps_owner_and_collision_domain(self):
         self.setup_network()
         self.add_vm()

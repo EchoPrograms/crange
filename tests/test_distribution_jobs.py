@@ -43,8 +43,12 @@ class DistributionJobTests(unittest.TestCase):
         for operation in ['scenario-edit', 'container-edit']:
             result = command(operation, 3, options)
             self.assertEqual(result[result.index('--node') + 1], 'auto')
+            preferred = command(operation, 3, {**options, 'preferred_node': 'proxmox2'})
+            self.assertEqual(preferred[-2:], ['--preferred-node', 'proxmox2'])
+            automatic = command(operation, 3, {**options, 'preferred_node': ''})
+            self.assertEqual(automatic[-2:], ['--preferred-node', ''])
             with self.assertRaises(ValueError):
-                command(operation, 3, {**options, 'preferred_node': 'proxmox2'})
+                command(operation, 3, {**options, 'preferred_node': 'unknown'})
 
     def test_custom_jumpbox_and_presets_retain_legacy_pins(self):
         box = {'kind': 'vm', 'name': 'desk', 'team': 0, 'template': 'base', 'network': '', 'cores': 2, 'memory': 2048, 'ip': 0, 'display_name': 'Desk', 'services': ['ssh'], 'credential_ref': '', 'sealed_credentials': ''}
