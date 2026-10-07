@@ -12,6 +12,8 @@ import time
 from pathlib import Path
 from urllib.parse import urlencode
 
+MAX_BROKER_RESPONSE_BYTES = 1024 * 1024
+
 
 class TicketError(RuntimeError):
     pass
@@ -123,15 +125,18 @@ def request_broker(data, *, socket_path=None):
             client.connect(path)
             client.sendall(request)
             chunks, size = [], 0
-            while size <= 65536:
-                block = client.recv(min(4096, 65537 - size))
+            while size <= MAX_BROKER_RESPONSE_BYTES:
+                block = client.recv(min(4096, MAX_BROKER_RESPONSE_BYTES + 1 - size))
                 if not block:
                     break
                 chunks.append(block)
                 size += len(block)
                 if b'\n' in block:
                     break
-        response = json.loads(b''.join(chunks).split(b'\n', 1)[0])
+        raw = b''.join(chunks)
+        if size > MAX_BROKER_RESPONSE_BYTES or b'\n' not in raw:
+            raise ValueError('Broker response exceeded its size limit or was incomplete.')
+        response = json.loads(raw.split(b'\n', 1)[0])
     except (OSError, ValueError) as exc:
         raise TicketError('Guacamole launch service is unavailable.') from exc
     if response.get('error'):

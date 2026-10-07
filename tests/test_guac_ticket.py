@@ -5,10 +5,12 @@ import json
 import multiprocessing
 import os
 import pwd
+import socketserver
 import sys
 import tempfile
 import unittest
 import time
+import threading
 from unittest.mock import patch
 from pathlib import Path
 from urllib.parse import parse_qs, urlsplit
@@ -21,6 +23,38 @@ import crange_guac_broker
 
 @unittest.skipUnless(sys.platform == 'linux', 'Requires Linux peer credentials')
 class GuacamoleBrokerTests(unittest.TestCase):
+    def test_broker_response_accepts_large_template_catalog_and_stays_bounded(self):
+        class ResponseHandler(socketserver.StreamRequestHandler):
+            def handle(self):
+                self.rfile.readline(65537)
+                self.wfile.write(json.dumps({'catalog': 'x' * 72_000}).encode() + b'\n')
+
+        with tempfile.TemporaryDirectory() as directory:
+            socket_path = str(Path(directory) / 'response.sock')
+            server = socketserver.UnixStreamServer(socket_path, ResponseHandler)
+            worker = threading.Thread(target=server.serve_forever, daemon=True)
+            worker.start()
+            try:
+                self.assertEqual(len(request_broker({'operation': 'template-options'}, socket_path=socket_path)['catalog']), 72_000)
+            finally:
+                server.shutdown(); server.server_close(); worker.join(5)
+
+        class OversizeHandler(socketserver.StreamRequestHandler):
+            def handle(self):
+                self.rfile.readline(65537)
+                self.wfile.write(json.dumps({'catalog': 'x' * (1024 * 1024 + 1)}).encode() + b'\n')
+
+        with tempfile.TemporaryDirectory() as directory:
+            socket_path = str(Path(directory) / 'oversize.sock')
+            server = socketserver.UnixStreamServer(socket_path, OversizeHandler)
+            worker = threading.Thread(target=server.serve_forever, daemon=True)
+            worker.start()
+            try:
+                with self.assertRaisesRegex(TicketError, 'unavailable'):
+                    request_broker({'operation': 'template-options'}, socket_path=socket_path)
+            finally:
+                server.shutdown(); server.server_close(); worker.join(5)
+
     def check_broker(self, expected_user, permitted):
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory)
