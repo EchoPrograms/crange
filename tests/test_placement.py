@@ -8,6 +8,7 @@ import unittest
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1] / 'scripts'))
 from crange_catalog import CatalogError, publish_image, validate_catalog
 from crange_placement import PlacementError, ReservationLedger, capacity_window, schedule_batch
+from crange_scheduling import reviewed_bootstrap_replacements
 
 
 def fixtures():
@@ -21,6 +22,102 @@ def fixtures():
 
 
 class PlacementTests(unittest.TestCase):
+    def bootstrap_requests(self, inventory, catalog, policy):
+        policy['allowed_nodes'] = ['n1']
+        catalog['images']['base-v1']['kind'] = 'container'
+        for node in inventory['nodes'].values():
+            node['guest_types'] = ['container']
+            node['verified_networks'] = []
+            node['bootstrap_planned_networks'] = ['crtrans', 'p003tr', 'p003t001', 'p003t254']
+            node['storages']['local']['guest_types'] = ['container']
+        inventory['nodes']['n1']['observed_memory_mb'] = 10288
+        common = dict(project_id=3, kind='container', image='base-v1', memory_mb=512,
+                      cpu_cores=1, disk_gb=8, placement={'mode':'pin','pinned_node':'n1'})
+        return [
+            {**common, 'resource_key':'router:project', 'networks':['crtrans','p003tr']},
+            {**common, 'resource_key':'router:staging', 'networks':['p003tr','p003t254']},
+            {**common, 'resource_key':'router:team:1', 'networks':['p003tr','p003t001']},
+        ]
+
+    def test_bootstrap_replan_replaces_exact_review_only_after_new_plan_is_saved(self):
+        _, inv, cat, pol = fixtures()
+        requests = self.bootstrap_requests(inv, cat, pol)
+        with tempfile.TemporaryDirectory() as temp:
+            root = pathlib.Path(temp); (root/'.crange-plans').mkdir()
+            ledger = ReservationLedger(root/'ledger')
+            original = ledger.reserve_batch(requests, inv, cat, pol, 3, 'old-plan', 'owner', now=100, bootstrap=True)
+            record = {'plan_id':'old-plan','bootstrap':True,'bootstrap_node':'n1',
+                      'bootstrap_networks':['crtrans','p003t001','p003t254','p003tr'],
+                      'placements':original}
+            (root/'.crange-plans'/'old-plan.json').write_text(__import__('json').dumps(record))
+            self.assertEqual(reviewed_bootstrap_replacements(root,3,'owner','n1',requests,pol,ledger), ['old-plan'])
+            self.assertEqual(reviewed_bootstrap_replacements(root,3,'other-owner','n1',requests,pol,ledger), [])
+            changed_networks = copy.deepcopy(requests)
+            changed_networks[1]['networks'] = ['p003tr','p003t099']
+            self.assertEqual(reviewed_bootstrap_replacements(root,3,'owner','n1',changed_networks,pol,ledger), [])
+            with self.assertRaisesRegex(PlacementError, 'no longer replaceable'):
+                ledger.reserve_batch(requests, inv, cat, pol, 3, 'wrong-owner', 'other-owner',
+                    now=100, bootstrap=True, replace_reviewed_job_ids=['old-plan'])
+
+            # A failed candidate must leave the old review usable and reserved.
+            no_room = copy.deepcopy(inv); no_room['nodes']['n1']['observed_memory_mb'] = 12000
+            with self.assertRaises(PlacementError):
+                ledger.reserve_batch(requests, no_room, cat, pol, 3, 'failed-candidate', 'owner',
+                                     now=101, bootstrap=True, replace_reviewed_job_ids=['old-plan'])
+            self.assertEqual(ledger.status('old-plan')['state'], 'reviewed')
+            self.assertEqual(len(ledger.active_reservations()), 3)
+
+            replacement = ledger.reserve_batch(requests, inv, cat, pol, 3, 'new-plan', 'owner',
+                now=102, bootstrap=True, replace_reviewed_job_ids=['old-plan'])
+            self.assertEqual(len(ledger.active_reservations()), 6)
+            ledger.finalize_review_replacement('new-plan',['old-plan'],3,'owner',now=103)
+            self.assertEqual(ledger.status('old-plan')['state'], 'released')
+            self.assertEqual(ledger.status('new-plan')['state'], 'reviewed')
+            self.assertEqual(len(ledger.active_reservations()), 3)
+            with self.assertRaises(PlacementError):
+                ledger.mark_running('old-plan', now=104)
+            ledger.mark_running('new-plan', now=104)
+            ledger.close()
+
+    def test_running_bootstrap_review_wins_race_against_supersession(self):
+        _, inv, cat, pol = fixtures()
+        requests = self.bootstrap_requests(inv, cat, pol)
+        with tempfile.TemporaryDirectory() as temp:
+            path = pathlib.Path(temp)/'ledger'
+            ledger = ReservationLedger(path)
+            ledger.reserve_batch(requests, inv, cat, pol, 3, 'old-plan', 'owner', now=100, bootstrap=True)
+            ledger.reserve_batch(requests, inv, cat, pol, 3, 'new-plan', 'owner', now=101,
+                                 bootstrap=True, replace_reviewed_job_ids=['old-plan'])
+            ledger.close()
+            barrier = threading.Barrier(2); outcomes = []
+            def claim_old():
+                current = ReservationLedger(path); barrier.wait()
+                try:
+                    current.mark_running('old-plan', now=102); outcomes.append('apply-claimed')
+                except PlacementError:
+                    outcomes.append('apply-rejected')
+                finally: current.close()
+            def finalize_new():
+                current = ReservationLedger(path); barrier.wait()
+                try:
+                    current.finalize_review_replacement('new-plan',['old-plan'],3,'owner',now=103)
+                    outcomes.append('replacement-finalized')
+                except PlacementError:
+                    outcomes.append('replacement-rejected')
+                finally: current.close()
+            threads = [threading.Thread(target=claim_old), threading.Thread(target=finalize_new)]
+            for thread in threads: thread.start()
+            for thread in threads: thread.join()
+            self.assertEqual(len(outcomes), 2)
+            self.assertEqual(sum(x.endswith('claimed') for x in outcomes) + sum(x.endswith('finalized') for x in outcomes), 1)
+            ledger = ReservationLedger(path)
+            self.assertIn(ledger.status('old-plan')['state'], ('running','released'))
+            self.assertEqual(ledger.status('new-plan')['state'], 'reviewed')
+            ledger.reconcile_job('new-plan',operation_terminal=True,allocations_reconciled=True)
+            if ledger.status('old-plan')['state'] == 'running':
+                ledger.reconcile_job('old-plan',operation_terminal=True,allocations_reconciled=True)
+            ledger.close()
+
     def test_bootstrap_admission_is_explicit_router_only_and_transient(self):
         request, inventory, catalog, policy=fixtures()
         node=inventory['nodes']['n1']

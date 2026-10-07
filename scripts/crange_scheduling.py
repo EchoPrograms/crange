@@ -431,6 +431,53 @@ def freeze(row, live, previous=None):
     return {'resource_key': row['resource_key'], 'resolved': values, 'reason':'Existing guest placement retained', 'existing':True, 'image': row.get('image') or ''}
 
 
+def reviewed_bootstrap_replacements(path, project_id, owner, bootstrap_node, requests, policy, ledger):
+    """Find only an identical, still-reviewed router bootstrap preview to replace."""
+    if not bootstrap_node or not requests or any(not r['resource_key'].startswith('router:') for r in requests):
+        return []
+    requested_networks = sorted({network for request in requests for network in request.get('networks', [])})
+    request_by_key = {request['resource_key']: request for request in requests}
+    replacements = []
+    for manifest in (Path(path) / '.crange-plans').glob('*.json'):
+        try:
+            record = json.loads(manifest.read_text())
+            plan_id = record.get('plan_id')
+            if (not record.get('bootstrap') or record.get('applied_at') or
+                    record.get('bootstrap_node') != bootstrap_node or
+                    sorted(record.get('bootstrap_networks', [])) != requested_networks or
+                    plan_id != manifest.stem):
+                continue
+            saved = ledger.get_job(plan_id)
+        except (OSError, json.JSONDecodeError, PlacementError):
+            continue
+        if (saved['project_id'] != project_id or saved['owner'] != owner or saved['state'] != 'reviewed'):
+            continue
+        allocations = saved['allocations']
+        plan_placements = record.get('placements', [])
+        if ({a.get('resource_key') for a in allocations} != set(request_by_key) or
+                {p.get('resource_key') for p in plan_placements} != set(request_by_key) or
+                {a.get('reservation_id') for a in allocations} != {p.get('reservation_id') for p in plan_placements}):
+            continue
+        allocation_by_key = {a['resource_key']: a for a in allocations}
+        exact = True
+        for key, request in request_by_key.items():
+            allocation = allocation_by_key[key]
+            expected_resources = {
+                'memory_mb': request['memory_mb'],
+                'cpu_cores': request['cpu_cores'],
+                'disk_gb': request['disk_gb'] + request.get('copy_overhead_gb', request['disk_gb'] * policy.get('copy_overhead_fraction', 0.1)),
+            }
+            if (request.get('kind') != 'container' or request.get('image') != allocation.get('image') or
+                    request.get('placement', {}).get('pinned_node') != bootstrap_node or
+                    allocation.get('resolved', {}).get('node_name') != bootstrap_node or
+                    allocation.get('resources') != expected_resources):
+                exact = False
+                break
+        if exact:
+            replacements.append(plan_id)
+    return replacements
+
+
 def prepare(path, cfg, plan_id, owner, api=None, *, bootstrap_node=None):
     from crange import ProxmoxAPI, validate_project_quota
     validate_project_quota(path,cfg)
@@ -497,8 +544,13 @@ def prepare(path, cfg, plan_id, owner, api=None, *, bootstrap_node=None):
     from crange_proxmox_compat import reviewed_identity
     provider_compat = reviewed_identity()
     ledger=ReservationLedger(DATA/'reservations.sqlite3')
+    replacements=[]
     try:
-        if requests:placements+=ledger.reserve_batch(requests,inventory,catalog,policy,int(cfg['project_id']),plan_id,owner,bootstrap=bool(bootstrap_node))
+        if requests:
+            if bootstrap_node:
+                replacements=reviewed_bootstrap_replacements(path,int(cfg['project_id']),owner,bootstrap_node,requests,policy,ledger)
+            placements+=ledger.reserve_batch(requests,inventory,catalog,policy,int(cfg['project_id']),plan_id,owner,
+                bootstrap=bool(bootstrap_node),replace_reviewed_job_ids=replacements)
     finally:
         ledger.close()
     for placement in placements:
@@ -507,7 +559,8 @@ def prepare(path, cfg, plan_id, owner, api=None, *, bootstrap_node=None):
     return {'provider_compat': provider_compat, 'plan_id':plan_id,'placements':placements,'requests':requests,'policy_revision':policy['revision'],
             'policy_sha256':hashlib.sha256(json.dumps(policy,sort_keys=True).encode()).hexdigest(),
             'catalog_sha256':catalog_identity(catalog),'reservation_ids':[p['reservation_id'] for p in placements if p.get('reservation_id')],
-            **({'bootstrap_node':bootstrap_node} if bootstrap_node else {})}
+            **({'bootstrap_node':bootstrap_node} if bootstrap_node else {}),
+            **({'replaced_reviewed_plan_ids':replacements} if replacements else {})}
 
 
 def tf_overrides(prepared):

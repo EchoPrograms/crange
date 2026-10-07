@@ -877,8 +877,9 @@ def cmd_plan(args: argparse.Namespace) -> None:
     if getattr(args, 'bootstrap', False):
         cfg, bootstrap_node, bootstrap_networks = _bootstrap_project(path, cfg)
     plan_id = os.urandom(16).hex()
+    owner = os.environ.get('CRANGE_ACTOR', f'cli:{os.getuid()}')
     try:
-        placement = prepare(path, cfg, plan_id, os.environ.get('CRANGE_ACTOR', f'cli:{os.getuid()}'),
+        placement = prepare(path, cfg, plan_id, owner,
                             bootstrap_node=bootstrap_node)
     except __import__('crange_placement').PlacementError as exc:
         if 'local linked cache' in str(exc) or 'verified local image replica' in str(exc):
@@ -948,11 +949,25 @@ def cmd_plan(args: argparse.Namespace) -> None:
                 fd = os.open(manifest, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
                 with os.fdopen(fd, 'w') as stream:
                     json.dump(record, stream, indent=2)
+                from crange_scheduling import atomic_json
+                project_plan_manifest = path / '.crange-plans' / f'{plan_id}.json'
+                atomic_json(project_plan_manifest, {k:record[k] for k in ('plan_id','created','changes','placements','reservation_ids','policy_revision','bootstrap','bootstrap_node','bootstrap_networks') if k in record},0o640)
+                replaced = (placement or {}).get('replaced_reviewed_plan_ids', [])
+                if replaced:
+                    from crange_scheduling import DATA
+                    from crange_placement import ReservationLedger
+                    ledger = ReservationLedger(DATA / 'reservations.sqlite3')
+                    try:
+                        ledger.finalize_review_replacement(plan_id, replaced, int(args.project), owner)
+                    except Exception:
+                        destination.unlink(missing_ok=True)
+                        manifest.unlink(missing_ok=True)
+                        project_plan_manifest.unlink(missing_ok=True)
+                        raise
+                    finally:
+                        ledger.close()
                 print(f'Plan ID: {plan_id}')
                 print(f'Inputs SHA-256: {inputs}')
-
-                from crange_scheduling import atomic_json
-                atomic_json(path / '.crange-plans' / f'{plan_id}.json', {k:record[k] for k in ('plan_id','created','changes','placements','reservation_ids','policy_revision','bootstrap','bootstrap_node','bootstrap_networks') if k in record},0o640)
                 return plan_id
             abandon_plan(placement)
     except Exception:

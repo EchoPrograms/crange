@@ -258,16 +258,19 @@ class ReservationLedger:
         self.db.execute('PRAGMA busy_timeout=30000')
         self.db.execute('CREATE TABLE IF NOT EXISTS jobs (job_id TEXT PRIMARY KEY, project_id INTEGER, owner TEXT, state TEXT, expires REAL, heartbeat REAL, allocations TEXT)')
 
-    def active_reservations(self, exclude_job_id=None):
+    def active_reservations(self, exclude_job_id=None, exclude_job_ids=()):
+        excluded = set(exclude_job_ids)
+        if exclude_job_id is not None:
+            excluded.add(exclude_job_id)
         result = []
         for job, project, allocations in self.db.execute("SELECT job_id, project_id, allocations FROM jobs WHERE state != 'released'"):
-            if job == exclude_job_id:
+            if job in excluded:
                 continue
             for a in json.loads(allocations):
                 result.append({'project_id': project, 'reservation_id': a['reservation_id'], 'resource_key': a['resource_key'], **a['resolved'], **a['resources']})
         return result
 
-    def reserve_batch(self, requests, inventory, catalog, policy, project_id, job_id, owner, now=None, known_existing_allocations=(), *, bootstrap=False):
+    def reserve_batch(self, requests, inventory, catalog, policy, project_id, job_id, owner, now=None, known_existing_allocations=(), *, bootstrap=False, replace_reviewed_job_ids=()):
         now = time.time() if now is None else now
         if not requests or not isinstance(project_id, int) or isinstance(project_id, bool) or not 1 <= project_id <= 255 or not owner or not job_id or any(r.get('project_id') != project_id for r in requests):
             raise PlacementError('valid project, owner, job and nonempty single-project batch required')
@@ -275,15 +278,73 @@ class ReservationLedger:
         try:
             if self.db.execute('SELECT 1 FROM jobs WHERE job_id=?', (job_id,)).fetchone():
                 raise PlacementError('job already has reservations; reconcile instead of duplicating')
-            count = self.db.execute("SELECT COUNT(*) FROM jobs WHERE project_id=? AND owner=? AND state='reviewed'", (project_id, owner)).fetchone()[0]
+            replace_ids = tuple(dict.fromkeys(replace_reviewed_job_ids))
+            if replace_ids and not bootstrap:
+                raise PlacementError('only a router bootstrap review can supersede a prior bootstrap review')
+            if any(not isinstance(old_id, str) or not old_id or old_id == job_id for old_id in replace_ids):
+                raise PlacementError('invalid reviewed bootstrap replacement identity')
+            request_by_key = {request['resource_key']: request for request in requests}
+            for old_id in replace_ids:
+                old = self.db.execute('SELECT project_id, owner, state, allocations FROM jobs WHERE job_id=?', (old_id,)).fetchone()
+                if not old or old[0] != project_id or old[1] != owner or old[2] != 'reviewed':
+                    raise PlacementError('prior bootstrap review is no longer replaceable')
+                allocations = json.loads(old[3])
+                if (not allocations or any(not str(a.get('resource_key', '')).startswith('router:') for a in allocations)
+                        or {a.get('resource_key') for a in allocations} != set(request_by_key)):
+                    raise PlacementError('prior review is not the exact router-only bootstrap request')
+                for allocation in allocations:
+                    request = request_by_key[allocation['resource_key']]
+                    expected_disk = request['disk_gb'] + request.get('copy_overhead_gb', request['disk_gb'] * policy.get('copy_overhead_fraction', .1))
+                    if (request.get('kind') != 'container' or request.get('image') != allocation.get('image')
+                            or allocation.get('resolved', {}).get('node_name') != request.get('placement', {}).get('pinned_node')
+                            or allocation.get('resources') != {'memory_mb': request['memory_mb'], 'cpu_cores': request['cpu_cores'], 'disk_gb': expected_disk}):
+                        raise PlacementError('prior bootstrap review does not match the exact replacement request')
+            placeholders = ','.join('?' for _ in replace_ids)
+            count_query = "SELECT COUNT(*) FROM jobs WHERE project_id=? AND owner=? AND state='reviewed'"
+            count_args = [project_id, owner]
+            if replace_ids:
+                count_query += f' AND job_id NOT IN ({placeholders})'
+                count_args.extend(replace_ids)
+            count = self.db.execute(count_query, count_args).fetchone()[0]
             if count >= policy.get('max_reviewed_plans', 2):
                 raise PlacementError('outstanding reviewed-plan limit reached')
-            placements = schedule_batch(requests, inventory, catalog, policy, self.active_reservations(), now, known_existing_allocations, bootstrap=bootstrap)
+            placements = schedule_batch(requests, inventory, catalog, policy,
+                                        self.active_reservations(exclude_job_ids=replace_ids), now,
+                                        known_existing_allocations, bootstrap=bootstrap)
             for item in placements:
                 item['reservation_id'] = str(uuid.uuid4())
             self.db.execute('INSERT INTO jobs VALUES (?, ?, ?, ?, ?, ?, ?)', (job_id, project_id, owner, 'reviewed', now + policy.get('review_ttl_seconds', 3600), now, json.dumps(placements, sort_keys=True)))
             self.db.execute('COMMIT')
             return placements
+        except Exception:
+            self.db.execute('ROLLBACK')
+            raise
+
+    def finalize_review_replacement(self, new_job_id, old_job_ids, project_id, owner, now=None):
+        """Invalidate exact prior previews only after the replacement plan is saved.
+
+        Claiming an old apply and superseding it serialize on this transaction:
+        a running apply is never released, and a released review cannot later be
+        claimed by mark_running().
+        """
+        old_ids = tuple(dict.fromkeys(old_job_ids))
+        if not old_ids:
+            return
+        now = time.time() if now is None else now
+        self.db.execute('BEGIN IMMEDIATE')
+        try:
+            new = self.db.execute('SELECT project_id, owner, state, expires FROM jobs WHERE job_id=?', (new_job_id,)).fetchone()
+            if not new or new[0] != project_id or new[1] != owner or new[2] != 'reviewed' or now > new[3]:
+                raise PlacementError('replacement review is unavailable or expired')
+            for old_id in old_ids:
+                old = self.db.execute('SELECT project_id, owner, state FROM jobs WHERE job_id=?', (old_id,)).fetchone()
+                if not old or old[0] != project_id or old[1] != owner or old[2] != 'reviewed':
+                    raise PlacementError('prior bootstrap review was claimed or changed; replacement was not committed')
+            for old_id in old_ids:
+                changed = self.db.execute("UPDATE jobs SET state='released' WHERE job_id=? AND state='reviewed'", (old_id,)).rowcount
+                if changed != 1:
+                    raise PlacementError('prior bootstrap review was claimed or changed; replacement was not committed')
+            self.db.execute('COMMIT')
         except Exception:
             self.db.execute('ROLLBACK')
             raise
