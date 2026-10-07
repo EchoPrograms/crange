@@ -4,6 +4,7 @@ import json
 import re
 import uuid
 from datetime import datetime, timezone
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -130,9 +131,13 @@ def options(api=None):
         online={row['node'] for row in api.request('GET','/nodes') if row.get('status')=='online'}
     except Exception:
         online=set()
-    for node in sorted(NODES):
-        media=media_inventory(api,node)
-        containers=media_inventory(api,node,'vztmpl')
+    def collect(node):
+        if online and node not in online:
+            return node, [], []
+        return node, media_inventory(api,node), media_inventory(api,node,'vztmpl')
+    with ThreadPoolExecutor(max_workers=6) as pool:
+        collected=list(pool.map(collect, sorted(NODES)))
+    for node, media, containers in collected:
         nodes.append({'name':node,'isos':[m['volid'] for m in media],
                       'container_archives':[m['volid'] for m in containers],
                       'unavailable':node not in online if online else not media and not containers})
