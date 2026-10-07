@@ -731,10 +731,10 @@ def cmd_plan(args: argparse.Namespace) -> None:
         with tempfile.TemporaryDirectory(prefix="crange-plan-") as tmp:
             plan = Path(tmp) / "review.tfplan"
             plan_args = ["plan", "-input=false", "-out", str(plan)]
-            if placement:
-                overrides = Path(tmp) / 'placements.tfvars.json'
-                overrides.write_text(json.dumps(tf_overrides(placement)))
-                plan_args += ['-var-file', str(overrides)]
+            from crange_templates import media_tf_overrides
+            overrides = Path(tmp) / 'placements.tfvars.json'
+            overrides.write_text(json.dumps(media_tf_overrides(path, cfg, placement)))
+            plan_args += ['-var-file', str(overrides)]
             if getattr(args, 'replace_sdn_applier', False):
                 plan_args.append('-replace=proxmox_sdn_applier.apply')
             tf_run(path, plan_args)
@@ -863,7 +863,10 @@ def cmd_apply(args: argparse.Namespace) -> None:
     tf_run(path, ["init", "-input=false", "-upgrade=false"])
     with tempfile.TemporaryDirectory(prefix="crange-apply-") as tmp:
         plan = Path(tmp) / "review.tfplan"
-        tf_run(path, ["plan", "-input=false", "-out", str(plan)])
+        from crange_templates import media_tf_overrides
+        overrides = Path(tmp) / 'media.tfvars.json'
+        overrides.write_text(json.dumps(media_tf_overrides(path, json_config(path))))
+        tf_run(path, ["plan", "-input=false", "-out", str(plan), "-var-file", str(overrides)])
         detail = json.loads(tf_run(path, ["show", "-json", str(plan)], capture=True).stdout)
         if getattr(args, 'staging_only', False):
             enforce_staging_plan(detail, json_config(path))

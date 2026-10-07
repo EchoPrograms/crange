@@ -21,6 +21,22 @@ class BuildError(Exception):
     pass
 
 
+def find_signed_archive(args, checksum):
+    """Return the first approved copy matching the signed appliance checksum."""
+    for storage in ('crange-library', 'media-mirror1', 'media-mirror4', 'local'):
+        candidate = storage + ':vztmpl/' + args.archive
+        try:
+            path = Path(command(['pvesm', 'path', candidate]).strip())
+            if not path.is_file() or path.stat().st_size <= 0:
+                continue
+            with path.open('rb') as stream:
+                if hashlib.file_digest(stream, 'sha512').hexdigest() == checksum:
+                    return path, candidate
+        except (BuildError, OSError):
+            continue
+    return None, None
+
+
 def command(argv, data=None, timeout=900):
     result = subprocess.run(argv, input=data, capture_output=True, text=True, timeout=timeout)
     if result.returncode:
@@ -60,9 +76,15 @@ def build(args):
     metadata = json.loads(command(['perl', '-e', code]))
     if not metadata or metadata.get('architecture') != 'amd64' or not re.fullmatch(r'[a-f0-9]{128}', metadata.get('sha512sum', '')):
         raise BuildError('Archive is missing from the signed catalog or has no SHA-512 checksum.')
-    archive = Path('/var/lib/vz/template/cache') / args.archive
-    if not archive.exists():
-        command(['pveam', 'download', 'local', args.archive])
+    # Prefer the shared cluster library. Read-only mirrors remain usable when
+    # its server is unavailable; signed appliance metadata verifies every copy.
+    archive, volume = find_signed_archive(args, metadata['sha512sum'])
+    if archive is None:
+        # Writable primary only: a new archive must be distributed by the
+        # mirror service rather than silently creating divergent mirror files.
+        command(['pveam', 'download', 'crange-library', args.archive])
+        volume = 'crange-library:vztmpl/' + args.archive
+        archive = Path(command(['pvesm', 'path', volume]).strip())
     with archive.open('rb') as stream:
         digest = hashlib.file_digest(stream, 'sha512').hexdigest()
     if digest != metadata['sha512sum']:
@@ -70,7 +92,7 @@ def build(args):
     distro = metadata['os']
     hostname = 'crange-base-' + distro.replace('.', '-')
     record = {'schema_version': 1, 'template_id': args.vmid, 'node': os.uname().nodename,
-        'hostname': hostname, 'kind': 'container', 'archive': args.archive, 'archive_sha512': digest,
+        'hostname': hostname, 'kind': 'container', 'archive': args.archive, 'archive_volume':volume, 'archive_sha512': digest,
         'source': metadata['location'], 'catalog_version': metadata['version'],
         'builder_sha256': hashlib.sha256(Path(__file__).read_bytes()).hexdigest(),
         'built_at': datetime.now(timezone.utc).isoformat(), 'status': 'building'}
@@ -85,7 +107,7 @@ def build(args):
         guest('sh', '-c', 'cat > ' + path, data=text)
         guest('chmod', mode, path)
     try:
-        command(['pct', 'create', str(args.vmid), 'local:vztmpl/' + args.archive,
+        command(['pct', 'create', str(args.vmid), volume,
             '--hostname', hostname, '--rootfs', 'local-lvm:4', '--cores', '1', '--memory', '512', '--swap', '0',
             '--unprivileged', '1', '--onboot', '0', '--pool', 'crange-iac', '--tags', 'range-lan;crange-base',
             '--net0', 'name=eth0,bridge=craccess,ip=dhcp,mtu=1450,firewall=1', '--nameserver', '10.60.2.1'])

@@ -37,22 +37,32 @@ def media_inventory(api, node, content='iso'):
     return result
 
 
-def resolve_iso(api, node, volid):
-    available = media_inventory(api, node)
+def resolve_media(api, node, volid, content):
+    if content not in ('iso','vztmpl'):
+        raise ValueError('Unsupported installation media type.')
+    available = media_inventory(api, node, content)
     if any(row['volid'] == volid for row in available):
         return volid
     # A mirror is equivalent only when the synchronizer recorded its content hash.
     name = volid.split('/')[-1]
     for item in library_status().get('files', []):
-        if item.get('content') != 'iso' or item.get('name') != name or not item.get('sha256'):
+        if item.get('content') != content or item.get('name') != name or not item.get('sha256'):
             continue
         verified = {copy.get('storage') for copy in item.get('copies', [])
                     if copy.get('sha256') == item['sha256']}
         for storage in MEDIA_STORAGES[:3]:
-            candidate = storage + ':iso/' + name
+            candidate = storage + ':' + content + '/' + name
             if storage in verified and any(row['volid'] == candidate and int(row['size']) == item.get('size') for row in available):
                 return candidate
-    raise ValueError('Selected ISO is unavailable on this node and no verified mirror is available.')
+    raise ValueError('Selected installation media is unavailable on this node and no verified mirror is available.')
+
+
+def resolve_iso(api, node, volid):
+    return resolve_media(api,node,volid,'iso')
+
+
+def resolve_archive(api, node, volid):
+    return resolve_media(api,node,volid,'vztmpl')
 
 
 MODELS = {'virtio', 'e1000', 'e1000e', 'rtl8139', 'vmxnet3'}
@@ -239,3 +249,38 @@ def publish(build_id,projects,prepared,api=None):
         temp=file.with_suffix('.tmp');temp.write_text(json.dumps(approved,indent=2)+'\n');temp.replace(file)
     record.update(status='published',reference=reference,approved_projects=projects);save(record)
     print('Published '+key+' to projects '+', '.join(map(str,projects))+'. Existing templates and releases were retained.')
+
+
+def media_tf_overrides(path, cfg, prepared=None, api=None):
+    """Bind archive paths before plan review; existing guests retain their source."""
+    from crange import ProxmoxAPI
+    from crange_scheduling import declarations, tf_overrides, applied_resources, freeze
+    values=tf_overrides(prepared) if prepared else {'resolved_placements':{}}
+    resolved=values['resolved_placements']
+    records={p['resource_key']:p for p in (prepared or {}).get('placements',[])}
+    api=api or ProxmoxAPI()
+    existing=applied_resources(path) if not prepared else {}
+    for row in declarations(path,cfg):
+        key=row['resource_key'];record=records.get(key,{})
+        placement=resolved.get(key,{})
+        if key in existing:
+            resolved[key]=freeze(row,existing[key])['resolved']
+            continue
+        if record.get('existing') or placement.get('template_id') is not None:
+            continue
+        reference=row['reference']
+        archive=placement.get('template_file_id') or reference.get('template_file_id')
+        if not archive and key.startswith('router:'):
+            archive='crange-library:vztmpl/debian-13-standard_13.6-1_amd64.tar.zst'
+        if not archive or reference.get('template_id') is not None:
+            continue
+        node=placement.get('node_name') or row['box'].get('node_name') or cfg.get('router_node','proxmox4')
+        if node=='auto':
+            raise ValueError('Automatic archive placement must be resolved before media selection.')
+        chosen=resolve_archive(api,node,archive)
+        if prepared and placement.get('template_file_id') and chosen!=archive:
+            # Saved reservations name exact archive sources; a new review must
+            # select a verified catalog mirror instead of changing behind it.
+            raise ValueError('Reviewed archive source is unavailable; restage using a verified library mirror.')
+        resolved[key]={**placement,'template_file_id':chosen}
+    return values
