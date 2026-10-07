@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import copy
 import errno
 import fcntl
 import ssl
@@ -455,7 +456,7 @@ def cmd_project_init(args: argparse.Namespace) -> None:
         transit = _allocate_project_transit_address(_occupied_project_transit_addresses())
         staging = Path(tempfile.mkdtemp(prefix=f".project-{project:03d}-", dir=ENVS))
         try:
-            for filename in ("main.tf", "template-profile.json", "approved-scenario-templates.json", "approved-container-templates.json"):
+            for filename in ("main.tf", "variables.tf", "template-profile.json", "approved-scenario-templates.json", "approved-container-templates.json"):
                 source = template / filename
                 if not source.is_file():
                     raise CrangeError(f"Missing project template file: {source}")
@@ -751,6 +752,95 @@ def automation_inputs_digest(path: Path) -> str:
     return hashlib.sha256(json.dumps(values, sort_keys=True).encode()).hexdigest()
 
 
+def _bootstrap_project(path: Path, cfg: dict, api=None):
+    """Select a provider/zone-verified node for an empty routers-only project."""
+    from crange import ProxmoxAPI
+    from crange_scheduling import (bootstrap_node_candidates, placement_intent,
+                                   provider_container_placement_verified,
+                                   network_attestation_valid, read_settings)
+    if any((path / name).exists() for name in ('terraform.tfstate', 'terraform.tfstate.backup', '.terraform.tfstate.lock.info')):
+        raise CrangeError('Project bootstrap is only available before Terraform state exists.')
+    if any(cfg.get(key) for key in ('jump_boxes', 'custom_networks', 'scenario_boxes', 'scenario_containers')):
+        raise CrangeError('Project bootstrap only creates base routers and networks; remove scenario guests before bootstrapping.')
+    policy, catalog = read_settings()
+    if not policy.get('enabled'):
+        raise CrangeError('Automatic placement policy is disabled; project bootstrap requires an enrolled node.')
+    candidates = bootstrap_node_candidates(policy)
+    if not candidates:
+        raise CrangeError('No node has both provider-container acceptance and a current CRANGE zone network attestation.')
+    node = candidates[0]
+    image_id = cfg.get('router_image', 'debian-12-router-v1')
+    image = catalog.get('images', {}).get(image_id)
+    if not image or image.get('kind') != 'container' or image.get('source_type') != 'stock_archive' or image.get('verified') is not True:
+        raise CrangeError('Router bootstrap requires the verified Debian stock archive image.')
+    if not any(replica.get('node') == node and replica.get('state') == 'ready' and replica.get('template_file_id')
+               for replica in image.get('replicas', [])):
+        raise CrangeError('The verified router archive is unavailable on the bootstrap node.')
+    pid = int(cfg['project_id'])
+    prefix = f'p{pid:03d}'
+    expected_vnets = {prefix + 'tr', prefix + 't254'} | {f'{prefix}t{int(team):03d}' for team in cfg['team_ids']}
+    if cfg.get('custom_networks'):
+        raise CrangeError('Custom networks must be added after the base project router bootstrap.')
+    api = api or ProxmoxAPI()
+    nodes = api.request('GET', '/nodes')
+    if not isinstance(nodes, list) or not nodes:
+        raise CrangeError('Proxmox node inventory is unavailable for bootstrap.')
+    live = api.request('GET', '/cluster/resources', {'type': 'vm'})
+    for resource in live:
+        tags = set(str(resource.get('tags', '')).split(';'))
+        if prefix in tags or str(resource.get('name', '')).startswith(prefix + '-'):
+            raise CrangeError('Project-scoped guests already exist; use the normal reviewed plan instead of bootstrap.')
+    vnets = api.request('GET', '/cluster/sdn/vnets')
+    names = {row.get('vnet') for row in vnets if isinstance(row, dict)}
+    if names & expected_vnets:
+        raise CrangeError('Project VNets already exist outside Terraform state; reconcile them before bootstrap.')
+    cfg = copy.deepcopy(cfg)
+    cfg['router_node'] = node
+    cfg['router_placement'] = placement_intent(node)
+    return cfg, node, expected_vnets
+
+
+def _validate_bootstrap_plan(detail: dict, project_id: int, node: str, networks: set[str], cfg: dict) -> list[dict]:
+    prefix = f'p{project_id:03d}'
+    expected = {
+        'proxmox_sdn_applier.finalizer', 'proxmox_sdn_vnet.transit',
+        'proxmox_sdn_vnet.staging', 'terraform_data.sdn_revision',
+        'proxmox_sdn_applier.apply',
+        'module.project_router.proxmox_virtual_environment_container.router',
+        'module.staging_router.proxmox_virtual_environment_container.router',
+    }
+    expected.update(f'proxmox_sdn_vnet.team[{json.dumps(str(team))}]' for team in cfg['team_ids'])
+    expected.update(f'module.team_router[{json.dumps(str(team))}].proxmox_virtual_environment_container.router' for team in cfg['team_ids'])
+    changes = []
+    seen = set()
+    for item in detail.get('resource_changes', []):
+        address = item.get('address', '')
+        actions = item.get('change', {}).get('actions', [])
+        if actions == ['no-op']:
+            continue
+        if address not in expected or actions != ['create']:
+            raise CrangeError('Bootstrap plan may create only the project SDN foundation and router containers; inspect/reconcile the project before retrying.')
+        seen.add(address)
+        after = item.get('change', {}).get('after') or {}
+        if address.endswith('.router'):
+            if after.get('node_name') != node or after.get('pool_id') != 'crange-iac':
+                raise CrangeError('Bootstrap router escaped its reviewed node or pool.')
+            tags = set(after.get('tags') or [])
+            if prefix not in tags:
+                raise CrangeError('Bootstrap router ownership tag is missing.')
+            os_block = after.get('operating_system') or []
+            if len(os_block) != 1 or os_block[0].get('template_file_id') != 'crange-library:vztmpl/debian-12-standard_12.12-1_amd64.tar.zst':
+                raise CrangeError('Bootstrap router must use the verified Debian 12.12 archive.')
+        elif address.startswith('proxmox_sdn_vnet.'):
+            if after.get('id') not in networks:
+                raise CrangeError('Bootstrap plan contains an unexpected VNet.')
+        changes.append({'address': address, 'actions': actions})
+    missing = expected - seen
+    if missing:
+        raise CrangeError('Bootstrap plan does not contain the complete fresh project foundation: ' + ', '.join(sorted(missing)))
+    return changes
+
+
 def cmd_stage_changes(args: argparse.Namespace) -> None:
     """Fixed project workflow: audited cache preparation, then exact guest plan."""
     from crange_scheduling import read_settings, required_preparations
@@ -782,9 +872,14 @@ def cmd_plan(args: argparse.Namespace) -> None:
     path = project_dir(args.project)
     cfg = json_config(path)
     from crange_scheduling import prepare, tf_overrides, print_review, abandon_plan
+    bootstrap_node = None
+    bootstrap_networks = set()
+    if getattr(args, 'bootstrap', False):
+        cfg, bootstrap_node, bootstrap_networks = _bootstrap_project(path, cfg)
     plan_id = os.urandom(16).hex()
     try:
-        placement = prepare(path, cfg, plan_id, os.environ.get('CRANGE_ACTOR', f'cli:{os.getuid()}'))
+        placement = prepare(path, cfg, plan_id, os.environ.get('CRANGE_ACTOR', f'cli:{os.getuid()}'),
+                            bootstrap_node=bootstrap_node)
     except __import__('crange_placement').PlacementError as exc:
         if 'local linked cache' in str(exc) or 'verified local image replica' in str(exc):
             from crange_scheduling import required_preparations
@@ -815,6 +910,8 @@ def cmd_plan(args: argparse.Namespace) -> None:
                 actions = resource.get("change", {}).get("actions", [])
                 if actions != ["no-op"]:
                     changes.append((resource.get("address", "?"), actions))
+            if bootstrap_node:
+                _validate_bootstrap_plan(detail, int(args.project), bootstrap_node, bootstrap_networks, cfg)
             from crange_staging import staging_blockers
             blockers = staging_blockers(detail, json_config(path))
             print("\nPlan review:")
@@ -844,6 +941,9 @@ def cmd_plan(args: argparse.Namespace) -> None:
                           'placements': placement['placements'] if placement else [],
                           'reservation_ids': placement['reservation_ids'] if placement else [],
                           'policy_revision': placement['policy_revision'] if placement else None}
+                if bootstrap_node:
+                    record.update(bootstrap=True, bootstrap_node=bootstrap_node,
+                                  bootstrap_networks=sorted(bootstrap_networks))
                 manifest = directory / f'{plan_id}.json'
                 fd = os.open(manifest, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
                 with os.fdopen(fd, 'w') as stream:
@@ -852,7 +952,7 @@ def cmd_plan(args: argparse.Namespace) -> None:
                 print(f'Inputs SHA-256: {inputs}')
 
                 from crange_scheduling import atomic_json
-                atomic_json(path / '.crange-plans' / f'{plan_id}.json', {k:record[k] for k in ('plan_id','created','changes','placements','reservation_ids','policy_revision')},0o640)
+                atomic_json(path / '.crange-plans' / f'{plan_id}.json', {k:record[k] for k in ('plan_id','created','changes','placements','reservation_ids','policy_revision','bootstrap','bootstrap_node','bootstrap_networks') if k in record},0o640)
                 return plan_id
             abandon_plan(placement)
     except Exception:
@@ -886,6 +986,14 @@ def cmd_apply_saved(args: argparse.Namespace, path: Path) -> None:
         raise CrangeError('Saved plan predates template/source input verification; review a fresh plan.')
     if not hmac.compare_digest(automation_inputs_digest(path), automation_digest):
         raise CrangeError('Template approvals or Terraform source changed since review; create a new plan.')
+    bootstrap_cfg = None
+    if record.get('bootstrap'):
+        bootstrap_cfg, bootstrap_node, bootstrap_networks = _bootstrap_project(path, json_config(path))
+        if (bootstrap_node != record.get('bootstrap_node') or
+                sorted(bootstrap_networks) != record.get('bootstrap_networks')):
+            raise CrangeError('Bootstrap node or project networks changed since review; create a new bootstrap plan.')
+        detail = json.loads(tf_run(path, ['show', '-json', str(plan)], capture=True).stdout)
+        _validate_bootstrap_plan(detail, int(args.project), bootstrap_node, bootstrap_networks, bootstrap_cfg)
     if getattr(args, 'staging_only', False):
         detail = json.loads(tf_run(path, ['show', '-json', str(plan)], capture=True).stdout)
         enforce_staging_plan(detail, json_config(path))
@@ -914,7 +1022,64 @@ def cmd_apply_saved(args: argparse.Namespace, path: Path) -> None:
     record['applied_at'] = datetime.now(timezone.utc).isoformat()
     manifest.write_text(json.dumps(record, indent=2) + '\n')
     from crange_scheduling import atomic_json
-    atomic_json(path / '.crange-plans' / f'{args.plan_id}.json', {k:record[k] for k in ('plan_id','created','changes','placements','reservation_ids','policy_revision','applied_at') if k in record},0o640)
+    atomic_json(path / '.crange-plans' / f'{args.plan_id}.json', {k:record[k] for k in ('plan_id','created','changes','placements','reservation_ids','policy_revision','applied_at','bootstrap','bootstrap_node','bootstrap_networks') if k in record},0o640)
+    if record.get('bootstrap'):
+        status = {'schema_version': 1, 'project_id': int(args.project), 'state': 'awaiting_network_acceptance',
+                  'bootstrap_plan_id': args.plan_id, 'node': record['bootstrap_node'],
+                  'networks': record['bootstrap_networks'], 'applied_at': record['applied_at'],
+                  'acceptance_recorded': False}
+        status['state'] = 'configuration_pending'
+        atomic_json(path / '.crange-bootstrap.json', status, 0o640)
+        try:
+            cmd_configure(argparse.Namespace(project=args.project, target='all', yes=True))
+        except Exception:
+            status['state'] = 'configuration_failed'
+            atomic_json(path / '.crange-bootstrap.json', status, 0o640)
+            raise
+        status['state'] = 'awaiting_network_acceptance'
+        status['configured_at'] = datetime.now(timezone.utc).isoformat()
+        atomic_json(path / '.crange-bootstrap.json', status, 0o640)
+        print('Router/network foundation deployed and configured. Exact per-VNet network acceptance is required before scenario placement or release.')
+
+
+def cmd_bootstrap_plan(args: argparse.Namespace) -> None:
+    args.bootstrap = True
+    args.retain = True
+    args.replace_sdn_applier = False
+    cmd_plan(args)
+
+
+def cmd_bootstrap_configure(args: argparse.Namespace) -> None:
+    path = project_dir(args.project)
+    status_path = path / '.crange-bootstrap.json'
+    try:
+        status = json.loads(status_path.read_text())
+    except (OSError, json.JSONDecodeError) as exc:
+        raise CrangeError('Bootstrap configuration record is unavailable.') from exc
+    if status.get('project_id') != int(args.project) or status.get('state') not in ('configuration_failed', 'configuration_pending', 'awaiting_network_acceptance'):
+        raise CrangeError('Project is not at the router bootstrap configuration step.')
+    if not (path / 'terraform.tfstate').is_file():
+        raise CrangeError('Router bootstrap state is missing; do not configure unreviewed resources.')
+    status['state'] = 'configuration_pending'
+    from crange_scheduling import atomic_json
+    atomic_json(status_path, status, 0o640)
+    try:
+        cmd_configure(argparse.Namespace(project=args.project, target='all', yes=True))
+    except Exception:
+        status['state'] = 'configuration_failed'
+        atomic_json(status_path, status, 0o640)
+        raise
+    status['state'] = 'awaiting_network_acceptance'
+    status['configured_at'] = datetime.now(timezone.utc).isoformat()
+    atomic_json(status_path, status, 0o640)
+    print('Routers configured. Exact per-VNet network acceptance is required before scenario placement or release.')
+
+
+def cmd_bootstrap_apply(args: argparse.Namespace) -> None:
+    args.yes = True
+    args.allow_destroy = False
+    args.allow_replace = False
+    cmd_apply_saved(args, project_dir(args.project))
 
 
 def cmd_apply(args: argparse.Namespace) -> None:
@@ -2880,6 +3045,13 @@ def make_parser() -> argparse.ArgumentParser:
     q = sub.add_parser("projects", help="List Terraform project environments"); q.set_defaults(func=cmd_projects)
     q = sub.add_parser("project-init", help="Create a new standardized project environment from project-template")
     q.add_argument("project"); q.set_defaults(func=cmd_project_init)
+    q = sub.add_parser("bootstrap-plan", help="Create a reviewed router-only foundation plan on an enrolled node")
+    q.add_argument("project"); q.set_defaults(func=cmd_bootstrap_plan)
+    q = sub.add_parser("infra-bootstrap-apply", help="Apply one exact reviewed router-only bootstrap plan")
+    q.add_argument("project"); q.add_argument("--yes", action="store_true", required=True); q.add_argument("--plan-id", required=True)
+    q.set_defaults(func=cmd_bootstrap_apply)
+    q = sub.add_parser("bootstrap-configure", help="Configure routers after an applied bootstrap plan")
+    q.add_argument("project"); q.set_defaults(func=cmd_bootstrap_configure)
     q = sub.add_parser("project-show", help="Show declared and applied project resources"); q.add_argument("project"); q.set_defaults(func=cmd_project_show)
     q = sub.add_parser("guac-sync", help="Render reviewed Guacamole access desired state"); q.add_argument("project"); q.set_defaults(func=cmd_guac_sync)
     q = sub.add_parser("guac-apply", help="Apply a Guacamole access manifest through the configured connector"); q.add_argument("project"); q.set_defaults(func=cmd_guac_apply)

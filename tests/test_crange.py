@@ -30,6 +30,7 @@ class CrangeConfigTests(unittest.TestCase):
         template = crange.ENVS / "project-template"
         template.mkdir()
         (template / "main.tf").write_text("terraform {}\n")
+        (template / "variables.tf").write_text('variable "resolved_placements" { type = any }\n')
         (template / "template-profile.json").write_text("{}\n")
         (template / "approved-scenario-templates.json").write_text(
             json.dumps({"approved-base": {"template_id": 112, "template_node": "proxmox4"}})
@@ -331,6 +332,7 @@ jump_boxes = {
             crange.cmd_project_init(SimpleNamespace(project="5"))
         created = crange.ENVS / "project-005"
         self.assertTrue((created / "approved-scenario-templates.json").is_file())
+        self.assertTrue((created / "variables.tf").is_file())
         cfg = json.loads((created / "crange.auto.tfvars.json").read_text())
         self.assertEqual(cfg["project_id"], 5)
         self.assertEqual(cfg["transit_address"], "10.60.2.4/24")

@@ -21,6 +21,29 @@ def fixtures():
 
 
 class PlacementTests(unittest.TestCase):
+    def test_bootstrap_admission_is_explicit_router_only_and_transient(self):
+        request, inventory, catalog, policy=fixtures()
+        node=inventory['nodes']['n1']
+        policy['allowed_nodes']=['n1']
+        node['guest_types']=['container']
+        node['networks']=['crtrans']
+        node['verified_networks']=[]
+        node['bootstrap_planned_networks']=['crtrans','p003tr']
+        node['storages']['local']['guest_types']=['container']
+        image=catalog['images']['base-v1']
+        image['kind']='container';image['architecture']='x86_64'
+        image['replicas']=image['replicas'][:1]
+        request.update(kind='container',resource_key='router:project',networks=['crtrans','p003tr'],
+                       placement={'mode':'pin','pinned_node':'n1'},memory_mb=512,cpu_cores=1)
+        with self.assertRaises(PlacementError):
+            schedule_batch([request],inventory,catalog,policy,now=100)
+        placement=schedule_batch([request],inventory,catalog,policy,now=100,bootstrap=True)
+        self.assertEqual(placement[0]['resolved']['node_name'],'n1')
+        self.assertEqual(node['verified_networks'],[])
+        request['resource_key']='container:scenario'
+        with self.assertRaises(PlacementError):
+            schedule_batch([request],inventory,catalog,policy,now=100,bootstrap=True)
+
     def test_source_probe_reservation_is_project_scoped_and_reconciles_only_explicitly(self):
         _, inv, _, pol = fixtures()
         for node in inv['nodes'].values():

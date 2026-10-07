@@ -28,6 +28,29 @@ class SchedulingTests(unittest.TestCase):
         self.assertEqual(scheduling.requested_cpu_type('vm', {}), 'host')
         self.assertEqual(scheduling.requested_cpu_type('vm', {'cpu_type':'x86-64-v2-AES'}), 'x86-64-v2-AES')
 
+    def test_bootstrap_eligibility_is_router_only_and_does_not_record_network_acceptance(self):
+        checks=sorted(scheduling.NETWORK_CHECKS)
+        policy={'provider_version':'0.104.0','allowed_nodes':['proxmox2'],
+                'nodes':{'proxmox2':{'provider_container_acceptance':{
+                    'provider_version':'0.104.0','node':'proxmox2','node_version':'pve-manager/9.0.3',
+                    'disposable_terraform_ct':True,'network_config_verified':True,'job_id':'ct-test'}}},
+                'network_attestations':{'proxmox2':{'verified':True,'mtu':1450,'zone':'crange','passed_checks':checks}}}
+        inventory={'nodes':{'proxmox2':{'online':True,'draining':False,'networks':['crtrans'],
+                                        'verified_networks':['crtrans']}}}
+        requests=[{'kind':'container','resource_key':'router:project','project_id':3,
+                   'networks':['p003tr','crtrans'],'placement':{'mode':'pin','pinned_node':'proxmox2'}},
+                  {'kind':'container','resource_key':'router:staging','project_id':3,
+                   'networks':['p003t254'],'placement':{'mode':'pin','pinned_node':'proxmox2'}}]
+        result=scheduling._bootstrap_planned_networks(inventory,policy,requests,'proxmox2')
+        self.assertEqual(result['nodes']['proxmox2']['verified_networks'],['crtrans'])
+        self.assertEqual(set(result['nodes']['proxmox2']['bootstrap_planned_networks']),{'crtrans','p003tr','p003t254'})
+        self.assertNotIn('p003t254',policy['network_attestations']['proxmox2'].get('vnets',[]))
+        for bad in ([{**requests[0],'resource_key':'vm:scenario'}],
+                    [dict(requests[0],project_id=4),requests[1]],
+                    [dict(requests[0],placement={'mode':'auto'}),requests[1]]):
+            with self.subTest(bad=bad), self.assertRaises(PlacementError):
+                scheduling._bootstrap_planned_networks({'nodes':{'proxmox2':{'online':True,'verified_networks':['crtrans']}}},policy,bad,'proxmox2')
+
     def test_discovery_counts_stopped_guests_and_template_disks_without_double_ram(self):
         policy = dict(scheduling.DEFAULT_POLICY, allowed_nodes=['proxmox2'])
         result = scheduling.discover(API(),policy)

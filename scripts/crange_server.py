@@ -81,6 +81,13 @@ def serve(host='127.0.0.1', port=8000):
                             if not desired_file.is_file():
                                 desired_file = directory / 'terraform.tfvars'
                             record['desired_revision'] = hashlib.sha256(desired_file.read_bytes()).hexdigest()
+                            record['has_state'] = (directory / 'terraform.tfstate').is_file()
+                            bootstrap_status = directory / '.crange-bootstrap.json'
+                            if bootstrap_status.is_file():
+                                try:
+                                    record['bootstrap_status'] = json.loads(bootstrap_status.read_text())
+                                except (OSError, ValueError):
+                                    record['bootstrap_status'] = {'state': 'record_invalid'}
                             placement_file = directory / 'crange-applied-placements.json'
                             record['applied_placements'] = json.loads(placement_file.read_text()) if placement_file.is_file() else {}
                             record['staged_plans'] = []

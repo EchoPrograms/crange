@@ -122,6 +122,20 @@ class JobTests(unittest.TestCase):
         self.assertEqual(command('network-add', 3, {'name': 'corp', 'team': 1, 'id': 100, 'node': 'proxmox4'}),
                          ['network-add', '3', 'corp', '--team', '1', '--id', '100', '--node', 'proxmox4'])
 
+    def test_router_bootstrap_jobs_are_fixed_and_review_bound(self):
+        self.assertEqual(command('bootstrap-plan', 3, {}), ['bootstrap-plan', '3'])
+        plan_id = 'b' * 32
+        self.assertEqual(command('bootstrap-apply', 3, {'plan_id': plan_id}),
+                         ['infra-bootstrap-apply', '3', '--yes', '--plan-id', plan_id])
+        self.assertEqual(command('bootstrap-configure', 3, {}), ['bootstrap-configure', '3'])
+        for operation, options in (
+                ('bootstrap-plan', {'command': 'id'}),
+                ('bootstrap-apply', {'plan_id': plan_id, 'allow_destroy': True}),
+                ('bootstrap-apply', {'plan_id': '../../etc/passwd'}),
+                ('bootstrap-configure', {'shell': 'id'})):
+            with self.subTest(operation=operation, options=options), self.assertRaises(ValueError):
+                command(operation, 3, options)
+
     def test_release_and_scenario_inputs_are_typed(self):
         self.assertEqual(command('release-deploy', 3, {'version': '1.2.0', 'teams': [1, 2]}),
                          ['release-deploy', '3', '1.2.0', '--teams', '1', '2'])

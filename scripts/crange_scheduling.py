@@ -169,6 +169,52 @@ def provider_container_placement_verified(policy, node_name):
             and isinstance(proof.get('job_id'), str) and bool(proof['job_id']))
 
 
+def bootstrap_node_candidates(policy):
+    """Nodes whose existing provider and zone proofs can host a router-only bootstrap."""
+    return [node for node in policy.get('allowed_nodes', [])
+            if provider_container_placement_verified(policy, node)
+            and network_attestation_valid(policy.get('network_attestations', {}).get(node, {}))]
+
+
+def _bootstrap_planned_networks(inventory, policy, requests, node_name):
+    """Mark planned-VNet eligibility only inside a router-only bootstrap review.
+
+    This is not an acceptance record. The project VNets are created by the
+    reviewed foundation plan and remain ineligible to ordinary placement until
+    exact per-VNet acceptance is separately recorded.
+    """
+    if not bootstrap_node_candidates(policy) or node_name not in bootstrap_node_candidates(policy):
+        raise PlacementError('Bootstrap requires an enrolled node with provider and zone acceptance.')
+    expected = set()
+    project_ids = set()
+    for request in requests:
+        if request.get('kind') != 'container' or not str(request.get('resource_key', '')).startswith('router:'):
+            raise PlacementError('Bootstrap plans may contain only project router containers.')
+        pid = request.get('project_id')
+        if type(pid) is not int or not 1 <= pid <= 255 or pid in (60, 61):
+            raise PlacementError('Bootstrap project ID is invalid.')
+        project_ids.add(pid)
+        expected.update(request.get('networks', []))
+        intent = request.get('placement', {})
+        if intent.get('mode') != 'pin' or intent.get('pinned_node') != node_name:
+            raise PlacementError('Every bootstrap router must be pinned to the reviewed node.')
+    if len(project_ids) != 1 or not expected:
+        raise PlacementError('Bootstrap must contain one project and its router networks.')
+    project = next(iter(project_ids))
+    prefix = f'p{project:03d}'
+    if any(net != 'crtrans' and not re.fullmatch(rf'{prefix}(?:tr|t(?:00[1-9]|0[1-9][0-9]|1[0-9]{{2}}|2[0-4][0-9]|254))', net)
+           for net in expected):
+        raise PlacementError('Bootstrap network set is outside the project router topology.')
+    node = inventory.get('nodes', {}).get(node_name)
+    if not node or not node.get('online') or node.get('draining'):
+        raise PlacementError('Bootstrap node is unavailable.')
+    # Keep planning eligibility distinct from live, exact-VNet acceptance. The
+    # enrolled zone proof plus project-only resource allowlist permits crtrans
+    # for router foundation planning, but this never records acceptance.
+    node['bootstrap_planned_networks'] = sorted(expected)
+    return inventory
+
+
 def discover(api, policy, planned_networks=()):
     """Account every visible guest, including stopped guests and non-range guests.
 
@@ -385,7 +431,7 @@ def freeze(row, live, previous=None):
     return {'resource_key': row['resource_key'], 'resolved': values, 'reason':'Existing guest placement retained', 'existing':True, 'image': row.get('image') or ''}
 
 
-def prepare(path, cfg, plan_id, owner, api=None):
+def prepare(path, cfg, plan_id, owner, api=None, *, bootstrap_node=None):
     from crange import ProxmoxAPI, validate_project_quota
     validate_project_quota(path,cfg)
     policy,catalog = read_settings()
@@ -443,11 +489,16 @@ def prepare(path, cfg, plan_id, owner, api=None):
             for field in ('datastore_id','template_id','template_file_id','clone_mode'):
                 if row['retained'].get(field) is not None:requests[-1]['resolved_'+field]=row['retained'][field]
     inventory=discover(api or ProxmoxAPI(),policy,{n for row in rows for n in row['networks']})
+    if bootstrap_node:
+        if (cfg.get('jump_boxes') or cfg.get('custom_networks') or cfg.get('scenario_boxes') or
+                cfg.get('scenario_containers')):
+            raise PlacementError('Router bootstrap is restricted to an empty project with no scenario guests.')
+        inventory=_bootstrap_planned_networks(inventory,policy,requests,bootstrap_node)
     from crange_proxmox_compat import reviewed_identity
     provider_compat = reviewed_identity()
     ledger=ReservationLedger(DATA/'reservations.sqlite3')
     try:
-        if requests:placements+=ledger.reserve_batch(requests,inventory,catalog,policy,int(cfg['project_id']),plan_id,owner)
+        if requests:placements+=ledger.reserve_batch(requests,inventory,catalog,policy,int(cfg['project_id']),plan_id,owner,bootstrap=bool(bootstrap_node))
     finally:
         ledger.close()
     for placement in placements:
@@ -455,7 +506,8 @@ def prepare(path, cfg, plan_id, owner, api=None):
         placement['declared_template'] = row['box'].get('template')
     return {'provider_compat': provider_compat, 'plan_id':plan_id,'placements':placements,'requests':requests,'policy_revision':policy['revision'],
             'policy_sha256':hashlib.sha256(json.dumps(policy,sort_keys=True).encode()).hexdigest(),
-            'catalog_sha256':catalog_identity(catalog),'reservation_ids':[p['reservation_id'] for p in placements if p.get('reservation_id')]}
+            'catalog_sha256':catalog_identity(catalog),'reservation_ids':[p['reservation_id'] for p in placements if p.get('reservation_id')],
+            **({'bootstrap_node':bootstrap_node} if bootstrap_node else {})}
 
 
 def tf_overrides(prepared):
@@ -478,6 +530,8 @@ def begin_apply(path, prepared, api=None):
     api=api or ProxmoxAPI()
     networks={n for request in prepared['requests'] for n in request['networks']}
     inventory=discover(api,policy,networks)
+    if prepared.get('bootstrap_node'):
+        inventory=_bootstrap_planned_networks(inventory,policy,prepared['requests'],prepared['bootstrap_node'])
     for placement in prepared['placements']:
         resolved = placement['resolved']
         node = inventory['nodes'].get(resolved['node_name'], {})
@@ -617,7 +671,8 @@ def required_preparations(path, cfg, *, api=None):
         for node_name,node in sorted(working['nodes'].items()):
             if row['kind'] not in node.get('guest_types', []):continue
             if intent.get('pinned_node',node_name)!=node_name or node_name not in intent.get('allowed_nodes',policy['allowed_nodes']):continue
-            if not node.get('management_verified') or not set(row['networks'])<=set(node.get('verified_networks',[])):continue
+            network_eligibility=set(node.get('verified_networks',[])) | set(node.get('bootstrap_planned_networks',[]))
+            if not node.get('management_verified') or not set(row['networks'])<=network_eligibility:continue
             if not set(image.get('required_features',[]))<=set(node.get('features',[])):continue
             for storage_id,storage in sorted(node.get('storages',{}).items()):
                 replicas=[r for r in image.get('replicas',[]) if r['state']=='ready' and r['node']==node_name and (r.get('template_file_id') or (r['datastore_id']==storage_id and 'linked' in r.get('clone_modes_verified',[]) and storage.get('snapshots_verified') and not storage.get('shared')))]

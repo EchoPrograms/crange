@@ -70,7 +70,7 @@ def capacity_window(node, policy, node_name, storage=None, clone_mode='linked'):
     return result
 
 
-def schedule_batch(requests, inventory, catalog, policy, reservations=(), now=None, known_existing_allocations=()):
+def schedule_batch(requests, inventory, catalog, policy, reservations=(), now=None, known_existing_allocations=(), *, bootstrap=False):
     now = time.time() if now is None else now
     validate_catalog(catalog)
     for config in [policy] + list(policy.get('nodes', {}).values()):
@@ -179,7 +179,14 @@ def schedule_batch(requests, inventory, catalog, policy, reservations=(), now=No
                 if not required <= set(node.get('features', [])):
                     raise PlacementError('required CPU/firmware capability unavailable')
                 networks = set(r.get('networks', []))
-                if not networks <= set(node.get('networks', [])) or not networks <= set(node.get('verified_networks', [])) or not node.get('management_verified'):
+                exact_networks = networks <= set(node.get('verified_networks', []))
+                bootstrap_networks = (bootstrap and r.get('kind') == 'container'
+                    and str(r.get('resource_key', '')).startswith('router:')
+                    and r.get('placement', {}).get('mode') == 'pin'
+                    and r.get('placement', {}).get('pinned_node') == name
+                    and networks <= set(node.get('bootstrap_planned_networks', [])))
+                if ((not networks <= set(node.get('networks', [])) and not bootstrap_networks)
+                        or not (exact_networks or bootstrap_networks) or not node.get('management_verified')):
                     raise PlacementError('network/MTU/management path not verified')
                 node_window = capacity_window(node, policy, name)
                 available_mem = node_window['memory_mb'] - p['memory_mb']
@@ -260,7 +267,7 @@ class ReservationLedger:
                 result.append({'project_id': project, 'reservation_id': a['reservation_id'], 'resource_key': a['resource_key'], **a['resolved'], **a['resources']})
         return result
 
-    def reserve_batch(self, requests, inventory, catalog, policy, project_id, job_id, owner, now=None, known_existing_allocations=()):
+    def reserve_batch(self, requests, inventory, catalog, policy, project_id, job_id, owner, now=None, known_existing_allocations=(), *, bootstrap=False):
         now = time.time() if now is None else now
         if not requests or not isinstance(project_id, int) or isinstance(project_id, bool) or not 1 <= project_id <= 255 or not owner or not job_id or any(r.get('project_id') != project_id for r in requests):
             raise PlacementError('valid project, owner, job and nonempty single-project batch required')
@@ -271,7 +278,7 @@ class ReservationLedger:
             count = self.db.execute("SELECT COUNT(*) FROM jobs WHERE project_id=? AND owner=? AND state='reviewed'", (project_id, owner)).fetchone()[0]
             if count >= policy.get('max_reviewed_plans', 2):
                 raise PlacementError('outstanding reviewed-plan limit reached')
-            placements = schedule_batch(requests, inventory, catalog, policy, self.active_reservations(), now, known_existing_allocations)
+            placements = schedule_batch(requests, inventory, catalog, policy, self.active_reservations(), now, known_existing_allocations, bootstrap=bootstrap)
             for item in placements:
                 item['reservation_id'] = str(uuid.uuid4())
             self.db.execute('INSERT INTO jobs VALUES (?, ?, ?, ?, ?, ?, ?)', (job_id, project_id, owner, 'reviewed', now + policy.get('review_ttl_seconds', 3600), now, json.dumps(placements, sort_keys=True)))
