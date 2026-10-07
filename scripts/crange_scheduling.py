@@ -26,6 +26,50 @@ DEFAULT_POLICY = {'revision': 'conservative-v1', 'enabled': False,
                   'max_inventory_age_seconds': 120, 'review_ttl_seconds': 3600,
                   'max_reviewed_plans': 2, 'max_load': 1.0,
                   'clone_mode': 'linked', 'copy_overhead_fraction': .1, 'nodes': {}, 'network_attestations': {}}
+LIBRARY_STATUS = Path('/var/lib/crange-media-library/status.json')
+ARCHIVE_STORAGES = ('crange-library', 'media-mirror1', 'media-mirror4', 'local')
+
+
+def verified_archive_copies(catalog, status):
+    """Add immutable catalog aliases for manifest-verified copies of stock archives.
+
+    The copied rows remain bound to the same artifact hash and source node. The
+    reservation then records the selected volume ID, and begin_apply checks that
+    exact volume on that node before Terraform can create anything.
+    """
+    if not isinstance(status, dict) or not status.get('updated_at'):
+        return catalog
+    files = {(row.get('content'), row.get('name')): row for row in status.get('files', [])
+             if isinstance(row, dict) and isinstance(row.get('name'), str)}
+    result = copy.deepcopy(catalog)
+    for image in result.get('images', {}).values():
+        if image.get('source_type') != 'stock_archive' or image.get('kind') != 'container':
+            continue
+        digest = image.get('artifact_sha256')
+        for replica in list(image.get('replicas', [])):
+            source = replica.get('template_file_id', '')
+            if not source or ':vztmpl/' not in source:
+                continue
+            name = source.split(':vztmpl/', 1)[1]
+            row = files.get(('vztmpl', name), {})
+            if (not isinstance(row.get('size'), (int, float)) or row['size'] <= 0 or
+                    row.get('sha256') != digest):
+                continue
+            verified = {item.get('storage') for item in row.get('copies', [])
+                        if isinstance(item, dict) and item.get('sha256') == digest}
+            for storage in ARCHIVE_STORAGES:
+                if storage not in verified:
+                    continue
+                volid = f'{storage}:vztmpl/{name}'
+                if volid == source or any(r.get('node') == replica.get('node') and
+                                          r.get('template_file_id') == volid
+                                          for r in image.get('replicas', [])):
+                    continue
+                candidate = copy.deepcopy(replica)
+                candidate.update(template_file_id=volid, datastore_id=storage,
+                                 copy_verification={'storage': storage, 'sha256': digest})
+                image.setdefault('replicas', []).append(candidate)
+    return result
 
 
 def read_settings():
@@ -34,6 +78,12 @@ def read_settings():
     if not isinstance(policy, dict): raise PlacementError('Invalid distribution policy.')
     catalog_file = CONFIG / 'image-catalog.json'
     catalog = json.loads(catalog_file.read_text()) if catalog_file.exists() else {'schema_version': 1, 'images': {}}
+    validate_catalog(catalog)
+    try:
+        status = json.loads(LIBRARY_STATUS.read_text())
+    except (OSError, ValueError):
+        status = {}
+    catalog = verified_archive_copies(catalog, status)
     validate_catalog(catalog)
     return policy, catalog
 

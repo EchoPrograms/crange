@@ -9,6 +9,7 @@ from unittest.mock import Mock, patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'scripts'))
 import crange_templates as templates
+import crange_scheduling as scheduling
 _spec = importlib.util.spec_from_file_location('builder', Path(__file__).resolve().parents[1] / 'scripts/build-container-base.py')
 builder = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(builder)
@@ -71,6 +72,49 @@ class ArchiveFallbackTests(unittest.TestCase):
             self.assertEqual(volume, 'media-mirror1:vztmpl/debian-13-standard_test_amd64.tar.zst')
             with patch.object(builder, 'command', side_effect=lookup):
                 self.assertEqual(builder.find_signed_archive(args, '0' * 128), (None, None))
+
+    def test_scheduler_adds_only_manifest_hash_verified_stock_archive_aliases(self):
+        digest = 'a' * 64
+        catalog = {'schema_version': 1, 'images': {'debian-stock-v1': {
+            'kind': 'container', 'source_type': 'stock_archive', 'architecture': 'amd64',
+            'artifact_sha256': digest, 'source_revision': 'debian13', 'verified': True,
+            'approved_projects': [3], 'disk_gb': 8,
+            'replicas': [{'node': 'proxmox2', 'template_file_id': 'local:vztmpl/debian.tar.zst',
+                'datastore_id': 'local', 'state': 'ready', 'artifact_sha256': digest,
+                'verified_at': '2026-10-01T00:00:00Z'}]}}}
+        status = {'updated_at': '2026-10-07T16:00:00Z', 'files': [{
+            'content': 'vztmpl', 'name': 'debian.tar.zst', 'size': 100,
+            'sha256': digest, 'copies': [
+                {'storage': 'crange-library', 'sha256': digest},
+                {'storage': 'media-mirror1', 'sha256': digest},
+                {'storage': 'media-mirror4', 'sha256': 'b' * 64},
+                {'storage': 'other-storage', 'sha256': digest}]}]}
+        resolved = scheduling.verified_archive_copies(catalog, status)
+        replicas = resolved['images']['debian-stock-v1']['replicas']
+        self.assertEqual([r['template_file_id'] for r in replicas], [
+            'local:vztmpl/debian.tar.zst', 'crange-library:vztmpl/debian.tar.zst',
+            'media-mirror1:vztmpl/debian.tar.zst'])
+        self.assertEqual(replicas[1]['copy_verification']['sha256'], digest)
+        self.assertEqual(scheduling.catalog_identity(resolved),
+                         scheduling.catalog_identity(scheduling.verified_archive_copies(catalog, status)))
+        later_status = {**status, 'updated_at': '2026-10-07T16:05:00Z'}
+        self.assertEqual(scheduling.catalog_identity(resolved),
+                         scheduling.catalog_identity(scheduling.verified_archive_copies(catalog, later_status)))
+        self.assertEqual(len(catalog['images']['debian-stock-v1']['replicas']), 1)
+
+    def test_scheduler_ignores_archive_manifest_with_wrong_artifact_hash(self):
+        catalog = {'schema_version': 1, 'images': {'base': {
+            'kind': 'container', 'source_type': 'stock_archive', 'architecture': 'amd64',
+            'artifact_sha256': 'a' * 64, 'source_revision': 'debian13', 'verified': True,
+            'approved_projects': [3], 'disk_gb': 8,
+            'replicas': [{'node': 'proxmox2', 'template_file_id': 'local:vztmpl/debian.tar.zst',
+                'datastore_id': 'local', 'state': 'ready', 'artifact_sha256': 'a' * 64,
+                'verified_at': '2026-10-01T00:00:00Z'}]}}}
+        status = {'updated_at': '2026-10-07T16:00:00Z', 'files': [{
+            'content': 'vztmpl', 'name': 'debian.tar.zst', 'size': 100,
+            'sha256': 'b' * 64, 'copies': [{'storage': 'media-mirror1', 'sha256': 'b' * 64}]}]}
+        result = scheduling.verified_archive_copies(catalog, status)
+        self.assertEqual(len(result['images']['base']['replicas']), 1)
 
 
 if __name__ == '__main__':
