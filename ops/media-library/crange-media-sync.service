@@ -1,0 +1,8 @@
+[Unit]
+Description=Synchronize cluster ISO and LXC archive mirrors
+After=network-online.target
+Wants=network-online.target
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/crange-media-sync
+TimeoutStartSec=2h
