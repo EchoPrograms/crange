@@ -43,6 +43,18 @@ class ScenarioDraftTests(unittest.TestCase):
             for key in user["assigned_boxes"]:
                 self.assertEqual(boxes[key]["team_id"], user["team_id"])
                 self.assertEqual(boxes[key]["assessor"], int(user["username"][-2:]))
+            self.assertEqual(user["login"], f"p100-t{user['team_id']:03d}u{int(user['username'][-2:]):02d}")
+            self.assertTrue(user["enabled"])
+            self.assertFalse(user["allow_password_reset"])
+            self.assertEqual(user["connection_grants"], [])
+
+    def test_guacamole_account_job_evidence_contains_no_plaintext_credentials(self):
+        accounts = DRAFT["guacamole_accounts"]
+        self.assertEqual(accounts["credential_file_mode"], "0600")
+        self.assertFalse(accounts["plaintext_passwords_in_repository"])
+        self.assertFalse(accounts["connections_granted"])
+        self.assertEqual(len(accounts["account_batch_jobs"]), 5)
+        self.assertTrue(all(job["status"] == "succeeded" for job in accounts["account_batch_jobs"]))
 
     def test_windows_image_is_pending_and_debian_containers_are_declared(self):
         windows = [box for box in DRAFT["participant_boxes"] if box["os"].startswith("Windows")]

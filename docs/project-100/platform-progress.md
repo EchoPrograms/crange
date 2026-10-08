@@ -109,3 +109,23 @@ deployed. Windows Server images and associated participant boxes remain
 pending immutable publication. The host-management path to Proxmox 2 remains
 unavailable, so router/network acceptance and service deployment are blocked;
 no guest on that node has been recreated or migrated.
+
+## Participant Guacamole accounts — 2026-10-08
+
+The existing authenticated bulk-user workflow created two enabled accounts for
+each team. Logins are `p100-t001u01/02` through `p100-t005u01/02`; each
+account is scoped to its own team. All five `guac-enroll` jobs succeeded
+(`66505afd239a461eabe351778e507e52`, `34ad9a994efe42afa39d0ad04bf8b901`,
+`782f16bd8b324942b0c4661520b0e7a9`, `0a1da8113a204ce1a47826624e989b4e`,
+`f028a1613cca44208bf4f8005a6e28a7`). The Guacamole API confirms all ten
+accounts exist, have no connection grants, and lack self-service password
+`UPDATE`. Their generated credentials are kept only in
+`/home/crange/.config/crange/project-100-assessor-guac.json` (mode 0600); no
+passwords are in the repository. The draft maps each assessor to its two
+intended Linux/Windows boxes, with connection grants pending guest deployment.
+
+The first authenticated API attempt exposed a project-directory permission
+issue. Project 100 is now mode 0710 so the dashboard's `crange` primary group
+can traverse it to read the 0640 desired-state file, without directory listing
+access. The `project-init` workflow now creates future project directories
+with the same mode; focused tests cover both directory and config-file modes.

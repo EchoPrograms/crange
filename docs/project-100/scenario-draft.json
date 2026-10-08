@@ -368,103 +368,153 @@
   "assessor_users": [
     {
       "username": "assessor-t01-01",
-      "login_pattern": "p100-assessor-t01-01",
       "team_id": 1,
       "assigned_boxes": [
         "t001-j01",
         "t001-j02"
       ],
-      "credential_source": "protected user-secret workflow"
+      "credential_source": "protected user-secret workflow",
+      "login": "p100-t001u01",
+      "account_status": "created_and_verified",
+      "enabled": true,
+      "allow_password_reset": false,
+      "connection_grants": [],
+      "grant_status": "pending_guest_deployment"
     },
     {
       "username": "assessor-t01-02",
-      "login_pattern": "p100-assessor-t01-02",
       "team_id": 1,
       "assigned_boxes": [
         "t001-j03",
         "t001-j04"
       ],
-      "credential_source": "protected user-secret workflow"
+      "credential_source": "protected user-secret workflow",
+      "login": "p100-t001u02",
+      "account_status": "created_and_verified",
+      "enabled": true,
+      "allow_password_reset": false,
+      "connection_grants": [],
+      "grant_status": "pending_guest_deployment"
     },
     {
       "username": "assessor-t02-01",
-      "login_pattern": "p100-assessor-t02-01",
       "team_id": 2,
       "assigned_boxes": [
         "t002-j01",
         "t002-j02"
       ],
-      "credential_source": "protected user-secret workflow"
+      "credential_source": "protected user-secret workflow",
+      "login": "p100-t002u01",
+      "account_status": "created_and_verified",
+      "enabled": true,
+      "allow_password_reset": false,
+      "connection_grants": [],
+      "grant_status": "pending_guest_deployment"
     },
     {
       "username": "assessor-t02-02",
-      "login_pattern": "p100-assessor-t02-02",
       "team_id": 2,
       "assigned_boxes": [
         "t002-j03",
         "t002-j04"
       ],
-      "credential_source": "protected user-secret workflow"
+      "credential_source": "protected user-secret workflow",
+      "login": "p100-t002u02",
+      "account_status": "created_and_verified",
+      "enabled": true,
+      "allow_password_reset": false,
+      "connection_grants": [],
+      "grant_status": "pending_guest_deployment"
     },
     {
       "username": "assessor-t03-01",
-      "login_pattern": "p100-assessor-t03-01",
       "team_id": 3,
       "assigned_boxes": [
         "t003-j01",
         "t003-j02"
       ],
-      "credential_source": "protected user-secret workflow"
+      "credential_source": "protected user-secret workflow",
+      "login": "p100-t003u01",
+      "account_status": "created_and_verified",
+      "enabled": true,
+      "allow_password_reset": false,
+      "connection_grants": [],
+      "grant_status": "pending_guest_deployment"
     },
     {
       "username": "assessor-t03-02",
-      "login_pattern": "p100-assessor-t03-02",
       "team_id": 3,
       "assigned_boxes": [
         "t003-j03",
         "t003-j04"
       ],
-      "credential_source": "protected user-secret workflow"
+      "credential_source": "protected user-secret workflow",
+      "login": "p100-t003u02",
+      "account_status": "created_and_verified",
+      "enabled": true,
+      "allow_password_reset": false,
+      "connection_grants": [],
+      "grant_status": "pending_guest_deployment"
     },
     {
       "username": "assessor-t04-01",
-      "login_pattern": "p100-assessor-t04-01",
       "team_id": 4,
       "assigned_boxes": [
         "t004-j01",
         "t004-j02"
       ],
-      "credential_source": "protected user-secret workflow"
+      "credential_source": "protected user-secret workflow",
+      "login": "p100-t004u01",
+      "account_status": "created_and_verified",
+      "enabled": true,
+      "allow_password_reset": false,
+      "connection_grants": [],
+      "grant_status": "pending_guest_deployment"
     },
     {
       "username": "assessor-t04-02",
-      "login_pattern": "p100-assessor-t04-02",
       "team_id": 4,
       "assigned_boxes": [
         "t004-j03",
         "t004-j04"
       ],
-      "credential_source": "protected user-secret workflow"
+      "credential_source": "protected user-secret workflow",
+      "login": "p100-t004u02",
+      "account_status": "created_and_verified",
+      "enabled": true,
+      "allow_password_reset": false,
+      "connection_grants": [],
+      "grant_status": "pending_guest_deployment"
     },
     {
       "username": "assessor-t05-01",
-      "login_pattern": "p100-assessor-t05-01",
       "team_id": 5,
       "assigned_boxes": [
         "t005-j01",
         "t005-j02"
       ],
-      "credential_source": "protected user-secret workflow"
+      "credential_source": "protected user-secret workflow",
+      "login": "p100-t005u01",
+      "account_status": "created_and_verified",
+      "enabled": true,
+      "allow_password_reset": false,
+      "connection_grants": [],
+      "grant_status": "pending_guest_deployment"
     },
     {
       "username": "assessor-t05-02",
-      "login_pattern": "p100-assessor-t05-02",
       "team_id": 5,
       "assigned_boxes": [
         "t005-j03",
         "t005-j04"
       ],
-      "credential_source": "protected user-secret workflow"
+      "credential_source": "protected user-secret workflow",
+      "login": "p100-t005u02",
+      "account_status": "created_and_verified",
+      "enabled": true,
+      "allow_password_reset": false,
+      "connection_grants": [],
+      "grant_status": "pending_guest_deployment"
     }
   ],
   "protected_variable_names": [
@@ -486,5 +536,39 @@
     "Windows source image is not published; Windows service hosts and ten Windows participant boxes remain pending.",
     "Project 100 has no approved-container alias for the verified Debian 12 archive; Linux business-service CT declarations remain pending.",
     "Guacamole users are definitions only; no account passwords or user rows have been created."
-  ]
+  ],
+  "guacamole_accounts": {
+    "credential_file": "/home/crange/.config/crange/project-100-assessor-guac.json",
+    "credential_file_mode": "0600",
+    "plaintext_passwords_in_repository": false,
+    "connections_granted": false,
+    "account_batch_jobs": [
+      {
+        "team_id": 1,
+        "job_id": "66505afd239a461eabe351778e507e52",
+        "status": "succeeded"
+      },
+      {
+        "team_id": 2,
+        "job_id": "34ad9a994efe42afa39d0ad04bf8b901",
+        "status": "succeeded"
+      },
+      {
+        "team_id": 3,
+        "job_id": "782f16bd8b324942b0c4661520b0e7a9",
+        "status": "succeeded"
+      },
+      {
+        "team_id": 4,
+        "job_id": "0a1da8113a204ce1a47826624e989b4e",
+        "status": "succeeded"
+      },
+      {
+        "team_id": 5,
+        "job_id": "f028a1613cca44208bf4f8005a6e28a7",
+        "status": "succeeded"
+      }
+    ],
+    "verification": "All ten accounts were confirmed in the Guacamole user API with zero connection grants and self-password UPDATE disabled."
+  }
 }

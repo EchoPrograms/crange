@@ -465,6 +465,10 @@ def cmd_project_init(args: argparse.Namespace) -> None:
                 f'project_id = {project}\ntransit_address = "{transit}"\nteam_ids = ["1"]\n'
             )
             save_config(staging, {"project_id": project, "transit_address": transit, "router_node":"auto", "router_placement":{"mode":"auto","preferred_node":""}, "team_ids": ["1"], "jump_boxes": {}, "custom_networks": {}, "scenario_containers": {}})
+            # The dashboard runs in the crange group and reads the known config
+            # file (0640); execute-only group access allows traversal without
+            # exposing a directory listing or Terraform state to the web user.
+            os.chmod(staging, 0o710)
             os.replace(staging, target)
         finally:
             if staging.exists():

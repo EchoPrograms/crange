@@ -1,5 +1,6 @@
 import importlib.util
 import json
+import stat
 from pathlib import Path
 import tempfile
 import threading
@@ -372,6 +373,8 @@ jump_boxes = {
         cfg = json.loads((created / "crange.auto.tfvars.json").read_text())
         self.assertEqual(cfg["project_id"], 5)
         self.assertEqual(cfg["transit_address"], "10.60.2.4/24")
+        self.assertEqual(stat.S_IMODE(created.stat().st_mode), 0o710)
+        self.assertEqual(stat.S_IMODE((created / "crange.auto.tfvars.json").stat().st_mode), 0o640)
 
     def test_project_init_transit_allocator_reserves_special_addresses(self):
         occupied = {f"10.60.2.{octet}" for octet in (2, 3, 4, 5)}
