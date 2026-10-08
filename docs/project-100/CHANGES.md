@@ -100,3 +100,22 @@ remaining blockers. Do not place secrets or fabricated verification here.
 - Acceptance will measure identity/services on the isolated first OOBE clone,
   generalize it, then compare a fresh second clone's actual GUID/SID. Historical
   source identity is not reconstructed.
+
+## Guacamole visibility repair — 2026-10-08
+
+- Live investigation found ten native Guacamole connections, with administrator
+  permissions, hidden by the custom homepage because the CRANGE applied access
+  indexes contain no connections. Project 100 has ten Linux jumpboxes and four
+  business containers declared; these are not yet deployed scenario guests.
+- The homepage now merges the authenticated Guacamole connection tree with
+  CRANGE-managed rows. Native connections show their permitted Connect links
+  and addresses, group protocol suffixes into one row, and appear under Other
+  connections. Native access does not imply verified CRANGE guest ownership;
+  power and snapshot actions require that ownership mapping.
+- Built and deployed the extension on VM 110. The served app.js contains the
+  change; authenticated Guacamole login and its ten-connection tree succeeded.
+  A focused JavaScript harness checked grouped services, address loading and
+  absence of power requests for untracked connections. Guest reachability was
+  not proved by those checks.
+- Empty project launch tickets now explain that boxes must first be deployed,
+  rather than directing the user to reapply an empty access manifest.

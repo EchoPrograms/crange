@@ -59,7 +59,9 @@ def issue_ticket(session_token: str, project_id: int, *, auth, secret_hex: str,
         raise TicketError('Guacamole access has not been applied for this project.') from exc
     connections = applied.get('connections', [])
     permissions = applied.get('permissions', [])
-    if not connections or any(not item.get('resource_key') for item in connections):
+    if not connections:
+        raise TicketError('No remote-access boxes are deployed for this project yet. Deploy the boxes before opening Guacamole.')
+    if any(not item.get('resource_key') for item in connections):
         raise TicketError('Reapply this project’s Guacamole access manifest to enable launch tickets.')
 
     user = next((item for item in auth.list_users(project=project)

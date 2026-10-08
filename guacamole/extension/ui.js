@@ -47,21 +47,21 @@
                 '  <div class="cr-list-toolbar"><label class="cr-search-label" for="cr-box-search">Search servers</label><input id="cr-box-search" type="search" ng-model="search" placeholder="Name, IP, team, or project"></div>',
                 '  <p class="cr-error" ng-if="error" role="alert">{{error}}</p>',
                 '  <p class="cr-empty" ng-if="loading">Loading servers…</p>',
-                '  <p class="cr-empty" ng-if="!loading && !filteredBoxes().length && !error">No servers available.</p>',
+                '  <p class="cr-empty" ng-if="!loading && !filteredBoxes().length && !error">{{search ? "No servers match your search." : "No deployed servers are assigned to this account. Deploy project boxes and apply their remote access in CRANGE to make them available here."}}</p>',
                 '  <section class="cr-project-group" ng-repeat="project in projectGroups track by project.id" ng-if="filteredBoxes(project).length">',
-                '    <h2 class="cr-project-heading" ng-if="!cr.selectedProject">Project {{project.id}}</h2>',
+                '    <h2 class="cr-project-heading" ng-if="!cr.selectedProject">{{project.label}}</h2>',
                 '  <section class="cr-team-group" ng-repeat="group in project.teams track by group.id" ng-if="filteredBoxes(group).length">',
-                '    <button type="button" class="cr-team-heading" ng-click="toggleTeam(group)" aria-expanded="{{group.open || !!search}}"><span aria-hidden="true">{{group.open || search ? "▾" : "▸"}}</span><strong>{{group.team === 0 ? "Team 0 · Staging" : "Team " + group.team}}</strong><span class="cr-team-project">Project {{group.project}}</span><span class="cr-team-count">{{filteredBoxes(group).length}} servers</span></button>',
+                '    <button type="button" class="cr-team-heading" ng-click="toggleTeam(group)" aria-expanded="{{group.open || !!search}}"><span aria-hidden="true">{{group.open || search ? "▾" : "▸"}}</span><strong>{{group.team === null ? "Existing connections" : group.team === 0 ? "Team 0 · Staging" : "Team " + group.team}}</strong><span class="cr-team-project" ng-if="group.project">Project {{group.project}}</span><span class="cr-team-count">{{filteredBoxes(group).length}} servers</span></button>',
                 '  <div class="cr-server-table" ng-show="group.open || search">',
                 '    <div class="cr-server-head"><span>Server</span><span>Address</span><span>Location</span><span>Power</span><span>Connect</span><span aria-label="Management"></span></div>',
                 '    <div class="cr-server-row" ng-repeat="box in filteredBoxes(group) track by box.project + \'/\' + box.resource_key">',
                 '      <div class="cr-server-name" title="{{box.name}}"><span class="cr-machine-icon" aria-hidden="true">▣</span><span>{{box.name}}</span><small>{{box.kind}}</small></div>',
                 '      <div class="cr-server-ip">{{box.ip || "—"}}</div>',
-                '      <div class="cr-server-location">{{box.team === 0 ? "Team 0 · Staging" : "Team " + box.team}}<small>Project {{box.project}}</small></div>',
+                '      <div class="cr-server-location">{{box.team === null ? "Guacamole" : box.team === 0 ? "Team 0 · Staging" : "Team " + box.team}}<small ng-if="box.project">Project {{box.project}}</small></div>',
                 '      <div class="cr-server-power"><span class="cr-status" ng-class="{on: box.state === \'running\'}">{{box.state || "Checking…"}}</span></div>',
                 '      <div class="cr-protocols"><a ng-repeat="protocol in box.protocols track by $index" ng-if="protocol.url" class="cr-protocol" ng-class="protocol.protocol" ng-href="{{protocol.url}}" title="Open {{protocol.protocol | uppercase}} to {{box.name}}">{{protocol.protocol | uppercase}}</a><span ng-if="!box.protocols.length">—</span></div>',
                 '      <div class="cr-server-manage" ng-class="{open: menuBox === box}" ng-mouseleave="closeMenu()">',
-                '        <button type="button" class="cr-more" ng-click="toggleMenu(box)" aria-label="Manage {{box.name}}" aria-expanded="{{menuBox === box}}" title="Manage this server">⋮</button>',
+                '        <button type="button" ng-if="!box.native" class="cr-more" ng-click="toggleMenu(box)" aria-label="Manage {{box.name}}" aria-expanded="{{menuBox === box}}" title="Manage this server">⋮</button>',
                 '        <div class="cr-management-menu" ng-if="menuBox === box" role="group" aria-label="Server management">',
                 '        <button type="button" ng-if="box.state === \'stopped\'" ng-click="submit(box, \'start\')" ng-disabled="box.busy" title="Start this server">Start</button>',
                 '        <button type="button" ng-if="box.state === \'running\'" ng-click="submit(box, \'shutdown\')" ng-disabled="box.busy" title="Ask the operating system to shut down safely; active sessions disconnect">Shutdown</button>',
@@ -125,25 +125,56 @@
                     var data = error && error.data;
                     return (data && (data.message || data.error)) || (error && error.statusText) || 'Request failed';
                 }
-                function visit(group, source, byName) {
+                var nativeParameters = Object.create(null);
+                function visit(group, source, byName, catalog) {
                     if (!group) return;
                     (group.childConnections || []).forEach(function (connection) {
                         var key = connection.name + '\u0000' + connection.protocol;
                         var id = ClientIdentifier.toString({dataSource: source, type: ClientIdentifier.Types.CONNECTION, id: connection.identifier});
                         if (!byName[key]) byName[key] = '#/client/' + encodeURIComponent(id);
+                        catalog.push({source: source, connection: connection, url: byName[key]});
                     });
-                    (group.childConnectionGroups || []).forEach(function (child) { visit(child, source, byName); });
+                    (group.childConnectionGroups || []).forEach(function (child) { visit(child, source, byName, catalog); });
                 }
                 function bindLinks() {
                     var byName = Object.create(null);
-                    angular.forEach(scope.connectionGroups, function (group, source) { visit(group, source, byName); });
+                    var catalog = [], managed = Object.create(null), native = Object.create(null);
+                    angular.forEach(scope.connectionGroups, function (group, source) { visit(group, source, byName, catalog); });
+                    scope.boxes = scope.boxes.filter(function (box) { return !box.native; });
                     scope.boxes.forEach(function (box) {
                         (box.protocols || []).forEach(function (protocol) {
+                            managed[protocol.connection_name + '\u0000' + protocol.protocol] = true;
                             protocol.url = byName[protocol.connection_name + '\u0000' + protocol.protocol] || null;
                         });
                     });
+                    // Guacamole's authenticated connection tree is authoritative
+                    // for native access. Never invent CRANGE ownership for it.
+                    catalog.forEach(function (item) {
+                        var connection = item.connection;
+                        if (managed[connection.name + '\u0000' + connection.protocol]) return;
+                        var title = connection.name.replace(/[- ·]+(ssh|rdp|vnc)$/i, '');
+                        var key = item.source + '/' + title;
+                        var box = native[key];
+                        if (!box) {
+                            box = native[key] = {project: 0, team: null, resource_key: 'native:' + key,
+                                native: true, name: title, kind: 'connection', state: 'Connection', protocols: [], ip: ''};
+                            scope.boxes.push(box);
+                        }
+                        box.protocols.push({protocol: connection.protocol, connection_name: connection.name, url: item.url});
+                        var parameterKey = item.source + '/' + connection.identifier;
+                        if (nativeParameters[parameterKey]) box.ip = nativeParameters[parameterKey];
+                        else if (!Object.prototype.hasOwnProperty.call(nativeParameters, parameterKey)) {
+                            nativeParameters[parameterKey] = '';
+                            $http.get('api/session/data/' + encodeURIComponent(item.source) + '/connections/' + encodeURIComponent(connection.identifier) + '/parameters', {headers: headers()}).then(function (response) {
+                                nativeParameters[parameterKey] = response.data.hostname || '';
+                                box.ip = nativeParameters[parameterKey];
+                            }, angular.noop);
+                        }
+                    });
+                    groupBoxes();
                 }
                 function refreshPower(box) {
+                    if (box.native) return;
                     request({operation: 'status', project: box.project, resource_key: box.resource_key}).then(function (data) {
                         box.state = data.state || 'unknown';
                     }, function () { box.state = 'unknown'; });
@@ -156,6 +187,24 @@
                     scope.menuBox = null;
                     try { window.localStorage.setItem('crange-selected-project', value || ''); } catch (ignored) {}
                 });
+                function groupBoxes() {
+                    var groups = Object.create(null), projects = Object.create(null);
+                    scope.boxes.forEach(function (box) {
+                        var id = box.project + '/' + box.team;
+                        if (!groups[id]) groups[id] = {id: id, project: box.project, team: box.team, open: !collapsedTeams[id], boxes: []};
+                        groups[id].boxes.push(box);
+                    });
+                    scope.teamGroups = Object.keys(groups).map(function (id) { return groups[id]; }).sort(function (a, b) { return a.project - b.project || a.team - b.team; });
+                    scope.teamGroups.forEach(function (group) {
+                        var id = String(group.project);
+                        if (!projects[id]) projects[id] = {id: id, label: group.project ? 'Project ' + id : 'Other connections', teams: [], boxes: []};
+                        projects[id].teams.push(group);
+                        projects[id].boxes = projects[id].boxes.concat(group.boxes);
+                    });
+                    scope.projectGroups = Object.keys(projects).map(function (id) { return projects[id]; }).sort(function (a, b) { return Number(a.id) - Number(b.id); });
+                    scope.cr.projects = scope.projectGroups;
+                    if (scope.cr.selectedProject && !projects[scope.cr.selectedProject]) scope.cr.selectedProject = '';
+                }
                 scope.refresh = function () {
                     scope.loading = true;
                     scope.$parent.cr.loading = true;
@@ -168,23 +217,6 @@
                             var existing = previous[box.project + '/' + box.resource_key];
                             return existing ? angular.extend(existing, box) : box;
                         });
-                        var groups = Object.create(null);
-                        scope.boxes.forEach(function (box) {
-                            var id = box.project + '/' + box.team;
-                            if (!groups[id]) groups[id] = {id: id, project: box.project, team: box.team, open: !collapsedTeams[id], boxes: []};
-                            groups[id].boxes.push(box);
-                        });
-                        scope.teamGroups = Object.keys(groups).map(function (id) { return groups[id]; }).sort(function (a, b) { return a.project - b.project || a.team - b.team; });
-                        var projects = Object.create(null);
-                        scope.teamGroups.forEach(function (group) {
-                            var id = String(group.project);
-                            if (!projects[id]) projects[id] = {id: id, label: 'Project ' + id, teams: [], boxes: []};
-                            projects[id].teams.push(group);
-                            projects[id].boxes = projects[id].boxes.concat(group.boxes);
-                        });
-                        scope.projectGroups = Object.keys(projects).map(function (id) { return projects[id]; }).sort(function (a, b) { return Number(a.id) - Number(b.id); });
-                        scope.cr.projects = scope.projectGroups;
-                        if (scope.cr.selectedProject && !projects[scope.cr.selectedProject]) scope.cr.selectedProject = '';
                         bindLinks();
                         scope.boxes.forEach(function (box) {
                             refreshPower(box);
