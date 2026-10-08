@@ -81,3 +81,22 @@ remaining blockers. Do not place secrets or fabricated verification here.
   approximately 10.6-second response instead of expiring checks at 8 seconds.
 - Windows clone launch is pending deployment of tested capture/identity code
   to the controller; no clone job was reported running at this checkpoint.
+
+## Resumed deployment checkpoint
+
+- Linux staging desired state committed as `2b69501`: ten Linux jumpboxes
+  use `.11/.13`, reserving `.12/.14` for Windows participants; four Team 0
+  business containers use the verified Debian 12 alias. Twenty focused checks
+  passed. No scenario guests were applied.
+- Windows source 115 remains stopped. A synchronous clone command timeout left
+  partial VM 8910; the terminal failed task, absent worker and owned volumes
+  were verified before guarded cleanup. The controller's asynchronous request
+  then received VM.Clone denial without creating a guest.
+- The authorized host-admin fallback launched a persistent clone process,
+  PID 1465086, tracked by Proxmox task
+  `UPID:proxmox4:00165B00:1C16E38A:6AC797AF:qmclone:115:root@pam:`.
+  The latest agent observation reports the same task running at 17 percent.
+  This is copy progress, not proof of Windows boot or image publication.
+- Acceptance will measure identity/services on the isolated first OOBE clone,
+  generalize it, then compare a fresh second clone's actual GUID/SID. Historical
+  source identity is not reconstructed.
