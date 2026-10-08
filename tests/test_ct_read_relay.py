@@ -6,7 +6,7 @@ import sys
 import unittest
 from unittest.mock import Mock
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'scripts'))
-from crange_ct_read_relay import validate_request, validate_guest, dispatch
+from crange_ct_read_relay import validate_request, validate_guest, dispatch, offline_config_snapshot
 
 
 class RelayTests(unittest.TestCase):
@@ -25,6 +25,71 @@ class RelayTests(unittest.TestCase):
                 ({'argv': ['/bin/sh']}, 101000), ({'node': 'proxmox2;id'}, 101000)]:
             with self.subTest(changes=changes, uid=uid), self.assertRaises(ValueError):
                 validate_request({**self.request, **changes}, self.policy, uid)
+
+    def test_offline_snapshot_request_is_exactly_allowlisted_and_reader_pinned(self):
+        policy={'peer_uid':101000,'offline_config_reader_node':'proxmox4',
+            'offline_config_guests':{'proxmox2':{
+                '113':{'kind':'lxc','required_tags':['p100','network-infrastructure']},
+                '147':{'kind':'qemu','required_tags':['crange-image','crange-cache-147']}}}}
+        request={'node':'proxmox4','guest_node':'proxmox2','kind':'lxc','vmid':113,
+                 'command':'offline-config-snapshot'}
+        validate_request(request,policy,101000)
+        for mutation in ({'node':'proxmox2'}, {'vmid':114}, {'kind':'qemu'},
+                         {'guest_node':'proxmox6'}, {'path':'/etc/shadow'}):
+            with self.subTest(mutation=mutation),self.assertRaises(ValueError):
+                validate_request({**request,**mutation},policy,101000)
+        with self.assertRaises(ValueError):
+            validate_request({**request,'vmid':147,'kind':'lxc'},policy,101000)
+
+    def test_offline_snapshot_returns_only_limits_after_offline_identity_and_digest_checks(self):
+        from unittest.mock import Mock
+        policy={'offline_config_guests':{'proxmox2':{
+            '113':{'kind':'lxc','required_tags':['p100','network-infrastructure']}}}}
+        request={'guest_node':'proxmox2','kind':'lxc','vmid':113}
+        nodes=[{'node':'proxmox2','status':'offline'}]
+        resource={'node':'proxmox2','type':'lxc','vmid':113,'status':'unknown',
+                  'tags':'network-infrastructure;p100;range-lan;terraform'}
+        config=(b'cores: 1\nmemory: 512\nrootfs: local-lvm:vm-113-disk-0,size=8G\n'
+                b'tags: network-infrastructure;p100;range-lan;terraform\ntemplate: 0\n')
+        get=Mock(side_effect=[nodes,[resource],nodes,[resource]])
+        snapshot=offline_config_snapshot(request,policy,get=get,read_bytes=lambda _path:config,now=1000)
+        self.assertEqual(snapshot['memory_bytes'],512*1024**2)
+        self.assertEqual(snapshot['cpu_cores'],1)
+        self.assertEqual(snapshot['disk_bytes'],8*1024**3)
+        self.assertEqual(snapshot['status'],'offline')
+        self.assertEqual(len(snapshot['config_sha256']),64)
+        self.assertNotIn('config',snapshot)
+        with self.assertRaisesRegex(ValueError,'offline'):
+            offline_config_snapshot(request,policy,get=lambda _path,*_args:[{'node':'proxmox2','status':'online'}],
+                                    read_bytes=lambda _path:config,now=1000)
+
+    def test_offline_snapshot_accounts_template_disk_without_resource_ram_cpu(self):
+        policy={'offline_config_guests':{'proxmox2':{
+            '147':{'kind':'qemu','required_tags':['crange-image','crange-cache-147']}}}}
+        request={'guest_node':'proxmox2','kind':'qemu','vmid':147}
+        nodes=[{'node':'proxmox2','status':'offline'}]
+        resource={'node':'proxmox2','type':'qemu','vmid':147,'status':'unknown',
+                  'tags':'crange-cache-147;crange-image'}
+        config=b'cores: 1\nmemory: 512\nscsi0: local-lvm:base-147-disk-0,size=20G\ntags: crange-cache-147;crange-image\ntemplate: 1\n'
+        calls=iter([nodes,[resource],nodes,[resource]])
+        snapshot=offline_config_snapshot(request,policy,get=lambda *_args:next(calls),
+                                         read_bytes=lambda _path:config,now=1000)
+        self.assertTrue(snapshot['template'])
+        self.assertEqual(snapshot['disk_bytes'],20*1024**3)
+
+    def test_offline_snapshot_dispatch_is_local_fixed_read_and_never_ssh_or_exec(self):
+        from unittest.mock import patch
+        policy={'peer_uid':101000,'offline_config_reader_node':'proxmox4',
+            'offline_config_guests':{'proxmox2':{
+                '113':{'kind':'lxc','required_tags':['p100','network-infrastructure']}}}}
+        request={'node':'proxmox4','guest_node':'proxmox2','kind':'lxc','vmid':113,
+                 'command':'offline-config-snapshot'}
+        with patch('crange_ct_read_relay.socket.gethostname',return_value='proxmox4'), \
+             patch('crange_ct_read_relay.host_read',return_value='{}') as read, \
+             patch('crange_ct_read_relay.subprocess.run') as run:
+            self.assertEqual(dispatch(request,policy,101000),{'value':'{}'})
+        read.assert_called_once_with(request,None,policy=policy)
+        run.assert_not_called()
 
     def test_pool_ownership_privilege_mounts_and_isolation_fail_closed(self):
         validate_guest(self.guest, self.members, 'proxmox2', 8840, 'crange-job-source')

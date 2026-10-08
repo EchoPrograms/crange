@@ -8,6 +8,7 @@ import json
 import math
 import os
 import re
+import socket
 import time
 from contextlib import contextmanager
 from pathlib import Path
@@ -143,6 +144,54 @@ def network_attestation_valid(attestation):
             and NETWORK_CHECKS <= set(attestation.get('passed_checks', [])))
 
 
+def _offline_config_snapshot(node, kind, vmid):
+    """Ask the fixed root-owned P4 relay for one allowlisted sanitized snapshot."""
+    if node not in KNOWN_NODES or kind not in ('lxc', 'qemu') or type(vmid) is not int:
+        raise PlacementError('Offline config snapshot identity is invalid.')
+    request = {'node': 'proxmox4', 'guest_node': node, 'kind': kind, 'vmid': vmid,
+               'command': 'offline-config-snapshot'}
+    try:
+        with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as client:
+            client.settimeout(65)
+            client.connect('/run/crange-ct-read/socket')
+            client.sendall(json.dumps(request, separators=(',', ':')).encode() + b'\n')
+            data = b''
+            while not data.endswith(b'\n') and len(data) <= 8192:
+                chunk = client.recv(8193 - len(data))
+                if not chunk:
+                    break
+                data += chunk
+    except OSError as exc:
+        raise PlacementError('Fixed offline config snapshot relay is unavailable.') from exc
+    if len(data) > 8192 or not data.endswith(b'\n'):
+        raise PlacementError('Fixed offline config snapshot response is invalid.')
+    try:
+        response = json.loads(data)
+        snapshot = json.loads(response['value']) if set(response) == {'value'} else None
+    except (ValueError, TypeError, KeyError):
+        snapshot = None
+    if not isinstance(snapshot, dict):
+        raise PlacementError('Fixed offline config snapshot was denied or malformed.')
+    captured = snapshot.get('captured_at')
+    digest = snapshot.get('config_sha256')
+    tags = snapshot.get('tags')
+    if (snapshot.get('guest_node') != node or snapshot.get('kind') != kind or
+            snapshot.get('vmid') != vmid or snapshot.get('status') != 'offline' or
+            type(snapshot.get('template')) is not bool or
+            type(snapshot.get('memory_bytes')) is not int or snapshot['memory_bytes'] < 0 or
+            isinstance(snapshot.get('cpu_cores'), bool) or
+            not isinstance(snapshot.get('cpu_cores'), (int, float)) or
+            not math.isfinite(snapshot['cpu_cores']) or snapshot['cpu_cores'] < 0 or
+            type(snapshot.get('disk_bytes')) is not int or snapshot['disk_bytes'] <= 0 or
+            not isinstance(digest, str) or not re.fullmatch(r'[a-f0-9]{64}', digest) or
+            not isinstance(tags, list) or not tags or any(not isinstance(tag, str) for tag in tags) or
+            not (('p100' in tags) ^ ('crange-image' in tags)) or
+            not isinstance(captured, (int, float)) or isinstance(captured, bool) or
+            not math.isfinite(captured) or captured > time.time() + 5 or time.time() - captured > 120):
+        raise PlacementError('Fixed offline config snapshot failed identity, freshness, or limit validation.')
+    return snapshot
+
+
 def _api_flag(value):
     return value in (True, 1, '1')
 
@@ -176,14 +225,15 @@ def bootstrap_node_candidates(policy):
             and network_attestation_valid(policy.get('network_attestations', {}).get(node, {}))]
 
 
-def _bootstrap_planned_networks(inventory, policy, requests, node_name):
+def _bootstrap_planned_networks(inventory, policy, requests, node_name=None, router_nodes=None):
     """Mark planned-VNet eligibility only inside a router-only bootstrap review.
 
     This is not an acceptance record. The project VNets are created by the
     reviewed foundation plan and remain ineligible to ordinary placement until
     exact per-VNet acceptance is separately recorded.
     """
-    if not bootstrap_node_candidates(policy) or node_name not in bootstrap_node_candidates(policy):
+    candidates = bootstrap_node_candidates(policy)
+    if not candidates or (router_nodes is None and node_name not in candidates):
         raise PlacementError('Bootstrap requires an enrolled node with provider and zone acceptance.')
     expected = set()
     project_ids = set()
@@ -196,8 +246,13 @@ def _bootstrap_planned_networks(inventory, policy, requests, node_name):
         project_ids.add(pid)
         expected.update(request.get('networks', []))
         intent = request.get('placement', {})
-        if intent.get('mode') != 'pin' or intent.get('pinned_node') != node_name:
-            raise PlacementError('Every bootstrap router must be pinned to the reviewed node.')
+        if isinstance(router_nodes, list):
+            if not set(router_nodes) <= set(candidates) or intent.get('mode') != 'auto':
+                raise PlacementError('Every bootstrap router must use reviewed, enrolled candidate nodes.')
+        else:
+            expected_node = (router_nodes or {}).get(request.get('resource_key')) if router_nodes is not None else node_name
+            if expected_node not in candidates or intent.get('mode') != 'pin' or intent.get('pinned_node') != expected_node:
+                raise PlacementError('Every bootstrap router must be pinned to its reviewed, enrolled node.')
     if len(project_ids) != 1 or not expected:
         raise PlacementError('Bootstrap must contain one project and its router networks.')
     project = next(iter(project_ids))
@@ -205,13 +260,26 @@ def _bootstrap_planned_networks(inventory, policy, requests, node_name):
     if any(net != 'crtrans' and not re.fullmatch(rf'{prefix}(?:tr|t(?:00[1-9]|0[1-9][0-9]|1[0-9]{{2}}|2[0-4][0-9]|254))', net)
            for net in expected):
         raise PlacementError('Bootstrap network set is outside the project router topology.')
-    node = inventory.get('nodes', {}).get(node_name)
-    if not node or not node.get('online') or node.get('draining'):
-        raise PlacementError('Bootstrap node is unavailable.')
+    if isinstance(router_nodes, list):
+        allowed_nodes = set(router_nodes)
+        if not allowed_nodes or not allowed_nodes <= set(candidates):
+            raise PlacementError('Bootstrap candidate nodes no longer have current provider and zone acceptance.')
+        for request in requests:
+            intent = request.get('placement', {})
+            if intent.get('mode') != 'auto' or set(intent.get('allowed_nodes', [])) != allowed_nodes:
+                raise PlacementError('Every bootstrap router must use the exact reviewed candidate-node set.')
+        selected_nodes = allowed_nodes
+    else:
+        selected_nodes = set((router_nodes or {}).values()) or {node_name}
+    for selected in selected_nodes:
+        node = inventory.get('nodes', {}).get(selected)
+        if not node or not node.get('online') or node.get('draining'):
+            raise PlacementError('Bootstrap node is unavailable.')
     # Keep planning eligibility distinct from live, exact-VNet acceptance. The
     # enrolled zone proof plus project-only resource allowlist permits crtrans
     # for router foundation planning, but this never records acceptance.
-    node['bootstrap_planned_networks'] = sorted(expected)
+    for selected in selected_nodes:
+        inventory['nodes'][selected]['bootstrap_planned_networks'] = sorted(expected)
     return inventory
 
 
@@ -248,22 +316,59 @@ def discover(api, policy, planned_networks=()):
             # Charge these against global/project quotas; never offer the node
             # for placement. Missing maxima make the inventory incomplete.
             for guest in (g for g in guests if g['node'] == name):
-                template = bool(int(guest.get('template', 0)))
-                if not template and any(guest.get(key) is None for key in ('maxmem', 'maxcpu', 'maxdisk')):
-                    raise PlacementError(f'Cannot account workloads on offline node {name}; configured maxima are missing.')
-                memory = float(guest.get('maxmem', 0)) / 2**20
-                cores = float(guest.get('maxcpu', 0))
-                disk = float(guest.get('maxdisk', 0)) / 2**30
-                if not template and (memory <= 0 or cores <= 0):
-                    raise PlacementError(f'Cannot account workloads on offline node {name}; configured CPU/RAM maxima are invalid.')
+                template = bool(int(guest.get('template') or 0))
+                maxima = {key: guest.get(key) for key in ('maxmem', 'maxcpu', 'maxdisk')}
+                if maxima['maxdisk'] is None or (not template and any(value is None for value in maxima.values())):
+                    # /cluster/resources omits configured maxima for guests on
+                    # an offline node. PVE keeps the authoritative guest config
+                    # in pmxcfs, so read it through the normal VM.Audit API and
+                    # derive only the missing values. Never infer from a name,
+                    # Terraform declaration, or zero usage counters.
+                    snapshot = None
+                    try:
+                        config = api.request('GET', f"/nodes/{name}/{guest['type']}/{guest['vmid']}/config")
+                    except Exception:
+                        snapshot = _offline_config_snapshot(name, guest['type'], int(guest['vmid']))
+                        template = snapshot['template']
+                        if maxima['maxmem'] is None and snapshot['memory_bytes']:
+                            maxima['maxmem'] = snapshot['memory_bytes']
+                        if maxima['maxcpu'] is None and snapshot['cpu_cores']:
+                            maxima['maxcpu'] = snapshot['cpu_cores']
+                        if maxima['maxdisk'] is None:
+                            maxima['maxdisk'] = snapshot['disk_bytes']
+                    else:
+                        if not isinstance(config, dict):
+                            raise PlacementError(f'Cannot account workloads on offline node {name}; guest {guest["vmid"]} config is invalid.')
+                        template = bool(int(config.get('template', template)))
+                        if maxima['maxmem'] is None and config.get('memory') is not None:
+                            maxima['maxmem'] = float(config['memory']) * 2**20
+                        if maxima['maxcpu'] is None and config.get('cores') is not None:
+                            maxima['maxcpu'] = float(config['cores']) * float(config.get('sockets', 1))
+                        if maxima['maxdisk'] is None:
+                            configured_disks = disk_allocations(config)
+                            if configured_disks:
+                                maxima['maxdisk'] = sum(configured_disks.values()) * 2**30
+                missing_values = [key for key, value in maxima.items()
+                                  if value is None and (not template or key == 'maxdisk')]
+                if missing_values:
+                    missing = ', '.join(missing_values)
+                    raise PlacementError(f'Cannot account workloads on offline node {name}; configured maxima are missing ({missing}; guest {guest["vmid"]}).')
+                memory = float(maxima['maxmem'] or 0) / 2**20
+                cores = float(maxima['maxcpu'] or 0)
+                disk = float(maxima['maxdisk'] or 0) / 2**30
+                if (not math.isfinite(disk) or disk < 0 or
+                        (not template and (not math.isfinite(memory) or not math.isfinite(cores) or
+                                           memory <= 0 or cores <= 0))):
+                    raise PlacementError(f'Cannot account workloads on offline node {name}; configured CPU/RAM/disk maxima are invalid (guest {guest["vmid"]}).')
                 if not template:
                     result['nodes'][name]['committed_memory_mb'] += memory
                     result['nodes'][name]['committed_cpu_cores'] += cores
-                    for scope in ['global', *re.findall(r'(?:^|;)p(\d{3})(?:;|$)', str(guest.get('tags', '')))]:
-                        scope = str(int(scope)) if scope != 'global' else scope
-                        usage = result['quota_usage'].setdefault(scope, {})
-                        for key, amount in (('memory_mb', memory), ('cpu_cores', cores), ('disk_gb', disk)):
-                            usage[key] = usage.get(key, 0) + amount
+                for scope in ['global', *re.findall(r'(?:^|;)p(\d{3})(?:;|$)', str(guest.get('tags', '')))]:
+                    scope = str(int(scope)) if scope != 'global' else scope
+                    usage = result['quota_usage'].setdefault(scope, {})
+                    for key, amount in (('memory_mb', 0 if template else memory),
+                                        ('cpu_cores', 0 if template else cores), ('disk_gb', disk)):
+                        usage[key] = usage.get(key, 0) + amount
                 result['guests'][str(guest['vmid'])] = {'node_name': name, 'kind': guest['type'],
                     'template': template, 'name': guest.get('name'), 'status': 'offline',
                     'tags': guest.get('tags', ''), 'memory_mb': memory, 'cpu_cores': cores,
@@ -330,7 +435,21 @@ def discover(api, policy, planned_networks=()):
         name = guest['node']
         if name not in result['nodes'] or not result['nodes'][name].get('online'): continue
         kind = guest['type']; vmid = int(guest['vmid'])
-        config = api.request('GET', f'/nodes/{name}/{kind}/{vmid}/config')
+        try:
+            config = api.request('GET', f'/nodes/{name}/{kind}/{vmid}/config')
+        except Exception as exc:
+            # A VMID can disappear between the cluster listing and config read
+            # during a reviewed cancel/recreate. Ignore only a confirmed stale
+            # listing; a live or moved VM, or an inconclusive refresh, fails closed.
+            from crange import CrangeError
+            if not isinstance(exc, CrangeError) or 'failed with HTTP 500.' not in str(exc):
+                raise
+            refreshed = api.request('GET', '/cluster/resources', {'type': 'vm'})
+            if not isinstance(refreshed, list):
+                raise PlacementError('Could not verify a guest disappeared after a config API error.') from exc
+            if any(int(item.get('vmid', -1)) == vmid for item in refreshed):
+                raise
+            continue
         node = result['nodes'][name]; template = bool(int(config.get('template', 0)))
         memory = float(config.get('memory', 0)); cores = float(config.get('cores', 1))*float(config.get('sockets', 1))
         disks = disk_allocations(config)
@@ -382,12 +501,21 @@ def declarations(path, cfg):
                      'image': image, 'networks': networks,
                      'default_preferred_node': 'proxmox4' if key.startswith('jumpbox:') else None})
     router_node = cfg.get('router_node', 'proxmox4')
-    router = {'node_name': router_node, 'placement': cfg.get('router_placement') or placement_intent(router_node), 'cores':1,'memory_mb':512}
+    router_nodes = cfg.get('bootstrap_router_nodes', {})
+    def router_for(key):
+        if cfg.get('bootstrap_candidate_nodes'):
+            candidates = list(cfg['bootstrap_candidate_nodes'])
+            return {'node_name': candidates[0], 'placement': {'mode': 'auto', 'allowed_nodes': candidates},
+                    'cores':1,'memory_mb':512}
+        node = router_nodes.get(key, router_node)
+        return {'node_name': node, 'placement': placement_intent(node), 'cores':1,'memory_mb':512}
     reference = {'image_id': cfg.get('router_image', 'debian-12-router-v1')}
     p = f'p{int(cfg["project_id"]):03d}'
-    append('router:project','container',router,reference,['crtrans',p+'tr'])
-    append('router:staging','container',router,reference,[p+'tr',p+'t254'])
-    for team in cfg['team_ids']: append('router:team:'+str(team),'container',router,reference,[p+'tr',p+f't{int(team):03d}'])
+    append('router:project','container',router_for('router:project'),reference,['crtrans',p+'tr'])
+    append('router:staging','container',router_for('router:staging'),reference,[p+'tr',p+'t254'])
+    for team in cfg['team_ids']:
+        key = 'router:team:'+str(team)
+        append(key,'container',router_for(key),reference,[p+'tr',p+f't{int(team):03d}'])
     for key, box in cfg.get('custom_networks', {}).items():
         append('router:custom:'+key,'container',box,reference,[p+f't{int(box["owner_team_id"]):03d}',p+f'c{int(box["network_id"]):03d}'])
     for kind, field, approved in [('jumpbox','jump_boxes',vm_templates),('vm','scenario_boxes',vm_templates),('container','scenario_containers',ct_templates)]:
@@ -431,7 +559,7 @@ def freeze(row, live, previous=None):
     return {'resource_key': row['resource_key'], 'resolved': values, 'reason':'Existing guest placement retained', 'existing':True, 'image': row.get('image') or ''}
 
 
-def reviewed_bootstrap_replacements(path, project_id, owner, bootstrap_node, requests, policy, ledger):
+def reviewed_bootstrap_replacements(path, project_id, owner, bootstrap_node, requests, policy, ledger, router_nodes=None):
     """Find only an identical, still-reviewed router bootstrap preview to replace."""
     if not bootstrap_node or not requests or any(not r['resource_key'].startswith('router:') for r in requests):
         return []
@@ -444,6 +572,8 @@ def reviewed_bootstrap_replacements(path, project_id, owner, bootstrap_node, req
             plan_id = record.get('plan_id')
             if (not record.get('bootstrap') or record.get('applied_at') or
                     record.get('bootstrap_node') != bootstrap_node or
+                    (isinstance(router_nodes, dict) and record.get('bootstrap_router_nodes') != router_nodes) or
+                    (isinstance(router_nodes, list) and record.get('bootstrap_nodes') != router_nodes) or
                     sorted(record.get('bootstrap_networks', [])) != requested_networks or
                     plan_id != manifest.stem):
                 continue
@@ -467,9 +597,11 @@ def reviewed_bootstrap_replacements(path, project_id, owner, bootstrap_node, req
                 'cpu_cores': request['cpu_cores'],
                 'disk_gb': request['disk_gb'] + request.get('copy_overhead_gb', request['disk_gb'] * policy.get('copy_overhead_fraction', 0.1)),
             }
+            expected_node = (router_nodes or {}).get(key, bootstrap_node) if isinstance(router_nodes, dict) else None
+            allowed_node = allocation.get('resolved', {}).get('node_name') in router_nodes if isinstance(router_nodes, list) else True
             if (request.get('kind') != 'container' or request.get('image') != allocation.get('image') or
-                    request.get('placement', {}).get('pinned_node') != bootstrap_node or
-                    allocation.get('resolved', {}).get('node_name') != bootstrap_node or
+                    (expected_node is not None and allocation.get('resolved', {}).get('node_name') != expected_node) or
+                    not allowed_node or
                     allocation.get('resources') != expected_resources):
                 exact = False
                 break
@@ -515,7 +647,9 @@ def purge_expired_bootstrap_reviews(path, project_id, owner, api, ledger, now=No
             continue
         allocations = saved['allocations']
         if (not allocations or any(not str(item.get('resource_key', '')).startswith('router:') for item in allocations)
-                or any(item.get('resolved', {}).get('node_name') != record.get('bootstrap_node') for item in allocations)):
+                or any(item.get('resolved', {}).get('node_name') !=
+                       record.get('bootstrap_router_nodes', {}).get(item.get('resource_key'), record.get('bootstrap_node'))
+                       for item in allocations)):
             continue
         nodes = {item['resolved']['node_name'] for item in allocations}
         try:
@@ -541,7 +675,7 @@ def purge_expired_bootstrap_reviews(path, project_id, owner, api, ledger, now=No
     return released
 
 
-def prepare(path, cfg, plan_id, owner, api=None, *, bootstrap_node=None):
+def prepare(path, cfg, plan_id, owner, api=None, *, bootstrap_node=None, bootstrap_nodes=None):
     from crange import ProxmoxAPI, validate_project_quota
     validate_project_quota(path,cfg)
     policy,catalog = read_settings()
@@ -604,7 +738,7 @@ def prepare(path, cfg, plan_id, owner, api=None, *, bootstrap_node=None):
         if (cfg.get('jump_boxes') or cfg.get('custom_networks') or cfg.get('scenario_boxes') or
                 cfg.get('scenario_containers')):
             raise PlacementError('Router bootstrap is restricted to an empty project with no scenario guests.')
-        inventory=_bootstrap_planned_networks(inventory,policy,requests,bootstrap_node)
+        inventory=_bootstrap_planned_networks(inventory,policy,requests,bootstrap_node,bootstrap_nodes)
     from crange_proxmox_compat import reviewed_identity
     provider_compat = reviewed_identity()
     ledger=ReservationLedger(DATA/'reservations.sqlite3')
@@ -614,7 +748,7 @@ def prepare(path, cfg, plan_id, owner, api=None, *, bootstrap_node=None):
         if requests:
             expired_bootstrap_reviews=purge_expired_bootstrap_reviews(path,int(cfg['project_id']),owner,api,ledger)
             if bootstrap_node:
-                replacements=reviewed_bootstrap_replacements(path,int(cfg['project_id']),owner,bootstrap_node,requests,policy,ledger)
+                replacements=reviewed_bootstrap_replacements(path,int(cfg['project_id']),owner,bootstrap_node,requests,policy,ledger,bootstrap_nodes)
             placements+=ledger.reserve_batch(requests,inventory,catalog,policy,int(cfg['project_id']),plan_id,owner,
                 bootstrap=bool(bootstrap_node),replace_reviewed_job_ids=replacements)
     finally:
@@ -622,10 +756,13 @@ def prepare(path, cfg, plan_id, owner, api=None, *, bootstrap_node=None):
     for placement in placements:
         row = next(row for row in rows if row['resource_key'] == placement['resource_key'])
         placement['declared_template'] = row['box'].get('template')
+    bootstrap_router_nodes = {p['resource_key']:p['resolved']['node_name'] for p in placements
+                              if str(p.get('resource_key','')).startswith('router:')} if bootstrap_node else None
     return {'provider_compat': provider_compat, 'plan_id':plan_id,'placements':placements,'requests':requests,'policy_revision':policy['revision'],
             'policy_sha256':hashlib.sha256(json.dumps(policy,sort_keys=True).encode()).hexdigest(),
             'catalog_sha256':catalog_identity(catalog),'reservation_ids':[p['reservation_id'] for p in placements if p.get('reservation_id')],
             **({'bootstrap_node':bootstrap_node} if bootstrap_node else {}),
+            **({'bootstrap_nodes':bootstrap_nodes,'bootstrap_router_nodes':bootstrap_router_nodes} if bootstrap_node else {}),
             **({'replaced_reviewed_plan_ids':replacements} if replacements else {}),
             **({'purged_expired_bootstrap_plan_ids':expired_bootstrap_reviews} if expired_bootstrap_reviews else {})}
 
@@ -651,7 +788,7 @@ def begin_apply(path, prepared, api=None):
     networks={n for request in prepared['requests'] for n in request['networks']}
     inventory=discover(api,policy,networks)
     if prepared.get('bootstrap_node'):
-        inventory=_bootstrap_planned_networks(inventory,policy,prepared['requests'],prepared['bootstrap_node'])
+        inventory=_bootstrap_planned_networks(inventory,policy,prepared['requests'],prepared['bootstrap_node'],prepared.get('bootstrap_nodes'))
     for placement in prepared['placements']:
         resolved = placement['resolved']
         node = inventory['nodes'].get(resolved['node_name'], {})
@@ -673,7 +810,8 @@ def begin_apply(path, prepared, api=None):
     if prepared['requests']:
         ledger=ReservationLedger(DATA/'reservations.sqlite3')
         try:
-            ledger.mark_running(prepared['plan_id'],requests=prepared['requests'],inventory=inventory,catalog=catalog,policy=policy)
+            ledger.mark_running(prepared['plan_id'],requests=prepared['requests'],inventory=inventory,catalog=catalog,policy=policy,
+                                bootstrap=bool(prepared.get('bootstrap_node')))
         finally:ledger.close()
 
 
@@ -698,7 +836,10 @@ def finish_apply(path, prepared, *, succeeded, api=None):
     if prepared['requests']:
         for node in {p['resolved']['node_name'] for p in prepared['placements']}:
             ids = {int(v['guest_id']) for v in record.values() if v['node_name'] == node}
-            if any(int(task.get('id') or 0) in ids for task in api.request('GET',f'/nodes/{node}/tasks',{'running':1}) if str(task.get('id') or '').isdigit()):
+            active_tasks = api.request('GET', f'/nodes/{node}/tasks', {'source': 'active', 'limit': 1000})
+            if not isinstance(active_tasks, list):
+                raise PlacementError('Could not verify whether applied project guests still have provider tasks.')
+            if any(int(task.get('id') or 0) in ids for task in active_tasks if str(task.get('id') or '').isdigit()):
                 raise PlacementError('Provider tasks still running; reservations retained for reconciliation.')
         ledger=ReservationLedger(DATA/'reservations.sqlite3')
         try:ledger.reconcile_job(prepared['plan_id'],operation_terminal=True,allocations_reconciled=True)
@@ -784,16 +925,27 @@ def required_preparations(path, cfg, *, api=None):
         if not image:raise PlacementError(f'{row["resource_key"]}: publish an approved immutable image before staging.')
         if isinstance(image.get('disk_gb'),bool) or not isinstance(image.get('disk_gb'),(int,float)) or not 0 < image['disk_gb'] < float('inf'):
             raise PlacementError('Published image disk allocation is missing.')
-        box=row['box'];intent=intent_for(box,row.get('default_preferred_node'));candidates=[];failures={}
+        box=row['box'];intent=intent_for(box,row.get('default_preferred_node'));candidates=[];failures={};excluded_nodes={}
         demand={'memory_mb':int(box.get('memory_mb',512 if row['kind']=='container' else 4096)),
                 'cpu_cores':int(box.get('cores',1 if row['kind']=='container' else 2)),
                 'disk_gb':image['disk_gb']*(1+policy.get('copy_overhead_fraction',.1))}
         for node_name,node in sorted(working['nodes'].items()):
-            if row['kind'] not in node.get('guest_types', []):continue
-            if intent.get('pinned_node',node_name)!=node_name or node_name not in intent.get('allowed_nodes',policy['allowed_nodes']):continue
+            reasons=[]
+            if not node.get('online'):reasons.append('node-offline')
+            if node.get('draining'):reasons.append('node-draining')
+            if node_name not in policy.get('allowed_nodes',[]):reasons.append('node-excluded-by-policy')
+            if intent.get('pinned_node',node_name)!=node_name or node_name not in intent.get('allowed_nodes',policy['allowed_nodes']):
+                reasons.append('placement-intent-excludes-node')
+            if row['kind'] not in node.get('guest_types',[]):reasons.append('guest-type-not-accepted')
+            if not node.get('management_verified'):reasons.append('node-management-not-verified')
             network_eligibility=set(node.get('verified_networks',[])) | set(node.get('bootstrap_planned_networks',[]))
-            if not node.get('management_verified') or not set(row['networks'])<=network_eligibility:continue
-            if not set(image.get('required_features',[]))<=set(node.get('features',[])):continue
+            missing_networks=set(row['networks'])-network_eligibility
+            if missing_networks:reasons.append('required-networks-not-verified:'+','.join(sorted(missing_networks)))
+            missing_features=set(image.get('required_features') or [])-set(node.get('features',[]))
+            if missing_features:reasons.append('required-image-features-not-verified:'+','.join(sorted(missing_features)))
+            if reasons:
+                excluded_nodes[node_name]=reasons
+                continue
             for storage_id,storage in sorted(node.get('storages',{}).items()):
                 replicas=[r for r in image.get('replicas',[]) if r['state']=='ready' and r['node']==node_name and (r.get('template_file_id') or (r['datastore_id']==storage_id and 'linked' in r.get('clone_modes_verified',[]) and storage.get('snapshots_verified') and not storage.get('shared')))]
                 already=(row['image'],node_name,storage_id) in planned_caches
@@ -819,7 +971,9 @@ def required_preparations(path, cfg, *, api=None):
                 score=sum(total[k]/max(allocation['headroom'][k]+total[k],.01) for k in total)/3
                 if intent.get('preferred_node')==node_name:score-=min(policy.get('preference_bonus',.05),.1)
                 candidates.append((score,node_name,storage_id,not replicas and not already,cache_demand,total))
-        if not candidates:raise PlacementError(f'{row["resource_key"]}: no safe cache-plus-guest target: {json.dumps(failures,sort_keys=True)}')
+        if not candidates:
+            detail={'node_exclusions':excluded_nodes,'storage_or_capacity_failures':failures}
+            raise PlacementError(f'{row["resource_key"]}: no safe cache-plus-guest target: {json.dumps(detail,sort_keys=True)}')
         _,node_name,storage_id,missing,cache_demand,total=min(candidates,key=lambda x:x[:3])
         consume(node_name,storage_id,total)
         if missing:

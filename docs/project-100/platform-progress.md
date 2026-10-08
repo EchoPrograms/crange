@@ -110,6 +110,74 @@ pending immutable publication. The host-management path to Proxmox 2 remains
 unavailable, so router/network acceptance and service deployment are blocked;
 no guest on that node has been recreated or migrated.
 
+## Participant connection scope — 2026-10-08
+
+All ten Project 100 participant accounts were updated through the authenticated
+dashboard API with an explicit own-Linux-jumpbox assignment and no default team
+scope. For each team, user 01 maps to `jumpbox:tTTT-j01` and user 02 maps to
+`jumpbox:tTTT-j03`; the existing home-team and user-number fields remain.
+All ten `guac-users` jobs succeeded and the desired record reports `scoped=true`.
+Windows `j02`/`j04` connection keys are pending Windows guest declaration.
+There are currently zero applied connections; live participant grants have not
+been tested.
+
+## Offline capacity accounting — 2026-10-08
+
+Project 100 `stage-changes` initially stopped because `/cluster/resources`
+reported Proxmox 2 offline and CTs 113, 118, and 119 with `status=unknown` and
+null `maxmem`, `maxcpu`, and `maxdisk`. The scheduler's old offline branch
+required those fields and could not proceed. Read-only inspection of the
+authoritative PVE cluster configuration on Proxmox 4 found each CT configured
+with 1 core, 512 MiB RAM, and an 8 GiB root filesystem. No guest was recreated
+or migrated.
+
+Controller API config reads for CTs 113, 118, and 119 returned HTTP 500 through
+both P2 and P4 endpoints. The existing root relay on P4 now accepts one fixed
+read-only `offline-config-snapshot` operation for exact allowlisted guest IDs,
+types, and required project/image tags. Its protected allowlist is
+`/etc/crange-ct-read-relay.json` (root-owned mode 0600). The relay checks current
+cluster membership, requires P2 to remain offline, verifies ownership tags,
+and confirms both membership and pmxcfs config bytes stayed unchanged during
+the read. It returns only configured RAM bytes, CPU cores, disk bytes, template
+status, config digest, and capture time. The controller worker accepts only a
+fresh snapshot matching its discovered guest row. The original probe identity
+commands retain their prior restrictions.
+
+An authenticated worker read returned CT113/118/119 at 512 MiB, 1 core, and
+8 GiB each; VM147 (`crange-image` cache) was identified as a template with a
+20 GiB configured disk, so only that disk is charged to quotas. Offline guests
+remain ineligible for placement. Focused relay and scheduler tests pass (36
+tests).
+
+The desired `mhl-debian12-stock` template resolves to approved catalog image
+`debian-12-router-v1` (8 GiB disk). Its Debian 12 stock archive replicas are
+already marked ready on P1, P3, and P5 with the verified SHA256 above, so this
+failure is not a missing image/cache. The actual next gate is network
+eligibility: the scenario guest requires `p100t254`, and P1/P3/P5 currently
+have no verified VNets in their admission records. P2 is offline and P4 is
+excluded by policy (and lacks CT acceptance).
+
+Cache planning previously returned an empty rejection map because it skipped
+nodes before storage/capacity evaluation. It now reports those node exclusions
+and handles a null optional image-feature list as no additional feature
+requirement. A real retry reports `required-networks-not-verified:p100t254` on
+P1/P3/P5; P2 is separately reported offline, and P4 policy-excluded. No
+storage/capacity candidate was evaluated (`storage_or_capacity_failures` is
+empty), so no cache preparation was attempted. No reviewed plan was produced
+and no apply ran. No offline guest was recreated or migrated, the Windows
+source was left unchanged, and no OPNsense changes were made. P100 team-0
+network acceptance remains blocked while P2's project router is unavailable.
+
+## P2 management-path check — 2026-10-08
+
+An independent check from Proxmox 1 to Proxmox 2 management address
+`10.0.0.102` found ping returning `Destination Host Unreachable` from
+`10.0.0.101`, SSH on TCP 22 timing out, and the `vmbr0` neighbor entry remaining
+`INCOMPLETE`. This confirms a layer-2 management-path failure while P2 is
+offline. The fixed config relay can still read shared pmxcfs metadata from P4;
+it does not restore P2 router service or establish network acceptance. No
+firewall changes followed these checks.
+
 ## Participant Guacamole accounts — 2026-10-08
 
 The existing authenticated bulk-user workflow created two enabled accounts for

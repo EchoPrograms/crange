@@ -284,6 +284,20 @@ source and actual LVM origin. Cluster SSH uses existing root host keys solely
 inside this guarded host service; the controller receives no host login key.
 Audit records contain request scope and outcome, never guest identities or keys.
 
+The same relay can serve a separately allowlisted `offline-config-snapshot`
+request from the controller worker. Its root-owned mode-0600 policy pins one
+online reader node and exact offline guest node/type/VMID/tag tuples under
+`offline_config_reader_node` and `offline_config_guests`. The operation reads
+only shared pmxcfs config for those exact guests, verifies cluster membership,
+required ownership tags, offline node status, and unchanged config digest and
+membership before/after, then returns configured memory bytes, CPU cores, disk
+bytes, template status, digest, and capture time. It never returns config text,
+credentials, arbitrary paths, or guest execution results. The worker accepts
+only a fresh response matching the currently discovered guest row; offline
+nodes remain unavailable for placement. Add only explicitly approved VMIDs to
+the protected host policy and review the guest ownership tags before restarting
+the relay.
+
 `source-probe --clone-mode linked` is an explicit administrator CT-only operation.
 Its captured source must be a stopped immutable local template and its datastore
 must have fresh complete discovery and verified local snapshot capability. The
