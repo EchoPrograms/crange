@@ -1,0 +1,70 @@
+{
+  "schema_version": 1,
+  "observed_at_utc": "2026-10-08T06:18:10Z",
+  "source": {
+    "node": "proxmox4",
+    "vmid": 115,
+    "build_id": "286a35040ed44d52b36fb30d097d771d",
+    "name": "crange-build-mhl-server-2025-eval",
+    "pool": "crange-probes",
+    "status": "stopped",
+    "tags": [
+      "crange-build-286a35040ed44d52b36fb30d097d771d",
+      "crange-image",
+      "crange-template-build",
+      "mhl-windows-sealed"
+    ]
+  },
+  "config": {
+    "normalized_sha256": "a884aea74b225fdb0f4e754ceb6d39932b482c87d3639c74dfa5ebfe4c5f3aab",
+    "boot": "order=sata0",
+    "memory_mb": 4096,
+    "optical_media_attached": false,
+    "historical_pre_transition_fingerprint_recorded": false,
+    "allowed_transition_summary": [
+      "private guest-disk clone answer file installed and verified",
+      "source generalized and shut down",
+      "installer, driver and private answer media detached",
+      "SATA0 set as sole boot device",
+      "source memory reduced to 4096 MiB",
+      "source moved into crange-probes with its unique build marker retained"
+    ]
+  },
+  "windows_generalization": {
+    "system_registry": {
+      "GeneralizationState": 4,
+      "CleanupState": 2
+    },
+    "sysprep_succeeded_tag": true,
+    "shutdown_request_logged": true,
+    "machine_guid_value_present_after_generalization": false,
+    "offline_profile_list_administrator_sid": "S-1-5-21-1429816746-3004255909-1098465845-500",
+    "profile_sid_is_claimed_as_active_sam_identity": false,
+    "pre_generalization_machine_guid_or_sid_persisted": false,
+    "sysprep_error_codes": [
+      "c000000d: BiUpdateEfiEntry failed",
+      "c000000d: BiExportBcdObjects failed",
+      "c000000d: BiExportStoreAlterationsToEfi failed",
+      "c000000d: Failed to export alterations to firmware"
+    ]
+  },
+  "private_answerfile": {
+    "installed_on_guest": "C:\\ProgramData\\CRANGE\\clone-unattend.xml",
+    "sha256_verified_against_private_iso_source": true,
+    "ntfs_acl_inheritance_disabled": true,
+    "allowed_principals": [
+      "NT AUTHORITY\\SYSTEM",
+      "BUILTIN\\Administrators"
+    ],
+    "administrator_secret_source": "P4 root-owned mode-0600 vault",
+    "secret_value_recorded": false
+  },
+  "publication": {
+    "pve_template": false,
+    "exported": false,
+    "isolated_clone_oobe_verified": false,
+    "distinct_machine_guid_and_sid_probe_verified": false,
+    "catalog_image_published": false,
+    "project_100_profile_approved": false
+  }
+}

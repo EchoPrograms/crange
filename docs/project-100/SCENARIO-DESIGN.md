@@ -27,7 +27,7 @@ Interfaces and documents should consistently use the MHL name and story.
 | Build artifacts expose configuration | CI troubleshooting bundles include environment/configuration files | An actual accessible artifact with a scoped synthetic service credential |
 | Backups readable beyond the backup team | Warehouse support was added to simplify recovery | Actual permission and a readable synthetic sensitive backup |
 | Windows automation consumes writable content | Dispatch and IT share an operations directory | Actual share/NTFS ACL and controlled test of the scheduled consumer |
-| Helpdesk delegation covers privileged staff | The admin account was placed in the ordinary Staff OU | Actual AD permission plus a reversible proof on an explicit test account |
+| Warehouse deployment can affect the whole forest | The Warehouse Deployment GPO was linked at the domain root for convenience, and WarehouseDeployers received GpoEdit rights | Actual domain-root link and delegated permission, followed by a reversible proof on an explicit test computer |
 
 These should form connected, believable paths across the application, Linux
 hosts, Windows shares and directory. Avoid placing every service account in

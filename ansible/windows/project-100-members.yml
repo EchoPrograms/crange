@@ -1,0 +1,118 @@
+---
+- name: Join MHL file servers and Windows jumpboxes to their isolated team forest
+  hosts: mhl_domain_members
+  gather_facts: false
+  serial: 1
+  vars_files:
+    - /etc/crange-secrets/project-100/windows.vault.yml
+  vars:
+    mhl_domain_name: mhl.test
+    mhl_dc_dns: "{{ hostvars[inventory_hostname].mhl_dc_dns }}"
+    mhl_dns_servers:
+      - "{{ mhl_dc_dns }}"
+    mhl_admin_sources:
+      - 10.60.0.20
+  pre_tasks:
+    - name: Require a concrete host in the Project 100 MHL member group
+      ansible.builtin.assert:
+        that:
+          - inventory_hostname in groups.get('mhl_domain_members', [])
+          - mhl_local_admin_user | length > 0
+          - mhl_local_admin_password | length >= 16
+          - mhl_guest_admin_passwords[inventory_hostname] is defined
+          - mhl_guest_admin_passwords[inventory_hostname] | length >= 16
+          - mhl_domain_admin_user | length > 0
+          - mhl_domain_admin_password | length >= 16
+        fail_msg: Use the protected Project 100 inventory and Ansible vault.
+      no_log: true
+    - name: Rotate this clone's shared base-image local administrator credential
+      ansible.windows.win_user:
+        name: "{{ mhl_local_admin_user }}"
+        password: "{{ mhl_guest_admin_passwords[inventory_hostname] }}"
+        update_password: always
+        state: present
+      no_log: true
+    - name: Use the rotated local credential for subsequent controller access
+      ansible.builtin.set_fact:
+        ansible_password: "{{ mhl_guest_admin_passwords[inventory_hostname] }}"
+      no_log: true
+    - name: Set this host's in-forest Windows computer name
+      ansible.windows.win_hostname:
+        name: "{{ mhl_guest_hostname }}"
+      register: mhl_member_rename
+
+    - name: Reboot after setting the member computer name
+      ansible.windows.win_reboot:
+        reboot_timeout: 900
+      when: mhl_member_rename.reboot_required | default(mhl_member_rename.changed)
+  tasks:
+    - name: Configure this host to use only its own team's MHL DNS server
+      ansible.windows.win_dns_client:
+        adapter_names: '*'
+        dns_servers: "{{ mhl_dns_servers }}"
+
+    - name: Join this machine to its isolated MHL forest
+      microsoft.ad.membership:
+        dns_domain_name: "{{ mhl_domain_name }}"
+        domain_admin_user: "{{ mhl_domain_admin_user }}"
+        domain_admin_password: "{{ mhl_domain_admin_password }}"
+        domain_ou_path: >-
+          {{ 'OU=Servers,OU=MHL,DC=mhl,DC=test'
+             if inventory_hostname in groups['mhl_file_servers']
+             else 'OU=Workstations,OU=MHL,DC=mhl,DC=test' }}
+        state: domain
+        reboot: true
+        reboot_timeout: 900
+      no_log: true
+
+    - name: Restrict Remote Desktop and WinRM to the controller and Guacamole host
+      ansible.windows.win_powershell:
+        script: |
+          $ErrorActionPreference = 'Stop'
+          $allowed = '{{ mhl_admin_sources | join(",") }}'
+          foreach ($group in @('Remote Desktop', 'Windows Remote Management')) {
+            $rules = Get-NetFirewallRule -DisplayGroup $group -ErrorAction SilentlyContinue
+            if ($rules) {
+              $rules | Set-NetFirewallRule -Enabled True -Profile Any
+              $rules | Get-NetFirewallAddressFilter | Set-NetFirewallAddressFilter -RemoteAddress $allowed
+            }
+          }
+          Set-Service -Name WinRM -StartupType Automatic
+          Enable-PSRemoting -Force -SkipNetworkProfileCheck
+
+- name: Enable file services on the MHL file server
+  hosts: mhl_file_servers
+  gather_facts: false
+  vars_files:
+    - /etc/crange-secrets/project-100/windows.vault.yml
+  tasks:
+    - name: Install the file server role
+      ansible.windows.win_feature:
+        name: FS-FileServer
+        include_management_tools: true
+        state: present
+
+    - name: Create the Project 100 backup directory
+      ansible.windows.win_file:
+        path: C:\\MHL\\Backups
+        state: directory
+
+    - name: Grant MHL employees change access to the backup share
+      ansible.windows.win_share:
+        name: MHL-Backups
+        path: C:\\MHL\\Backups
+        description: MHL restore staging and backup copies
+        list: true
+        change: MHL\\MHL-Employees
+        full: BUILTIN\\Administrators
+        state: present
+
+    - name: Give the MHL employee group modify access to backup files
+      ansible.windows.win_acl:
+        path: C:\\MHL\\Backups
+        user: MHL\\MHL-Employees
+        rights: Modify
+        type: allow
+        state: present
+        inherit: ContainerInherit,ObjectInherit
+        propagation: None

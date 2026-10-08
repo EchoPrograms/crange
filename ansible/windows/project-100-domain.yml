@@ -1,0 +1,187 @@
+---
+- name: Create the MHL Active Directory forest on the Team 0 controller
+  hosts: mhl_domain_controllers
+  gather_facts: false
+  serial: 1
+  vars_files:
+    - /etc/crange-secrets/project-100/windows.vault.yml
+  vars:
+    mhl_domain_name: mhl.test
+    mhl_netbios_name: MHL
+  pre_tasks:
+    - name: Require the expected MHL controller and protected bootstrap secrets
+      ansible.builtin.assert:
+        that:
+          - ansible_host is match('^10\.100\.(?:[0-5]|254)\.')
+          - mhl_project_id | int == 100
+          - mhl_network_id | int in [1, 2, 3, 4, 5, 254]
+          - mhl_local_admin_user | length > 0
+          - mhl_local_admin_password | length >= 16
+          - mhl_guest_admin_passwords[inventory_hostname] is defined
+          - mhl_guest_admin_passwords[inventory_hostname] | length >= 16
+          - mhl_dsrm_password | length >= 16
+          - mhl_domain_admin_password | length >= 16
+        fail_msg: >-
+          MHL forest provisioning requires the scoped MHL-DC01 inventory entry
+          and credentials from the protected Project 100 Ansible vault.
+      no_log: true
+    - name: Rotate this clone's shared base-image local administrator credential
+      ansible.windows.win_user:
+        name: "{{ mhl_local_admin_user }}"
+        password: "{{ mhl_guest_admin_passwords[inventory_hostname] }}"
+        update_password: always
+        state: present
+      no_log: true
+    - name: Use the rotated local credential for subsequent controller access
+      ansible.builtin.set_fact:
+        ansible_password: "{{ mhl_guest_admin_passwords[inventory_hostname] }}"
+      no_log: true
+    - name: Set the same in-forest controller hostname in this isolated team
+      ansible.windows.win_hostname:
+        name: "{{ mhl_guest_hostname }}"
+      register: mhl_dc_rename
+
+    - name: Reboot after setting the domain controller hostname
+      ansible.windows.win_reboot:
+        reboot_timeout: 900
+      when: mhl_dc_rename.reboot_required | default(mhl_dc_rename.changed)
+  tasks:
+    - name: Install Active Directory Domain Services and DNS
+      ansible.windows.win_feature:
+        name:
+          - AD-Domain-Services
+          - DNS
+        include_management_tools: true
+        state: present
+
+    - name: Create the isolated MHL forest and its first domain controller
+      microsoft.ad.domain:
+        dns_domain_name: "{{ mhl_domain_name }}"
+        domain_netbios_name: "{{ mhl_netbios_name }}"
+        domain_mode: Win2025
+        forest_mode: Win2025
+        install_dns: true
+        create_dns_delegation: false
+        safe_mode_password: "{{ mhl_dsrm_password }}"
+        reboot: true
+        reboot_timeout: 900
+      no_log: true
+
+- name: Create MHL directory objects and scoped backup training weakness
+  hosts: mhl_domain_controllers
+  gather_facts: false
+  serial: 1
+  vars_files:
+    - /etc/crange-secrets/project-100/windows.vault.yml
+  vars:
+    mhl_domain_name: mhl.test
+    ansible_user: "{{ mhl_domain_admin_user }}"
+    ansible_password: "{{ mhl_domain_admin_password }}"
+    mhl_ou_tree:
+      - name: MHL
+        path: "DC=mhl,DC=test"
+      - name: Users
+        path: "OU=MHL,DC=mhl,DC=test"
+      - name: Workstations
+        path: "OU=MHL,DC=mhl,DC=test"
+      - name: Servers
+        path: "OU=MHL,DC=mhl,DC=test"
+      - name: Service Accounts
+        path: "OU=MHL,DC=mhl,DC=test"
+  module_defaults:
+    group/microsoft.ad.domain:
+      domain_server: "{{ ansible_host }}"
+      domain_username: "{{ mhl_domain_admin_user }}"
+      domain_password: "{{ mhl_domain_admin_password }}"
+  pre_tasks:
+    - name: Require a protected domain administration credential
+      ansible.builtin.assert:
+        that:
+          - mhl_domain_admin_user | length > 0
+          - mhl_domain_admin_password | length >= 16
+          - mhl_warehouse_deploy_password | length >= 16
+        fail_msg: Use the protected Project 100 Ansible vault for MHL domain credentials.
+      no_log: true
+  tasks:
+    - name: Create the MHL directory OUs
+      microsoft.ad.ou:
+        name: "{{ item.name }}"
+        path: "{{ item.path }}"
+        state: present
+      loop: "{{ mhl_ou_tree }}"
+
+    - name: Create an MHL department security group
+      microsoft.ad.group:
+        name: MHL-Employees
+        scope: global
+        category: security
+        path: OU=Users,OU=MHL,DC=mhl,DC=test
+        state: present
+
+    - name: Create a non-administrative backup service identity
+      microsoft.ad.user:
+        name: svc_backup
+        upn: svc_backup@mhl.test
+        path: OU=Service Accounts,OU=MHL,DC=mhl,DC=test
+        password: "{{ mhl_backup_service_password }}"
+        enabled: true
+        password_never_expires: true
+        groups:
+          - Domain Users
+        state: present
+      no_log: true
+
+    - name: Create the warehouse deployment operator group
+      microsoft.ad.group:
+        name: WarehouseDeployers
+        scope: global
+        category: security
+        path: OU=Users,OU=MHL,DC=mhl,DC=test
+        state: present
+
+    - name: Create a synthetic warehouse deployment service identity
+      microsoft.ad.user:
+        name: svc_warehouse_deploy
+        upn: svc_warehouse_deploy@mhl.test
+        path: OU=Service Accounts,OU=MHL,DC=mhl,DC=test
+        password: "{{ mhl_warehouse_deploy_password }}"
+        enabled: true
+        password_never_expires: true
+        groups:
+          - WarehouseDeployers
+        state: present
+      no_log: true
+
+    - name: Give the warehouse group edit rights on its deployment policy
+      ansible.windows.win_powershell:
+        script: |
+          $ErrorActionPreference = 'Stop'
+          Import-Module GroupPolicy
+          $name = 'Warehouse Deployment'
+          $gpo = Get-GPO -Name $name -ErrorAction SilentlyContinue
+          if (-not $gpo) { $gpo = New-GPO -Name $name }
+          Set-GPPermission -Name $name -TargetName 'MHL\WarehouseDeployers' `
+            -TargetType Group -PermissionLevel GpoEdit -ErrorAction Stop | Out-Null
+          Set-GPRegistryValue -Name $name -Key 'HKLM\Software\MHL\Warehouse' `
+            -ValueName 'DeploymentChannel' -Type String -Value 'pilot' | Out-Null
+          $root = 'DC=mhl,DC=test'
+          $link = Get-GPInheritance -Target $root
+          if (-not ($link.GpoLinks | Where-Object DisplayName -eq $name)) {
+            New-GPLink -Name $name -Target $root -LinkEnabled Yes -Enforced No | Out-Null
+          }
+      no_log: true
+
+    - name: Create the normal MHL employee identities
+      microsoft.ad.user:
+        name: "{{ item.username }}"
+        upn: "{{ item.username }}@mhl.test"
+        display_name: "{{ item.display_name }}"
+        path: OU=Users,OU=MHL,DC=mhl,DC=test
+        password: "{{ item.password }}"
+        groups:
+          - MHL-Employees
+        enabled: true
+        password_never_expires: false
+        state: present
+      loop: "{{ mhl_employees }}"
+      no_log: true
