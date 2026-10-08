@@ -5,11 +5,11 @@ browser check. Avoid destructive exercises on unrelated resources.
 
 | Area | Required exercise | Evidence/status |
 | --- | --- | --- |
-| Projects | Create, automatic transit allocation, rename, selection | Pending |
-| Templates | Shared ISO/mirror selection, Windows installer, approved images | Pending |
-| Cluster | Capacity in GiB, commitments, node distribution, suggested nodes | Pending |
+| Projects | Create, automatic transit allocation, rename, selection | Partial: live P100 created, five teams declared; transit 10.60.2.2; rename/browser selection pending |
+| Templates | Shared ISO/mirror selection, Windows installer, approved images | Partial: official Windows media imported, failed owned builds cancelled, corrected installer reached managed OS; Windows clone publication pending |
+| Cluster | Capacity in GiB, commitments, node distribution, suggested nodes | Partial: live CPU reserves and zero template commitments verified; image availability status corrected; lab-specific placement/browser audit pending |
 | Staging | Declare/edit/remove VM, container and custom network | Pending |
-| Planning | Foundation review/apply, staging review, retained plan identity | Pending |
+| Planning | Foundation review/apply, staging review, retained plan identity | Partial: reviewed foundation applied, 17 additions/0 changes/0 deletions; staging review pending |
 | Deployment | Apply and configuration together, refresh after completion | Pending |
 | Health | Default ping and explicit SSH/RDP/HTTP checks, edit checks | Pending |
 | Teams | Five teams, Team 0, box status and team-scoped management | Pending |

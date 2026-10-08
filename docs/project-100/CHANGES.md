@@ -42,3 +42,20 @@ remaining blockers. Do not place secrets or fabricated verification here.
 - Capacity/bootstrap checks passed 49 tests, image snapshot checks passed five
   tests, and the refreshed live snapshot confirms the requested reserves and
   zero template commitments. No Project 100 deployment is claimed by these fixes.
+
+## Project 100 foundation and Windows installation
+
+- Verified and applied a project-owned foundation plan: seventeen additions,
+  no changes or deletions. Seven routers are placed across accepted nodes.
+  Bookkeeping and router/network acceptance remain distinct from guest readiness.
+- Fixed bootstrap revalidation forwarding and a Proxmox task-list query mismatch;
+  handled confirmed missing-guest inventory races without ignoring unknown errors.
+- Windows unattended installation failed on a 340-character command exceeding
+  Microsoft's 259-character limit, then on ElementTree's serialized namespace
+  prefixes. Both defects received targeted regression coverage.
+- The answerfile ISO omitted the setup script. A hash-verified script-only ISO
+  repaired the installed, owned VM without another OS reinstall. The builder
+  must include and verify both files in future seed media.
+- Windows build VM 115 now reports Server 2025 Standard Evaluation in a workgroup,
+  with QEMU Guest Agent, RDP, WinRM and its serial driver healthy. It is not yet a
+  generalized, clone-verified published Windows image.
