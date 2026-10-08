@@ -129,3 +129,21 @@ issue. Project 100 is now mode 0710 so the dashboard's `crange` primary group
 can traverse it to read the 0640 desired-state file, without directory listing
 access. The `project-init` workflow now creates future project directories
 with the same mode; focused tests cover both directory and config-file modes.
+
+A disposable Team 1 account exercised the account lifecycle through the
+authenticated API and fixed Guacamole jobs: create
+`fbd6a3079cf547e9948e67c29530fb18`, rename plus password change
+`1146ed7e7dab43c8ae7cc32e393e8ee4`, password-reset disable
+`09aa81362f12401681658f55a15f2930`, lock `2734debc2a9f4226a12a09c533a393e7`,
+unlock `92a1aa9f55bf4a26a2c2fa96ea81eabe`, and delete
+`419a3f04d1234b2e9a2f9bbf742fe0ef`. The renamed password authenticated; the
+old password was rejected. Guacamole confirmed the reset permission and lock
+state changes, and both local and remote fixture records were absent after
+delete. Temporary fixture credentials were removed after cleanup.
+
+A read-only Chromium check confirmed login, Project 100 selection/name, and the
+Overview, Projects, Teams, Scenario, Users, and Jobs pages. Teams showed six
+network entries; Users showed all ten accounts. Teams, Scenario, Users, and Jobs
+were rendered at 390px with no page-level horizontal overflow. Screenshots are
+under `/tmp/project100-ui-evidence/`; browser navigation does not substitute for
+the pending guest connection and rollout checks.
