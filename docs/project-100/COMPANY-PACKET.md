@@ -44,7 +44,7 @@ Only that team's listed company targets are in scope. The overall Project 100
 aggregate is `10.100.0.0/16`; it is not permission to access another team's
 systems or assessment workstations.
 
-Expected company systems are MHL-DC01, MHL-FS01, MHL-APP01, MHL-CI01 and
+Expected company systems are MHL-DC01, MHL-FS01, MHL-DB01, MHL-APP01, MHL-CI01 and
 MHL-BKP01. Assessors receive personal Linux and Windows workstations through
 the designated remote-access portal. Access to a workstation does not confer
 authorization over the portal or its underlying infrastructure.

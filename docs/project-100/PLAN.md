@@ -35,6 +35,7 @@ employees, shipments, customers, contacts, and credentials are synthetic.
 | --- | --- | --- |
 | MHL-DC01 | AD DS, DNS, company users/groups and service accounts | Windows Server |
 | MHL-FS01 | Dispatch/finance shares and a legacy intranet component | Windows Server |
+| MHL-DB01 | Shipment, finance and customer databases | Linux/PostgreSQL |
 | MHL-APP01 | Customer shipment portal and internal operations API | Linux |
 | MHL-CI01 | Acquired warehouse build scripts and artifact workflow | Linux |
 | MHL-BKP01 | Operational backups, exported reports and monitoring | Linux |
@@ -42,6 +43,11 @@ employees, shipments, customers, contacts, and credentials are synthetic.
 Participant jump boxes are assessment workstations, not business targets.
 Windows and Linux templates must be actually installed, clone-tested, and
 prepared before the corresponding declarations are offered as ready.
+
+Within each standard team LAN use DC `.10`, file server `.20`, database `.30`,
+application `.40`, CI `.50`, and backups `.60`. Team 0 uses the same host octets
+on network 254. Any additional warehouse subnet must be declared and captured
+with the release, not added through an unmanaged host route.
 
 ## Design principles
 
