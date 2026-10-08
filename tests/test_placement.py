@@ -175,6 +175,37 @@ class PlacementTests(unittest.TestCase):
         with self.assertRaises(PlacementError):
             schedule_batch([request],inventory,catalog,policy,now=100,bootstrap=True)
 
+    def test_bootstrap_auto_placement_uses_another_accepted_node_when_capacity_is_short(self):
+        request, inventory, catalog, policy=fixtures()
+        policy['allowed_nodes']=['n1','n2']
+        catalog['images']['base-v1']['kind']='container'
+        for node in inventory['nodes'].values():
+            node['guest_types']=['container']
+            node['verified_networks']=[]
+            node['bootstrap_planned_networks']=['crtrans','p003tr']
+            node['storages']['local']['guest_types']=['container']
+        inventory['nodes']['n1']['storages']['local']['free_gb']=1
+        request.update(kind='container',resource_key='router:project',networks=['crtrans','p003tr'],
+                       placement={'mode':'auto','allowed_nodes':['n1','n2']},memory_mb=512,cpu_cores=1,disk_gb=8)
+        result=schedule_batch([request],inventory,catalog,policy,now=100,bootstrap=True)
+        self.assertEqual(result[0]['resolved']['node_name'],'n2')
+
+    def test_reviewed_bootstrap_revalidation_keeps_transient_network_exception_scoped(self):
+        _, inventory, catalog, policy=fixtures()
+        requests=self.bootstrap_requests(inventory,catalog,policy)
+        with tempfile.TemporaryDirectory() as temp:
+            ledger=ReservationLedger(pathlib.Path(temp)/'ledger')
+            ledger.reserve_batch(requests,inventory,catalog,policy,3,'bootstrap','owner',now=100,bootstrap=True)
+            with self.assertRaisesRegex(PlacementError,'network/MTU/management path not verified'):
+                ledger.mark_running('bootstrap',now=101,requests=requests,inventory=inventory,
+                                    catalog=catalog,policy=policy)
+            self.assertEqual(ledger.status('bootstrap')['state'],'reviewed')
+            ledger.mark_running('bootstrap',now=102,requests=requests,inventory=inventory,
+                                catalog=catalog,policy=policy,bootstrap=True)
+            self.assertEqual(ledger.status('bootstrap')['state'],'running')
+            ledger.reconcile_job('bootstrap',operation_terminal=True,allocations_reconciled=True)
+            ledger.close()
+
     def test_source_probe_reservation_is_project_scoped_and_reconciles_only_explicitly(self):
         _, inv, _, pol = fixtures()
         for node in inv['nodes'].values():
@@ -507,6 +538,32 @@ class PlacementTests(unittest.TestCase):
             ledger.reconcile_job(job, operation_terminal=True, allocations_reconciled=True)
             self.assertEqual(ledger.active_reservations(), [])
             ledger.db.close()
+
+
+class PhysicalCpuReserveTests(unittest.TestCase):
+    def test_explicit_host_cores_override_fraction_before_overcommit(self):
+        _, inventory, _, policy = fixtures()
+        policy.update(cpu_reserve_fraction=.2, cpu_overcommit_ratio=3.5)
+        policy['nodes'] = {'n1': {'cpu_reserve_cores': 2}}
+        window = capacity_window(inventory['nodes']['n1'], policy, 'n1')
+        self.assertEqual(window['cpu_reserve_cores'], 2)
+        self.assertEqual(window['cpu_limit_cores'], 21)
+        self.assertEqual(window['cpu_cores'], 20)
+
+    def test_explicit_zero_reserves_no_cores(self):
+        _, inventory, _, policy = fixtures()
+        policy.update(cpu_reserve_fraction=.2, cpu_reserve_cores=0,
+                      cpu_overcommit_ratio=3.5)
+        window = capacity_window(inventory['nodes']['n2'], policy, 'n2')
+        self.assertEqual(window['cpu_reserve_cores'], 0)
+        self.assertEqual(window['cpu_limit_cores'], 28)
+
+    def test_invalid_absolute_reserve_is_rejected(self):
+        _, inventory, _, policy = fixtures()
+        for value in (-1, True, float('inf'), 9):
+            with self.subTest(value=value), self.assertRaises(PlacementError):
+                capacity_window(inventory['nodes']['n1'],
+                                {**policy, 'cpu_reserve_cores': value}, 'n1')
 
 
 if __name__ == '__main__':

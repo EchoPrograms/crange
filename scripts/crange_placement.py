@@ -43,12 +43,19 @@ def capacity_window(node, policy, node_name, storage=None, clone_mode='linked'):
     cpu = _number(node.get('cpu_cores'), 'physical CPU')
     memory_reserve = max(memory * settings.get('memory_reserve_fraction', .25),
                          settings.get('memory_reserve_mb', 4096))
-    cpu_limit = cpu * (1 - settings.get('cpu_reserve_fraction', .2)) * settings.get('cpu_overcommit_ratio', 1)
+    # An explicit core count overrides the percentage reserve, including zero.
+    # Reserve physical host cores before calculating guest overcommit capacity.
+    cpu_reserve = (_number(settings['cpu_reserve_cores'], 'cpu_reserve_cores')
+                   if 'cpu_reserve_cores' in settings
+                   else cpu * settings.get('cpu_reserve_fraction', .2))
+    if cpu_reserve > cpu:
+        raise PlacementError('cpu_reserve_cores exceeds physical CPU capacity')
+    cpu_limit = (cpu - cpu_reserve) * settings.get('cpu_overcommit_ratio', 1)
     memory_limit = memory * settings.get('memory_overcommit_ratio', 1) - memory_reserve
     observed_free = memory - memory_reserve - _number(node.get('observed_memory_mb'), 'observed memory')
     result = {'memory_limit_mb': memory_limit, 'cpu_limit_cores': cpu_limit,
               'memory_reserve_mb': memory_reserve,
-              'cpu_reserve_cores': cpu * settings.get('cpu_reserve_fraction', .2),
+              'cpu_reserve_cores': cpu_reserve,
               'memory_mb': min(memory_limit - _number(node.get('committed_memory_mb'), 'configured guest RAM'),
                                observed_free * settings.get('memory_overcommit_ratio', 1)),
               'cpu_cores': cpu_limit - _number(node.get('committed_cpu_cores'), 'configured guest CPU')}
@@ -77,7 +84,7 @@ def schedule_batch(requests, inventory, catalog, policy, reservations=(), now=No
         for key in ('memory_reserve_fraction', 'disk_reserve_fraction', 'cpu_reserve_fraction'):
             if key in config and not 0 <= _number(config[key], key) < 1:
                 raise PlacementError(f'{key}: fraction must be below one')
-        for key in ('memory_reserve_mb', 'disk_reserve_gb', 'cpu_overcommit_ratio',
+        for key in ('memory_reserve_mb', 'disk_reserve_gb', 'cpu_reserve_cores', 'cpu_overcommit_ratio',
                     'memory_overcommit_ratio', 'local_linked_disk_overcommit_ratio'):
             if key in config:
                 _number(config[key], key, 1 if key.endswith('overcommit_ratio') else 0)
@@ -180,10 +187,11 @@ def schedule_batch(requests, inventory, catalog, policy, reservations=(), now=No
                     raise PlacementError('required CPU/firmware capability unavailable')
                 networks = set(r.get('networks', []))
                 exact_networks = networks <= set(node.get('verified_networks', []))
+                bootstrap_intent = r.get('placement', {})
                 bootstrap_networks = (bootstrap and r.get('kind') == 'container'
                     and str(r.get('resource_key', '')).startswith('router:')
-                    and r.get('placement', {}).get('mode') == 'pin'
-                    and r.get('placement', {}).get('pinned_node') == name
+                    and (bootstrap_intent.get('mode') == 'auto' or
+                         (bootstrap_intent.get('mode') == 'pin' and bootstrap_intent.get('pinned_node') == name))
                     and networks <= set(node.get('bootstrap_planned_networks', [])))
                 if ((not networks <= set(node.get('networks', [])) and not bootstrap_networks)
                         or not (exact_networks or bootstrap_networks) or not node.get('management_verified')):
@@ -306,8 +314,13 @@ class ReservationLedger:
                 for allocation in allocations:
                     request = request_by_key[allocation['resource_key']]
                     expected_disk = request['disk_gb'] + request.get('copy_overhead_gb', request['disk_gb'] * policy.get('copy_overhead_fraction', .1))
+                    intent = request.get('placement', {})
+                    allocated_node = allocation.get('resolved', {}).get('node_name')
+                    placement_matches = (allocated_node in intent.get('allowed_nodes', [])
+                                         if intent.get('mode') == 'auto' else
+                                         allocated_node == intent.get('pinned_node'))
                     if (request.get('kind') != 'container' or request.get('image') != allocation.get('image')
-                            or allocation.get('resolved', {}).get('node_name') != request.get('placement', {}).get('pinned_node')
+                            or not placement_matches
                             or allocation.get('resources') != {'memory_mb': request['memory_mb'], 'cpu_cores': request['cpu_cores'], 'disk_gb': expected_disk}):
                         raise PlacementError('prior bootstrap review does not match the exact replacement request')
             placeholders = ','.join('?' for _ in replace_ids)
@@ -566,7 +579,7 @@ class ReservationLedger:
             return self.get_job(job_id)
         return [self.get_job(row[0]) for row in self.db.execute('SELECT job_id FROM jobs ORDER BY job_id').fetchall()]
 
-    def _revalidate(self, job_id, requests, inventory, catalog, policy, now, known_existing_allocations):
+    def _revalidate(self, job_id, requests, inventory, catalog, policy, now, known_existing_allocations, *, bootstrap=False):
         saved = self.validate_job(job_id, now)
         if any(a['policy_revision'] != policy.get('revision') for a in saved):
             raise PlacementError('placement policy changed; restage')
@@ -610,24 +623,28 @@ class ReservationLedger:
                 for field in ('memory_mb', 'cpu_cores', 'disk_gb'):
                     if field in usage:
                         usage[field] = max(0, usage[field] - actual.get(field, 0))
-        fresh = schedule_batch(list(original.values()), inventory, catalog, policy, self.active_reservations(exclude_job_id=job_id), now, known_existing_allocations)
+        if bootstrap and any(original.get(a.get('resource_key'), {}).get('kind') != 'container'
+                             or not str(a.get('resource_key','')).startswith('router:') for a in saved):
+            raise PlacementError('bootstrap revalidation is restricted to router containers')
+        fresh = schedule_batch(list(original.values()), inventory, catalog, policy,
+            self.active_reservations(exclude_job_id=job_id), now, known_existing_allocations, bootstrap=bootstrap)
         for a, b in zip(saved, fresh):
             if a['resolved'] != b['resolved'] or a['resources'] != b['resources']:
                 raise PlacementError('reviewed placement or resource request changed; restage')
         return saved
 
-    def revalidate_job(self, job_id, requests, inventory, catalog, policy, now=None, known_existing_allocations=()):
+    def revalidate_job(self, job_id, requests, inventory, catalog, policy, now=None, known_existing_allocations=(), *, bootstrap=False):
         """Recheck the exact reviewed placements under the reservation writer lock."""
         self.db.execute('BEGIN IMMEDIATE')
         try:
-            saved = self._revalidate(job_id, requests, inventory, catalog, policy, now, known_existing_allocations)
+            saved = self._revalidate(job_id, requests, inventory, catalog, policy, now, known_existing_allocations, bootstrap=bootstrap)
             self.db.execute('COMMIT')
             return saved
         except Exception:
             self.db.execute('ROLLBACK')
             raise
 
-    def mark_running(self, job_id, now=None, *, requests=None, inventory=None, catalog=None, policy=None, known_existing_allocations=()):
+    def mark_running(self, job_id, now=None, *, requests=None, inventory=None, catalog=None, policy=None, known_existing_allocations=(), bootstrap=False):
         """Optional capability inputs atomically revalidate and claim an operation."""
         self.db.execute('BEGIN IMMEDIATE')
         try:
@@ -639,7 +656,7 @@ class ReservationLedger:
             if any(x is not None for x in inputs):
                 if any(x is None for x in inputs):
                     raise PlacementError('all revalidation inputs required')
-                self._revalidate(job_id, requests, inventory, catalog, policy, now, known_existing_allocations)
+                self._revalidate(job_id, requests, inventory, catalog, policy, now, known_existing_allocations, bootstrap=bootstrap)
             self.db.execute("UPDATE jobs SET state='running', heartbeat=? WHERE job_id=?", (time.time() if now is None else now, job_id))
             self.db.execute('COMMIT')
         except Exception:
