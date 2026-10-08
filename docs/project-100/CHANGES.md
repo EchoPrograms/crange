@@ -25,3 +25,20 @@ gate. That evidence does not establish Project 100 network or release readiness.
 
 Agents append concise dated entries with changed files, jobs/results and any
 remaining blockers. Do not place secrets or fabricated verification here.
+
+## 2026-10-08 — capacity and image status
+
+- Configured absolute CPU reserves: two host cores each on Proxmox 1 and 5,
+  zero on the other nodes. Existing overcommit ratios and RAM/disk reserves
+  remain intact. The live policy revision is `mhl-cluster-cpu-reserve-20261008`.
+- Verified all eighteen actual templates contribute zero CPU/RAM commitments;
+  dashboard rows now separate configured image size from committed resources.
+  Active installer guests remain actual workloads until converted to templates.
+- Fixed archive observation to use checksum manifests and Proxmox storage
+  content, rather than a nonexistent guest VMID. Uncached locations are labelled
+  “Not cached”; deleted provenance locations remain explicit stale records.
+- Corrected Parrot source template 109's recorded storage to `crange-library`,
+  preserving its independently prepared local replica 111.
+- Capacity/bootstrap checks passed 49 tests, image snapshot checks passed five
+  tests, and the refreshed live snapshot confirms the requested reserves and
+  zero template commitments. No Project 100 deployment is claimed by these fixes.
