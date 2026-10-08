@@ -1,0 +1,47 @@
+---
+- name: Validate assigned build host
+  ansible.builtin.assert:
+    that:
+      - mhl_network_id | int in [1, 2, 3, 4, 5, 254]
+      - ansible_host == '10.100.' ~ (mhl_network_id | string) ~ '.50'
+      - mhl_ci_synthetic_token is defined
+      - mhl_ci_synthetic_token is match('^[A-Za-z0-9_-]{16,128}$')
+    fail_msg: Supply the synthetic exercise token through protected project vars.
+
+- name: Install build review utilities
+  ansible.builtin.apt:
+    name: [nginx, python3]
+    state: present
+    update_cache: true
+    cache_valid_time: 3600
+
+- name: Create warehouse build artifact directory
+  ansible.builtin.file:
+    path: /srv/mhl-ci/artifacts
+    state: directory
+    owner: root
+    group: www-data
+    mode: "0750"
+
+- name: Publish the synthetic warehouse troubleshooting bundle
+  ansible.builtin.template:
+    src: warehouse-release.env.j2
+    dest: /srv/mhl-ci/artifacts/warehouse-release.env
+    owner: root
+    group: www-data
+    mode: "0644"
+  no_log: true
+
+- name: Install build artifact read-only web location
+  ansible.builtin.file:
+    src: /srv/mhl-ci/artifacts
+    dest: /var/www/html/artifacts
+    state: link
+    owner: root
+    group: root
+
+- name: Enable nginx for artifact review
+  ansible.builtin.service:
+    name: nginx
+    enabled: true
+    state: started

@@ -1,0 +1,6 @@
+---
+- name: Restart MHL portal
+  ansible.builtin.systemd:
+    name: mhl-portal.service
+    state: restarted
+    daemon_reload: true

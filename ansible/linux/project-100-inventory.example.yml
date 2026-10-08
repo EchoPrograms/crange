@@ -1,0 +1,43 @@
+---
+all:
+  children:
+    mhl_databases:
+      hosts:
+        MHL-T0-DB01: { ansible_host: 10.100.254.30, mhl_network_id: 254, mhl_guest_hostname: MHL-DB01 }
+        MHL-T1-DB01: { ansible_host: 10.100.1.30, mhl_network_id: 1, mhl_guest_hostname: MHL-DB01 }
+        MHL-T2-DB01: { ansible_host: 10.100.2.30, mhl_network_id: 2, mhl_guest_hostname: MHL-DB01 }
+        MHL-T3-DB01: { ansible_host: 10.100.3.30, mhl_network_id: 3, mhl_guest_hostname: MHL-DB01 }
+        MHL-T4-DB01: { ansible_host: 10.100.4.30, mhl_network_id: 4, mhl_guest_hostname: MHL-DB01 }
+        MHL-T5-DB01: { ansible_host: 10.100.5.30, mhl_network_id: 5, mhl_guest_hostname: MHL-DB01 }
+    mhl_applications:
+      hosts:
+        MHL-T0-APP01: { ansible_host: 10.100.254.40, mhl_network_id: 254, mhl_guest_hostname: MHL-APP01 }
+        MHL-T1-APP01: { ansible_host: 10.100.1.40, mhl_network_id: 1, mhl_guest_hostname: MHL-APP01 }
+        MHL-T2-APP01: { ansible_host: 10.100.2.40, mhl_network_id: 2, mhl_guest_hostname: MHL-APP01 }
+        MHL-T3-APP01: { ansible_host: 10.100.3.40, mhl_network_id: 3, mhl_guest_hostname: MHL-APP01 }
+        MHL-T4-APP01: { ansible_host: 10.100.4.40, mhl_network_id: 4, mhl_guest_hostname: MHL-APP01 }
+        MHL-T5-APP01: { ansible_host: 10.100.5.40, mhl_network_id: 5, mhl_guest_hostname: MHL-APP01 }
+    mhl_build:
+      hosts:
+        MHL-T0-CI01: { ansible_host: 10.100.254.50, mhl_network_id: 254, mhl_guest_hostname: MHL-CI01 }
+        MHL-T1-CI01: { ansible_host: 10.100.1.50, mhl_network_id: 1, mhl_guest_hostname: MHL-CI01 }
+        MHL-T2-CI01: { ansible_host: 10.100.2.50, mhl_network_id: 2, mhl_guest_hostname: MHL-CI01 }
+        MHL-T3-CI01: { ansible_host: 10.100.3.50, mhl_network_id: 3, mhl_guest_hostname: MHL-CI01 }
+        MHL-T4-CI01: { ansible_host: 10.100.4.50, mhl_network_id: 4, mhl_guest_hostname: MHL-CI01 }
+        MHL-T5-CI01: { ansible_host: 10.100.5.50, mhl_network_id: 5, mhl_guest_hostname: MHL-CI01 }
+    mhl_backups:
+      hosts:
+        MHL-T0-BKP01: { ansible_host: 10.100.254.60, mhl_network_id: 254, mhl_guest_hostname: MHL-BKP01 }
+        MHL-T1-BKP01: { ansible_host: 10.100.1.60, mhl_network_id: 1, mhl_guest_hostname: MHL-BKP01 }
+        MHL-T2-BKP01: { ansible_host: 10.100.2.60, mhl_network_id: 2, mhl_guest_hostname: MHL-BKP01 }
+        MHL-T3-BKP01: { ansible_host: 10.100.3.60, mhl_network_id: 3, mhl_guest_hostname: MHL-BKP01 }
+        MHL-T4-BKP01: { ansible_host: 10.100.4.60, mhl_network_id: 4, mhl_guest_hostname: MHL-BKP01 }
+        MHL-T5-BKP01: { ansible_host: 10.100.5.60, mhl_network_id: 5, mhl_guest_hostname: MHL-BKP01 }
+  vars:
+    ansible_user: root
+    mhl_domain: mhl.test
+    mhl_db_ip: 10.100.{{ mhl_network_id }}.30
+    mhl_app_ip: 10.100.{{ mhl_network_id }}.40
+    mhl_customer_records:
+      - { id: 4101, name: Northwind Cold Storage }
+      - { id: 4102, name: Cedar Freight Cooperative }

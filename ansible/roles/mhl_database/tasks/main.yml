@@ -1,0 +1,70 @@
+---
+- name: Validate assigned database address
+  ansible.builtin.assert:
+    that:
+      - mhl_network_id | int in [1, 2, 3, 4, 5, 254]
+      - ansible_host == '10.100.' ~ (mhl_network_id | string) ~ '.30'
+      - mhl_db_runtime_password is defined
+      - mhl_db_runtime_password is match('^[A-Za-z0-9_-]{20,128}$')
+    fail_msg: Define the database password through the protected project vars file.
+
+- name: Install PostgreSQL and Python driver
+  ansible.builtin.apt:
+    name: [postgresql, python3-psycopg2]
+    state: present
+    update_cache: true
+    cache_valid_time: 3600
+
+- name: Set PostgreSQL to listen on the team LAN
+  ansible.builtin.lineinfile:
+    path: /etc/postgresql/15/main/postgresql.conf
+    regexp: '^#?listen_addresses\s*='
+    line: "listen_addresses = '{{ mhl_db_ip }}'"
+  notify: Restart PostgreSQL
+
+- name: Permit only the matching application host to connect
+  ansible.builtin.lineinfile:
+    path: /etc/postgresql/15/main/pg_hba.conf
+    insertafter: '^# IPv4 local connections:'
+    line: "host    mhl_ops    mhl_runtime    {{ mhl_app_ip }}/32    scram-sha-256"
+    state: present
+  notify: Restart PostgreSQL
+
+- name: Ensure PostgreSQL is enabled and running
+  ansible.builtin.service:
+    name: postgresql
+    enabled: true
+    state: started
+
+- name: Create runtime database role with deliberately excessive CREATEDB privilege
+  community.postgresql.postgresql_user:
+    name: mhl_runtime
+    password: "{{ mhl_db_runtime_password }}"
+    role_attr_flags: LOGIN,CREATEDB
+    state: present
+  become_user: postgres
+  no_log: true
+
+- name: Create the MHL operations database
+  community.postgresql.postgresql_db:
+    name: mhl_ops
+    owner: mhl_runtime
+    state: present
+  become_user: postgres
+
+- name: Install idempotent synthetic shipment schema
+  ansible.builtin.copy:
+    src: schema.sql
+    dest: /usr/local/share/mhl-schema.sql
+    owner: root
+    group: root
+    mode: "0644"
+
+- name: Load synthetic shipment records
+  community.postgresql.postgresql_script:
+    db: mhl_ops
+    path: /usr/local/share/mhl-schema.sql
+  become_user: postgres
+
+- name: Apply pending PostgreSQL restart
+  ansible.builtin.meta: flush_handlers

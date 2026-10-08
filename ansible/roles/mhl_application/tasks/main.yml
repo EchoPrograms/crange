@@ -1,0 +1,70 @@
+---
+- name: Validate application network and protected database secret
+  ansible.builtin.assert:
+    that:
+      - mhl_network_id | int in [1, 2, 3, 4, 5, 254]
+      - ansible_host == '10.100.' ~ (mhl_network_id | string) ~ '.40'
+      - mhl_db_runtime_password is defined
+      - mhl_db_runtime_password is match('^[A-Za-z0-9_-]{20,128}$')
+    fail_msg: Define the database password through the protected project vars file.
+
+- name: Install Python application runtime and PostgreSQL driver
+  ansible.builtin.apt:
+    name: [python3, python3-psycopg2]
+    state: present
+    update_cache: true
+    cache_valid_time: 3600
+
+- name: Create restricted application account
+  ansible.builtin.user:
+    name: mhl-portal
+    system: true
+    shell: /usr/sbin/nologin
+    home: /var/lib/mhl-portal
+    create_home: true
+
+- name: Create portal application directory
+  ansible.builtin.file:
+    path: /opt/mhl-portal
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+
+- name: Install MHL shipment portal
+  ansible.builtin.copy:
+    src: portal.py
+    dest: /opt/mhl-portal/portal.py
+    owner: root
+    group: root
+    mode: "0644"
+  notify: Restart MHL portal
+
+- name: Install protected portal database settings
+  ansible.builtin.template:
+    src: portal.env.j2
+    dest: /etc/mhl-portal.env
+    owner: root
+    group: root
+    mode: "0600"
+  no_log: true
+  notify: Restart MHL portal
+
+- name: Install MHL portal systemd unit
+  ansible.builtin.template:
+    src: mhl-portal.service.j2
+    dest: /etc/systemd/system/mhl-portal.service
+    owner: root
+    group: root
+    mode: "0644"
+  notify: Restart MHL portal
+
+- name: Enable portal service
+  ansible.builtin.systemd:
+    name: mhl-portal.service
+    enabled: true
+    state: started
+    daemon_reload: true
+
+- name: Apply pending portal restart
+  ansible.builtin.meta: flush_handlers

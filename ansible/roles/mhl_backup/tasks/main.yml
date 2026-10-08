@@ -1,0 +1,29 @@
+---
+- name: Validate assigned backup host
+  ansible.builtin.assert:
+    that:
+      - mhl_network_id | int in [1, 2, 3, 4, 5, 254]
+      - ansible_host == '10.100.' ~ (mhl_network_id | string) ~ '.60'
+
+- name: Install backup/report tools
+  ansible.builtin.apt:
+    name: [rsync, python3]
+    state: present
+    update_cache: true
+    cache_valid_time: 3600
+
+- name: Create report archive location
+  ansible.builtin.file:
+    path: /srv/mhl-backups/reports
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+
+- name: Publish synthetic quarterly dispatch export
+  ansible.builtin.copy:
+    src: dispatch-q3.csv
+    dest: /srv/mhl-backups/reports/dispatch-q3.csv
+    owner: root
+    group: root
+    mode: "0644"

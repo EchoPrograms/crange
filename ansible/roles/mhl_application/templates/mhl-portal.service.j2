@@ -1,0 +1,20 @@
+[Unit]
+Description=Meridian Harbor Logistics shipment portal
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=mhl-portal
+Group=mhl-portal
+EnvironmentFile=/etc/mhl-portal.env
+ExecStart=/usr/bin/python3 /opt/mhl-portal/portal.py
+Restart=on-failure
+RestartSec=3
+NoNewPrivileges=true
+ProtectSystem=full
+ProtectHome=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,28 @@
+---
+- name: Configure Meridian Harbor Logistics database hosts
+  hosts: mhl_databases
+  become: true
+  gather_facts: true
+  roles:
+    - mhl_database
+
+- name: Configure Meridian Harbor Logistics application hosts
+  hosts: mhl_applications
+  become: true
+  gather_facts: true
+  roles:
+    - mhl_application
+
+- name: Configure Meridian Harbor Logistics build hosts
+  hosts: mhl_build
+  become: true
+  gather_facts: true
+  roles:
+    - mhl_build
+
+- name: Configure Meridian Harbor Logistics backup hosts
+  hosts: mhl_backups
+  become: true
+  gather_facts: true
+  roles:
+    - mhl_backup

@@ -1,0 +1,4 @@
+shipment_id,customer,route,status,contact,dispatch_note
+61001,Northwind Cold Storage,Duluth-MN,delayed,dispatch.northwind@mhl.test,Refrigeration sensor reported intermittent restart
+61002,Cedar Freight Cooperative,Madison-WI,in_transit,dispatch.cedar@mhl.test,Warehouse handoff scheduled after 18:00
+61003,Northwind Cold Storage,Green-Bay-WI,delivered,receiving.northwind@mhl.test,Signed at receiving dock
