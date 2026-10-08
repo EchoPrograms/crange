@@ -59,3 +59,25 @@ remaining blockers. Do not place secrets or fabricated verification here.
 - Windows build VM 115 now reports Server 2025 Standard Evaluation in a workgroup,
   with QEMU Guest Agent, RDP, WinRM and its serial driver healthy. It is not yet a
   generalized, clone-verified published Windows image.
+
+## Windows and Linux scenario implementation
+
+- Windows scenario playbooks committed as `73cbf82`: independent-team AD
+  configuration, per-guest local Administrator rotation, employee/service
+  identities and an overbroad Warehouse Deployment GPO delegation/link.
+  Fifteen focused offline tests passed. The sealed source evidence records
+  cleared MachineGuid and successful Sysprep shutdown alongside EFI warnings;
+  fresh-clone boot and identity acceptance remain unverified.
+- Linux roles committed as `1f5981c`: PostgreSQL shipment records, customer
+  portal/report endpoints, synthetic CI artifacts and backup exports for
+  staging and teams 1–5. Ten focused offline tests passed, including encoded
+  query handling and service health failures. Fake database tests do not prove
+  actual PostgreSQL permissions, deployment or cross-team isolation.
+- Integration review found hard-coded PostgreSQL version paths and missing
+  runtime SELECT permission on seeded tables. Corrections are in progress;
+  review also requires a PostgreSQL Decimal response regression.
+- Proxmox 2 is offline, affecting the project router and two team routers.
+  NFS storage status was confirmed active after allowing its measured
+  approximately 10.6-second response instead of expiring checks at 8 seconds.
+- Windows clone launch is pending deployment of tested capture/identity code
+  to the controller; no clone job was reported running at this checkpoint.
