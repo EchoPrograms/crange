@@ -1,8 +1,30 @@
 {
   "approved-base": {
-    "template_id": 112,
-    "template_node": "proxmox4",
-    "display_name": "ParrotOS-Jumpbox"
+    "template_id": 111,
+    "template_node": "proxmox1",
+    "display_name": "ParrotOS-Jumpbox",
+    "image_id": "parrot-jumpbox-20261007-v1",
+    "image_artifact_sha256": "12c824df8c41405983e6e30d2027f319d8a6bfc9cad35b783b2c859943a773f3",
+    "source_config_sha256": "84000576526f174a6b0c01753032b299a5f0e84b15c3b44afb01f627b5d06ecf",
+    "replica_datastore": "local-lvm",
+    "replica_clone_modes": [
+      "linked"
+    ],
+    "profile": {
+      "scsi_hardware": "virtio-scsi-single",
+      "os_type": "l26",
+      "cpu_type": "x86-64-v2-AES",
+      "agent_enabled": true,
+      "cloud_init": false,
+      "boot_order": [
+        "scsi0",
+        "ide2",
+        "net0"
+      ],
+      "network_models": [
+        "virtio"
+      ]
+    }
   },
   "debian-13": {
     "display_name": "Debian13-VM",
@@ -29,5 +51,32 @@
     },
     "template_id": 3014,
     "template_node": "proxmox4"
+  },
+  "parrot-jumpbox-20261007-v1": {
+    "template_id": 111,
+    "template_node": "proxmox1",
+    "display_name": "ParrotOS-Jumpbox",
+    "image_id": "parrot-jumpbox-20261007-v1",
+    "image_artifact_sha256": "12c824df8c41405983e6e30d2027f319d8a6bfc9cad35b783b2c859943a773f3",
+    "source_config_sha256": "84000576526f174a6b0c01753032b299a5f0e84b15c3b44afb01f627b5d06ecf",
+    "replica_datastore": "local-lvm",
+    "replica_clone_modes": [
+      "linked"
+    ],
+    "profile": {
+      "scsi_hardware": "virtio-scsi-single",
+      "os_type": "l26",
+      "cpu_type": "x86-64-v2-AES",
+      "agent_enabled": true,
+      "cloud_init": false,
+      "boot_order": [
+        "scsi0",
+        "ide2",
+        "net0"
+      ],
+      "network_models": [
+        "virtio"
+      ]
+    }
   }
 }

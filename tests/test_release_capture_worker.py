@@ -27,8 +27,7 @@ class CaptureTests(unittest.TestCase):
             def request(self, method, path, fields=None):
                 outer.events.append((method, path, fields))
                 if path.endswith('/status'):
-                    return {'active': 1, 'content': 'backup', 'total': 100 * 1024**3, 'avail': 90 * 1024**3}
-                if path == '/storage/archive': return {'shared': 1}
+                    return {'active': 1, 'shared': 1, 'content': 'backup', 'total': 100 * 1024**3, 'avail': 90 * 1024**3}
                 if path == '/cluster/nextid': return 201
                 if path == '/pools/crange-probes':
                     return {'members': [{'node': 'proxmox4', 'type': 'qemu', 'vmid': 201}]}
@@ -79,6 +78,8 @@ class CaptureTests(unittest.TestCase):
         clone = next(i for i, e in enumerate(self.events) if e[0] == 'POST' and e[1].endswith('/clone'))
         self.assertLess(reserve, clone)
         self.assertEqual(self.events[clone][2]['pool'], 'crange-probes')
+        self.assertIn(('GET', '/nodes/proxmox4/storage/archive/status', None), self.events)
+        self.assertFalse(any(event[1] == '/storage/archive' for event in self.events if len(event) > 1))
         self.assertIn(('identity', True), self.events)
         self.assertIn(('export', False, 1), self.events)
         self.assertEqual(evidence['probe_job'], 'capture-p003-abc-probe')

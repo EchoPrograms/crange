@@ -3,10 +3,11 @@ import copy
 import pathlib
 import struct
 import sys
+import tempfile
 import unittest
 from unittest.mock import Mock, call
 sys.path.insert(0,str(pathlib.Path(__file__).resolve().parents[1]/'scripts'))
-from crange_distribution import capture_source_identity, export_image, DistributionError, _source_config_identity
+from crange_distribution import capture_source_identity, export_image, DistributionError, _source_config_identity, FileJournal
 from crange_catalog import validate_source_identity, CatalogError
 
 KEY='ssh-ed25519 '+base64.b64encode(struct.pack('>I',11)+b'ssh-ed25519'+struct.pack('>I',32)+b'a'*32).decode()
@@ -25,6 +26,16 @@ class CaptureTests(unittest.TestCase):
         other = {**after, 'unused0': 'local-lvm:base-8831-disk-0,size=20G'}
         self.assertNotEqual(_source_config_identity(before, 8830),
                             _source_config_identity(other, 8830))
+        nfs_before = {'scsi0': 'crange-library:109/vm-109-disk-0.raw,iothread=1,size=32G',
+                      'memory': 6000, 'net0': 'virtio=AA:BB,bridge=crprobe1450,link_down=1'}
+        nfs_after = {**nfs_before, 'template': 1,
+                     'scsi0': 'crange-library:109/base-109-disk-0.raw,iothread=1,size=32G'}
+        self.assertEqual(_source_config_identity(nfs_before, 109),
+                         _source_config_identity(nfs_after, 109))
+        wrong_directory = {**nfs_after,
+                           'scsi0': 'crange-library:108/base-109-disk-0.raw,iothread=1,size=32G'}
+        self.assertNotEqual(_source_config_identity(nfs_before, 109),
+                            _source_config_identity(wrong_directory, 109))
 
     def fixture(self,kind='container'):
         config={'tags':'crange-image','memory':512,'cores':1,'rootfs':'local-lvm:vm-100-disk-0,size=8G'}
@@ -127,6 +138,37 @@ class CaptureTests(unittest.TestCase):
         self.assertEqual(exported['source_identity'],record['source_identity'])
         self.assertEqual(exported['identity_capture'],record)
         self.assertEqual(exported['init_system'],'openrc')
+
+    def test_resume_export_hashes_only_archive_named_by_confirmed_terminal_task(self):
+        api,config,execute=self.fixture()
+        config['unprivileged']='1'
+        record=capture_source_identity(api,node='proxmox2',kind='container',vmid=100,job_id='capture-1',journal=Mock(),ct_exec=execute)
+        config['template']=1
+        upid='UPID:proxmox2:1:1:1:vzdump:100:root:'
+        with tempfile.TemporaryDirectory() as tmp:
+            journal=FileJournal(pathlib.Path(tmp))
+            prior={'job_id':'export-resume','node':'proxmox2','kind':'container','source_id':100,
+                'storage':'library','state':'exporting','disk_gb':8.0,'source_identity':record['source_identity'],
+                'identity_capture':record,'init_system':'systemd','memory_mb':512,'cpu_cores':1,'upid':upid}
+            journal(prior)
+            def request(method,path,fields=None):
+                if path.endswith('/config'): return copy.deepcopy(config)
+                if path.endswith('/status/current'): return {'status':'stopped'}
+                if path.endswith('/status'): return {'status':'stopped','exitstatus':'OK'}
+                if path.endswith('/log'): return [
+                    {'t':"INFO: creating vzdump archive '/mnt/pve/library/dump/vzdump-lxc-100-2026_10_07-21_07_48.vma.zst'"},
+                    {'t':'TASK OK'}]
+                raise AssertionError(f'unexpected request {method} {path}')
+            api.request.side_effect=request
+            hasher=Mock(return_value='b'*64)
+            exported=export_image(api,node='proxmox2',kind='container',vmid=100,storage='library',
+                job_id='export-resume',journal=journal,hash_volume=hasher,
+                approved_backup_storage=[('proxmox2','library')],identity_record=record)
+            self.assertEqual(exported['volume_id'],'library:backup/vzdump-lxc-100-2026_10_07-21_07_48.vma.zst')
+            self.assertEqual(exported['artifact_sha256'],'b'*64)
+            self.assertTrue(exported['recovered_from_terminal_task'])
+            hasher.assert_called_once_with('proxmox2',exported['volume_id'])
+            self.assertFalse(any(call.args[1].endswith('/vzdump') for call in api.request.call_args_list))
 
     def test_source_public_key_and_machine_id_are_validated(self):
         validate_source_identity({'machine_id':'a'*32,'ssh_host_key':KEY})

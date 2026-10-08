@@ -17,6 +17,7 @@ import os
 import tempfile
 import re
 import stat
+import urllib.parse
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -438,7 +439,7 @@ class SourceProbeWorker:
                 record.get('source_config_sha256') != capture.get('source_config_sha256') or
                 record.get('source_capture_job_id') != capture.get('job_id') or
                 record.get('image_id') != source_ref or record.get('datastore_id') != datastore_id or
-                record.get('reservation') != reservation or record.get('provider_tasks') or
+                record.get('reservation') != reservation or
                 not re.fullmatch(r'UPID:[^:]+:[0-9A-F]+:[0-9A-F]+:[0-9A-F]+:[^:]+:[^:]+:[^:]*:',
                                  str(task_upid), re.IGNORECASE)):
             raise DistributionError('Existing source-probe journal does not match the exact task and reservation.')
@@ -474,9 +475,17 @@ class SourceProbeWorker:
                 not re.search(r'(?:^|,)bridge=' + re.escape(self.verify.bridge) + r'(?:,|$)', str(value)) or
                 'link_down=1' not in str(value) for value in networks):
             raise DistributionError('Existing source-probe guest is not fully disconnected on the approved bridge.')
-        record.setdefault('provider_tasks', []).append(
-            {'path': base + '/clone', 'upid': task_upid, 'state': 'running'})
-        self.journal(dict(record))
+        recorded_tasks = record.setdefault('provider_tasks', [])
+        clone_task = {'path': base + '/clone', 'upid': task_upid, 'state': 'running'}
+        if recorded_tasks:
+            if (len(recorded_tasks) != 1 or
+                    any(recorded_tasks[0].get(key) != value for key, value in clone_task.items()
+                        if key != 'state') or
+                    recorded_tasks[0].get('state') not in ('running', 'confirmed-terminal')):
+                raise DistributionError('Existing source-probe provider task is outside the exact clone-resume scope.')
+        else:
+            recorded_tasks.append(clone_task)
+            self.journal(dict(record))
         self.api.task(source_node, task_upid, timeout=1800)
         record['provider_tasks'][-1]['state'] = 'confirmed-terminal'
         self.journal(dict(record))
@@ -805,13 +814,19 @@ def _source_config_identity(config, vmid):
     # PVE changes these metadata fields when stopping/converting to a template.
     stable = {key: value for key, value in config.items() if key not in {'template', 'lock', 'digest'}}
     # Template conversion renames only this VM's disk volume prefix from
-    # vm-<id>-disk-N to base-<id>-disk-N. Normalize that exact volume identity;
-    # datastore, disk number, size/options, and every other config field remain
-    # part of the fingerprint.
-    volume = re.compile(rf'(?P<storage>[A-Za-z0-9_.-]+:)(?:vm|base)-{int(vmid)}-disk-(?P<number>[0-9]+)(?=,|$)')
+    # vm-<id>-disk-N to base-<id>-disk-N. File-backed datastores include the
+    # VMID directory and format suffix (for example 109/base-109-disk-0.raw);
+    # normalize those exact paths too while preserving datastore, directory,
+    # disk number, format, size/options, and every other config field.
+    volume = re.compile(
+        rf'(?P<storage>[A-Za-z0-9_.-]+:)(?P<directory>{int(vmid)}/)?'
+        rf'(?:vm|base)-{int(vmid)}-disk-(?P<number>[0-9]+)'
+        r'(?P<format>\.(?:raw|qcow2|vmdk))?(?=,|$)')
     for key, value in stable.items():
         if isinstance(value, str):
-            stable[key] = volume.sub(lambda match: f'{match["storage"]}vm-{int(vmid)}-disk-{match["number"]}', value)
+            stable[key] = volume.sub(
+                lambda match: f'{match["storage"]}{match["directory"] or ""}'
+                f'vm-{int(vmid)}-disk-{match["number"]}{match["format"] or ""}', value)
     return hashlib.sha256(json.dumps(stable, sort_keys=True, separators=(',', ':')).encode()).hexdigest()
 
 
@@ -921,9 +936,74 @@ def export_image(api, *, node, kind, vmid, storage, job_id, journal,
         raise DistributionError('Matching worker-captured source identity is required before export.')
     validate_source_identity(identity_record.get('source_identity'))
     content_path = f'/nodes/{node}/storage/{storage}/content'
+    journal_dir = getattr(journal, 'directory', None)
+    if not isinstance(journal_dir, (str, Path)):
+        journal_dir = None
+    elif isinstance(journal_dir, str):
+        journal_dir = Path(journal_dir)
+    prior_path = journal_dir / f'{job_id}.json' if journal_dir is not None else None
+    if prior_path is not None and prior_path.exists():
+        prior = json.loads(prior_path.read_text())
+        expected = {
+            'job_id': job_id, 'node': node, 'kind': kind, 'source_id': vmid,
+            'storage': storage, 'disk_gb': disk_gb,
+            'source_identity': dict(identity_record['source_identity']),
+            'identity_capture': dict(identity_record),
+            'init_system': identity_record['init_system'],
+            'memory_mb': int(config.get('memory', 0)),
+            'cpu_cores': int(config.get('cores', 0)),
+        }
+        if any(prior.get(key) != value for key, value in expected.items()):
+            raise DistributionError('Existing export journal does not match this exact captured template.')
+        if prior.get('state') == 'exported':
+            digest = hash_volume(node, prior.get('volume_id', ''))
+            if digest != prior.get('artifact_sha256'):
+                raise DistributionError('Previously exported archive checksum changed; retain journal for review.')
+            return prior
+        if prior.get('state') == 'exporting' and prior.get('upid'):
+            # Recovery after a worker interruption is bound to the already
+            # submitted backup task. Never submit a second vzdump for this job.
+            status = api.request('GET', f'/nodes/{node}/tasks/{urllib.parse.quote(prior["upid"], safe="")}/status')
+            if status.get('status') != 'stopped' or status.get('exitstatus') != 'OK':
+                raise DistributionError('Prior export task is not confirmed successful; retain it for reconciliation.')
+            log_path = f'/nodes/{node}/tasks/{urllib.parse.quote(prior["upid"], safe="")}/log'
+            log_rows = []
+            for offset in range(0, 10000, 50):
+                page = api.request('GET', log_path, {'start': offset, 'limit': 50})
+                if not isinstance(page, list):
+                    raise DistributionError('Export task log has an invalid response; retain journal for review.')
+                log_rows.extend(page)
+                if len(page) < 50:
+                    break
+            else:
+                raise DistributionError('Export task log exceeded the fixed recovery limit.')
+            lines = [str(row.get('t', '')) for row in log_rows if isinstance(row, dict)]
+            archive_paths = set()
+            expected_prefix = f'/mnt/pve/{storage}/dump/'
+            for line in lines:
+                match = re.search(r"creating vzdump archive '([^']+)'", line)
+                if match and match.group(1).startswith(expected_prefix):
+                    archive_paths.add(match.group(1))
+            if len(archive_paths) != 1 or not any(line.strip() == 'TASK OK' for line in lines):
+                raise DistributionError('Successful export task log does not identify exactly one completed archive.')
+            archive_path = archive_paths.pop()
+            filename = archive_path[len(expected_prefix):]
+            if not re.fullmatch(rf'vzdump-{"qemu" if kind == "vm" else "lxc"}-{int(vmid)}-[0-9_-]{{10,24}}\.vma\.zst', filename):
+                raise DistributionError('Export task archive name does not match the exact source guest.')
+            volume_id = f'{storage}:backup/{filename}'
+            digest = hash_volume(node, volume_id)
+            if not re.fullmatch(r'[a-f0-9]{64}', str(digest)):
+                raise DistributionError('Recovered archive transport returned no valid checksum.')
+            prior.update(state='exported', volume_id=volume_id, artifact_sha256=digest,
+                         verified=True, complete_capture=True,
+                         recovered_from_terminal_task=True)
+            journal(prior)
+            return prior
+        raise DistributionError('Existing export journal is not resumable; retain it for reconciliation.')
     before = {item['volid'] for item in api.request('GET', content_path)}
     record = dict(job_id=job_id, node=node, kind=kind, source_id=vmid,
                   storage=storage, state='exporting', disk_gb=disk_gb,
+                  content_before=sorted(before),
                   source_identity=dict(identity_record['source_identity']), identity_capture=dict(identity_record),
                   init_system=identity_record['init_system'],
                   memory_mb=int(config.get('memory', 0)), cpu_cores=int(config.get('cores', 0)))

@@ -414,13 +414,16 @@ class ReplicaTests(unittest.TestCase):
                            'artifact_sha256': capture['source_config_sha256']}
             job = 'resume-1'
             journal = FileJournal(Path(directory))
+            clone_upid='UPID:proxmox1:00000004:00000004:00000004:qmclone:20000:root@pam:'
             journal({'job_id': job, 'image_id': 'source:proxmox1:qemu:8830',
                 'node': 'proxmox1', 'source_node': 'proxmox1', 'source_id': 8830,
                 'source_config_sha256': capture['source_config_sha256'],
                 'source_capture_job_id': capture['job_id'], 'datastore_id': 'local-lvm',
                 'state': 'allocated', 'kind': 'vm', 'probe_id': 20000,
                 'probe_pool': 'crange-probes', 'probe_marker': f'crange-job-{job}',
-                'reservation': reservation})
+                'reservation': reservation,
+                'provider_tasks': [{'path': '/nodes/proxmox1/qemu/8830/clone',
+                                    'upid': clone_upid, 'state': 'running'}]})
             result = {'passed': True, 'identity_unique': True,
                       'evidence': {'isolated_bridge': 'crprobe1450'}}
             verify = Mock(return_value=result)
@@ -429,8 +432,9 @@ class ReplicaTests(unittest.TestCase):
             completed = worker.resume(source_node='proxmox1', source_id=8830,
                 datastore_id='local-lvm', job_id=job, capture=capture,
                 reservation=reservation,
-                task_upid='UPID:proxmox1:00000004:00000004:00000004:qmclone:20000:root@pam:')
+                task_upid=clone_upid)
             self.assertEqual(completed['state'], 'source-probed')
+            self.assertEqual(len(completed['provider_tasks']), 2)
             self.assertEqual(completed['provider_tasks'][0]['state'], 'confirmed-terminal')
             api.request.assert_any_call('DELETE', '/nodes/proxmox1/qemu/20000', {'purge': 1})
 
