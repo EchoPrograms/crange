@@ -3,7 +3,7 @@
   "name": "CRANGE interface",
   "namespace": "crange-theme",
   "css": ["theme.css"],
-  "js": ["ui.js"],
+  "js": ["native-inventory.js", "ui.js"],
   "resources": {
     "assets/remote-access.svg": "image/svg+xml"
   },

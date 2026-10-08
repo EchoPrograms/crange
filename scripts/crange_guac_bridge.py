@@ -64,11 +64,16 @@ def verify(raw: bytes, headers, peer: str, *, key_file=None, now=None):
         raise BridgeError('Invalid Guacamole bridge JSON.') from exc
     identity = document.get('identity') if isinstance(document, dict) else None
     request = document.get('request') if isinstance(document, dict) else None
+    data_source = document.get('dataSource') if isinstance(document, dict) else None
     if not isinstance(identity, dict) or not isinstance(request, dict):
         raise BridgeError('Invalid Guacamole bridge request.')
     username = identity.get('username')
     if not isinstance(username, str) or not re.fullmatch(r'[A-Za-z0-9][A-Za-z0-9_.@-]{0,95}', username):
         raise BridgeError('Invalid Guacamole identity.')
+    if not isinstance(data_source, str) or not re.fullmatch(r'[A-Za-z0-9_-]{1,64}', data_source):
+        raise BridgeError('Invalid Guacamole data source.')
+    request = dict(request)
+    request['_authenticated_data_source'] = data_source
     return username, request
 
 
@@ -194,6 +199,15 @@ def handle(username: str, request: dict, *, auth, jobs, root: Path, rows_provide
                 box['job'] = {'id': job['id'], 'action': options['action'] if options['action'] in ('start','shutdown','stop','restart') else 'snapshot-' + options['action'],
                               'status': job['status'], 'output': job['output']}
         return 200, {'boxes': rows}
+
+    if operation == 'native-inventory':
+        from crange_guac_ticket import request_broker
+        result = request_broker({'operation': 'guac-native-inventory', 'username': username,
+                                 'data_source': request.get('_authenticated_data_source')})
+        connections = result.get('connections')
+        if not isinstance(connections, list):
+            raise BridgeError('Guacamole returned an invalid connection inventory.')
+        return 200, {'connections': connections}
 
     project = request.get('project')
     key = request.get('resource_key')

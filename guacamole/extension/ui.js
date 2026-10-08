@@ -47,7 +47,9 @@
                 '  <div class="cr-list-toolbar"><label class="cr-search-label" for="cr-box-search">Search servers</label><input id="cr-box-search" type="search" ng-model="search" placeholder="Name, IP, team, or project"></div>',
                 '  <p class="cr-error" ng-if="error" role="alert">{{error}}</p>',
                 '  <p class="cr-empty" ng-if="loading">Loading servers…</p>',
-                '  <p class="cr-empty" ng-if="!loading && !filteredBoxes().length && !error">{{search ? "No servers match your search." : "No deployed servers are assigned to this account. Deploy project boxes and apply their remote access in CRANGE to make them available here."}}</p>',
+        '  <p class="cr-empty" ng-if="nativeInventoryLoading">Verifying native connections…</p>',
+        '  <p class="cr-error" ng-if="nativeInventoryError" role="alert">{{nativeInventoryError}}</p>',
+        '  <p class="cr-empty" ng-if="!loading && !nativeInventoryLoading && !nativeInventoryError && !filteredBoxes().length && !error">{{search ? "No servers match your search." : "No deployed or verified servers are assigned to this account. Apply project remote access or connect a native entry to a live guest."}}</p>',
                 '  <section class="cr-project-group" ng-repeat="project in projectGroups track by project.id" ng-if="filteredBoxes(project).length">',
                 '    <h2 class="cr-project-heading" ng-if="!cr.selectedProject">{{project.label}}</h2>',
                 '  <section class="cr-team-group" ng-repeat="group in project.teams track by group.id" ng-if="filteredBoxes(group).length">',
@@ -125,14 +127,48 @@
                     var data = error && error.data;
                     return (data && (data.message || data.error)) || (error && error.statusText) || 'Request failed';
                 }
-                var nativeParameters = Object.create(null);
+                var nativeInventory = null;
+                var nativeInventoryRequest = null;
+                var destroyed = false;
+                scope.nativeInventoryLoading = true;
+                scope.nativeInventoryError = '';
+                function refreshNativeInventory() {
+                    if (nativeInventoryRequest) return nativeInventoryRequest;
+                    scope.nativeInventoryLoading = true;
+                    nativeInventoryRequest = request({operation: 'native-inventory'}).then(function (data) {
+                        if (!data || !Array.isArray(data.connections)) throw new Error('Invalid native inventory');
+                        var updated = Object.create(null);
+                        (data.connections || []).forEach(function (connection) {
+                            if (connection.guest_matched === true && connection.hostname) {
+                                updated[String(connection.data_source) + '\u0000' + String(connection.identifier)] = connection;
+                            }
+                        });
+                        nativeInventory = updated;
+                        scope.nativeInventoryError = '';
+                        if (!destroyed) bindLinks();
+                    }).catch(function () {
+                        scope.nativeInventoryError = 'Could not verify native connections. Use Refresh to retry.';
+                        scope.nativeInventoryLoading = false;
+                        if (nativeInventory) {
+                            Object.keys(nativeInventory).forEach(function (identifier) {
+                                nativeInventory[identifier].state = 'unknown';
+                            });
+                            if (!destroyed) bindLinks();
+                        }
+                    }).finally(function () {
+                        scope.nativeInventoryLoading = false;
+                        nativeInventoryRequest = null;
+                    });
+                    return nativeInventoryRequest;
+                }
                 function visit(group, source, byName, catalog) {
                     if (!group) return;
                     (group.childConnections || []).forEach(function (connection) {
-                        var key = connection.name + '\u0000' + connection.protocol;
+                        var key = source + '\u0000' + connection.name + '\u0000' + connection.protocol;
                         var id = ClientIdentifier.toString({dataSource: source, type: ClientIdentifier.Types.CONNECTION, id: connection.identifier});
                         if (!byName[key]) byName[key] = '#/client/' + encodeURIComponent(id);
-                        catalog.push({source: source, connection: connection, url: byName[key]});
+                        catalog.push({source: source, connection: connection,
+                            url: window.CRangeNativeInventory.connectionUrl(id)});
                     });
                     (group.childConnectionGroups || []).forEach(function (child) { visit(child, source, byName, catalog); });
                 }
@@ -141,37 +177,36 @@
                     var catalog = [], managed = Object.create(null), native = Object.create(null);
                     angular.forEach(scope.connectionGroups, function (group, source) { visit(group, source, byName, catalog); });
                     scope.boxes = scope.boxes.filter(function (box) { return !box.native; });
+                    var currentSource = authenticationService.getDataSource();
                     scope.boxes.forEach(function (box) {
                         (box.protocols || []).forEach(function (protocol) {
-                            managed[protocol.connection_name + '\u0000' + protocol.protocol] = true;
-                            protocol.url = byName[protocol.connection_name + '\u0000' + protocol.protocol] || null;
+                            var key = currentSource + '\u0000' + protocol.connection_name + '\u0000' + protocol.protocol;
+                            managed[key] = true;
+                            protocol.url = byName[key] || null;
                         });
                     });
                     // Guacamole's authenticated connection tree is authoritative
                     // for native access. Never invent CRANGE ownership for it.
-                    catalog.forEach(function (item) {
+                    window.CRangeNativeInventory.verifiedEntries(catalog, nativeInventory).forEach(function (item) {
                         var connection = item.connection;
-                        if (managed[connection.name + '\u0000' + connection.protocol]) return;
+                        if (managed[item.source + '\u0000' + connection.name + '\u0000' + connection.protocol]) return;
+                        var metadata = item.metadata;
                         var title = connection.name.replace(/[- ·]+(ssh|rdp|vnc)$/i, '');
                         var key = item.source + '/' + title;
                         var box = native[key];
                         if (!box) {
-                            box = native[key] = {project: 0, team: null, resource_key: 'native:' + key,
-                                native: true, name: title, kind: 'connection', state: 'Connection', protocols: [], ip: ''};
+                            box = native[key] = {project: null, team: null, resource_key: 'native:' + key,
+                                native: true, name: title, kind: metadata.guest_type || 'Guest',
+                                state: metadata.state || 'unknown', protocols: [], ip: metadata.hostname};
                             scope.boxes.push(box);
                         }
+                        box.ip = metadata.hostname;
+                        box.kind = metadata.guest_type || 'Guest';
+                        box.state = metadata.state || 'unknown';
                         box.protocols.push({protocol: connection.protocol, connection_name: connection.name, url: item.url});
-                        var parameterKey = item.source + '/' + connection.identifier;
-                        if (nativeParameters[parameterKey]) box.ip = nativeParameters[parameterKey];
-                        else if (!Object.prototype.hasOwnProperty.call(nativeParameters, parameterKey)) {
-                            nativeParameters[parameterKey] = '';
-                            $http.get('api/session/data/' + encodeURIComponent(item.source) + '/connections/' + encodeURIComponent(connection.identifier) + '/parameters', {headers: headers()}).then(function (response) {
-                                nativeParameters[parameterKey] = response.data.hostname || '';
-                                box.ip = nativeParameters[parameterKey];
-                            }, angular.noop);
-                        }
                     });
                     groupBoxes();
+                    if (nativeInventory === null) refreshNativeInventory();
                 }
                 function refreshPower(box) {
                     if (box.native) return;
@@ -206,6 +241,7 @@
                     if (scope.cr.selectedProject && !projects[scope.cr.selectedProject]) scope.cr.selectedProject = '';
                 }
                 scope.refresh = function () {
+                    refreshNativeInventory();
                     scope.loading = true;
                     scope.$parent.cr.loading = true;
                     scope.error = '';
@@ -298,8 +334,11 @@
                     scope.submit(box, 'snapshot-list');
                 };
                 scope.closeSnapshots = function () { scope.snapshotBox = null; };
-                scope.$on('$destroy', function () { polls.forEach(function (timer) { $interval.cancel(timer); }); });
-                polls.push($interval(function () { scope.boxes.forEach(refreshPower); }, 5000));
+                scope.$on('$destroy', function () { destroyed = true; polls.forEach(function (timer) { $interval.cancel(timer); }); });
+                polls.push($interval(function () {
+                    scope.boxes.forEach(refreshPower);
+                    refreshNativeInventory();
+                }, 5000));
                 scope.refresh();
             }
         };

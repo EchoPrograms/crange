@@ -44,6 +44,16 @@ class _Jobs:
 
 
 class BridgeTests(unittest.TestCase):
+    def test_native_inventory_uses_authenticated_bridge_identity_without_project_input(self):
+        result = {'connections': [{'identifier': '4', 'hostname': '10.60.0.20'}]}
+        with patch('crange_guac_ticket.request_broker', return_value=result) as broker:
+            response = handle('guacadmin', {'operation': 'native-inventory', 'username': 'mallory',
+                                            '_authenticated_data_source': 'mysql'},
+                              auth=_Auth(), jobs=_Jobs(), root=Path('/repo'))
+        self.assertEqual(response, (200, result))
+        broker.assert_called_once_with({'operation': 'guac-native-inventory', 'username': 'guacadmin',
+                                        'data_source': 'mysql'})
+
     def test_status_is_delegated_and_broker_rechecks_access(self):
         from crange_guac_broker import box_status
         from crange_guac_ticket import TicketError
@@ -104,7 +114,7 @@ class BridgeTests(unittest.TestCase):
             key = bytes(range(32))
             key_file = Path(directory) / 'key'
             key_file.write_text(key.hex())
-            body = json.dumps({'identity': {'username': 'alice'},
+            body = json.dumps({'identity': {'username': 'alice'}, 'dataSource': 'mysql',
                                'request': {'operation': 'list'}}).encode()
             nonce = 'a' * 32
             timestamp = '1790899200'
@@ -112,8 +122,10 @@ class BridgeTests(unittest.TestCase):
                                  hashlib.sha256).hexdigest()
             headers = {'X-Crange-Timestamp': timestamp, 'X-Crange-Nonce': nonce,
                        'X-Crange-Signature': signature}
-            self.assertEqual(verify(body, headers, '10.60.0.10', key_file=key_file,
-                                    now=int(timestamp))[0], 'alice')
+            username, request = verify(body, headers, '10.60.0.10', key_file=key_file,
+                                       now=int(timestamp))
+            self.assertEqual(username, 'alice')
+            self.assertEqual(request['_authenticated_data_source'], 'mysql')
             with self.assertRaises(BridgeError):
                 verify(body, headers, '10.60.0.10', key_file=key_file, now=int(timestamp))
             with self.assertRaises(BridgeError):

@@ -85,7 +85,8 @@ public final class CrangeBridgeProvider extends AbstractAuthenticationProvider {
                 if (user.statusCode() != 200 || !user.body().stripLeading().startsWith("{"))
                     return error(401, "Guacamole session expired.");
 
-                String body = "{\"identity\":" + user.body() + ",\"request\":" + request + "}";
+                String body = "{\"identity\":" + user.body() + ",\"dataSource\":\"" + source
+                        + "\",\"request\":" + request + "}";
                 String timestamp = Long.toString(Instant.now().getEpochSecond());
                 String nonce = UUID.randomUUID().toString().replace("-", "");
                 String controller = System.getenv().getOrDefault("CRANGE_CONTROLLER_BRIDGE_URL",
