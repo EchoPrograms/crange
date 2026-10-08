@@ -9,6 +9,18 @@ KEY = "/home/crange/.ssh/id_ed25519_range"
 PROJECT_ROUTER = "p{project:03d}_router"
 
 
+def scenario_vm_os_type(template, approvals):
+    """Return the OS type recorded by the approved VM image profile.
+
+    Old approved Linux images predate explicit OS profiles, so retain their
+    historical Linux default. Windows classification requires an explicit
+    approved profile value; guest services and names are never used as signals.
+    """
+    approval = approvals.get(template, {})
+    profile = approval.get("profile", {}) if isinstance(approval, dict) else {}
+    return profile.get("os_type", "l26") if isinstance(profile, dict) else "l26"
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--terraform-dir", required=True, type=Path)
@@ -258,18 +270,43 @@ def main():
                  "ansible_ssh_private_key_file": KEY, "ansible_python_interpreter": "/usr/bin/python3"},
         "hosts": {}, "children": {},
     }
+    groups["windows_guests"] = {
+        "vars": {
+            "ansible_connection": "winrm",
+            "ansible_port": 5985,
+            "ansible_winrm_transport": "ntlm",
+            "ansible_winrm_server_cert_validation": "ignore",
+        },
+        "hosts": {},
+        "children": {"windows_vms": {"hosts": {}}, "windows_jumpboxes": {"hosts": {}}},
+    }
     approved_file = args.terraform_dir / 'approved-scenario-templates.json'
     approved_vms = json.loads(approved_file.read_text()) if approved_file.exists() else {}
     for key, machine in (val("scenario_boxes") or {}).items():
         template = desired.get('scenario_boxes', {}).get(key, {}).get('template')
         profile = approved_vms.get(template, {}).get('profile', {})
-        if profile.get('os_type', 'l26') != 'l26' or profile.get('cloud_init') is False:
-            continue  # Administrator-managed Windows/BSD/manual images are not Linux Ansible targets.
         host = f"p{project_id:03d}_vm_{key}"
         values = {"ansible_host": machine["address"]}
-        groups["scenario_vms"]["hosts"][host] = values
-        scope = "staging_vms" if int(machine["team_id"]) == 254 else f"team_{int(machine['team_id']):03d}_vms"
-        groups["scenario_vms"]["children"].setdefault(scope, {"hosts": {}})["hosts"][host] = values
+        os_type = scenario_vm_os_type(template, approved_vms)
+        if os_type == 'l26' and profile.get('cloud_init') is not False:
+            groups["scenario_vms"]["hosts"][host] = values
+            scope = "staging_vms" if int(machine["team_id"]) == 254 else f"team_{int(machine['team_id']):03d}_vms"
+            groups["scenario_vms"]["children"].setdefault(scope, {"hosts": {}})["hosts"][host] = values
+        elif isinstance(os_type, str) and os_type.startswith('win'):
+            values.update({
+                "crange_template": template,
+                "crange_template_id": machine.get("placement", {}).get("template_id"),
+                "crange_template_node": machine.get("placement", {}).get("template_node"),
+                "crange_guest_id": machine.get("id"),
+                "crange_guest_network_id": str(machine.get("network_id", machine["team_id"])),
+                "crange_windows_jumpbox": bool(desired.get('scenario_boxes', {}).get(key, {}).get('is_jumpbox')),
+            })
+            group = "windows_jumpboxes" if values["crange_windows_jumpbox"] else "windows_vms"
+            groups["windows_guests"]["hosts"][host] = values
+            scope = "staging" if int(machine["team_id"]) == 254 else f"team_{int(machine['team_id']):03d}"
+            group_entry = groups["windows_guests"]["children"][group]
+            group_entry.setdefault("children", {}).setdefault(f"{scope}_windows", {"hosts": {}})["hosts"][host] = values
+        # BSD/manual guests remain outside the Linux and Windows automation groups.
 
     for key, jump in jumps.items():
         address = jump["address"]
