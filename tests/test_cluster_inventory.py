@@ -46,6 +46,9 @@ class ClusterTests(unittest.TestCase):
             self.assertEqual(node['capacity']['storages'][0]['available_gb'], 100)
             self.assertEqual(node['guests'][0]['status'], 'stopped')
             self.assertTrue(node['guests'][0]['cache'])
+            self.assertEqual(node['guests'][0]['memory_mb'], 0)
+            self.assertEqual(node['guests'][0]['cpu_cores'], 0)
+            self.assertEqual(node['guests'][0]['configured_memory_mb'], 512)
             self.assertEqual(result['images'][0]['locations'][0]['replicas'][0]['template_id'], 200)
             self.assertTrue(result['images'][0]['locations'][0]['replicas'][0]['observed'])
             self.assertEqual(result['images'][0]['approved_projects'], [3])
@@ -56,6 +59,48 @@ class ClusterTests(unittest.TestCase):
             self.assertEqual(path.stat().st_mode & 0o777, 0o640)
             with patch.object(cluster.time, 'time', return_value=500):
                 self.assertTrue(cluster.inventory_snapshot(admin=True)['stale'])
+
+    def test_stock_archive_observation_uses_exact_size_and_manifest_hash(self):
+        digest = 'a' * 64
+        archive = 'crange-library:vztmpl/debian-test.tar.zst'
+        raw = {'captured_at': 100, 'nodes': {'proxmox1': {
+            'online': True, 'memory_mb': 4096, 'cpu_cores': 4, 'observed_memory_mb': 0,
+            'committed_memory_mb': 0, 'committed_cpu_cores': 0, 'load': 0,
+            'management_verified': True, 'guest_types': ['container'],
+            'storages': {}}}, 'guests': {}}
+        policy = {'revision': 'v1', 'enabled': True, 'allowed_storages': ['local-lvm']}
+        image = {'kind': 'container', 'source_type': 'stock_archive', 'disk_gb': 1,
+            'artifact_sha256': digest, 'approved_projects': ['*'], 'replicas': [{
+                'node': 'proxmox1', 'datastore_id': 'crange-library', 'template_file_id': archive,
+                'state': 'ready', 'artifact_sha256': digest}]}
+        status = {'updated_at': '2026-10-08T00:00:00Z', 'files': [{
+            'content': 'vztmpl', 'name': 'debian-test.tar.zst', 'size': 123,
+            'sha256': digest, 'copies': [{'storage': 'crange-library', 'size': 123, 'sha256': digest}]}]}
+        api = Mock()
+        api.request.return_value = [{'volid': archive, 'size': 123}]
+        ledger = Mock(active_reservations=Mock(return_value=[]))
+        with tempfile.TemporaryDirectory() as directory, patch.object(scheduling, 'DATA', Path(directory)), \
+             patch.object(scheduling, 'LIBRARY_STATUS', Path(directory) / 'status.json'), \
+             patch.object(scheduling, 'read_settings', return_value=(policy, {'images': {'debian-test': image}})), \
+             patch.object(scheduling, 'discover', return_value=raw), \
+             patch.object(cluster, 'ReservationLedger', return_value=ledger):
+            (Path(directory) / 'status.json').write_text(json.dumps(status))
+            result = cluster.refresh_inventory_snapshot(api=api)
+        replica = result['images'][0]['locations'][0]['replicas'][0]
+        self.assertTrue(replica['observed'])
+        self.assertEqual(replica['observed_sha256'], digest)
+        self.assertTrue(result['images'][0]['archived'])
+        self.assertEqual(api.request.call_count, 1)
+
+        api.request.return_value = [{'volid': archive, 'size': 124}]
+        with tempfile.TemporaryDirectory() as directory, patch.object(scheduling, 'DATA', Path(directory)), \
+             patch.object(scheduling, 'LIBRARY_STATUS', Path(directory) / 'status.json'), \
+             patch.object(scheduling, 'read_settings', return_value=(policy, {'images': {'debian-test': image}})), \
+             patch.object(scheduling, 'discover', return_value=raw), \
+             patch.object(cluster, 'ReservationLedger', return_value=ledger):
+            (Path(directory) / 'status.json').write_text(json.dumps(status))
+            result = cluster.refresh_inventory_snapshot(api=api)
+        self.assertFalse(result['images'][0]['locations'][0]['replicas'][0]['observed'])
 
     def test_failed_refresh_retains_snapshot_and_exposes_sanitized_failure(self):
         with tempfile.TemporaryDirectory() as directory, patch.object(scheduling, 'DATA', Path(directory)):

@@ -6,6 +6,7 @@ reservation queries run as fixed controller jobs. Cluster data is admin-only.
 import json
 import os
 import time
+from datetime import datetime, timezone
 from pathlib import Path
 
 from crange import ProxmoxAPI
@@ -46,6 +47,58 @@ def _refresh_inventory_snapshot(*, api=None):
     nodes, guests, global_blockers = [], [], []
     replicas = {r.get('template_id'): (image_id, r) for image_id, image in catalog['images'].items()
                 for r in image['replicas'] if r.get('template_id') is not None}
+    try:
+        media_status = json.loads(scheduling.LIBRARY_STATUS.read_text())
+    except (OSError, ValueError):
+        media_status = {}
+    if not isinstance(media_status, dict):
+        media_status = {}
+    try:
+        status_updated = datetime.fromisoformat(str(media_status.get('updated_at', '')).replace('Z', '+00:00'))
+        if status_updated.tzinfo is None:
+            status_updated = status_updated.replace(tzinfo=timezone.utc)
+        media_manifest_fresh = 0 <= time.time() - status_updated.timestamp() <= 86400
+    except (TypeError, ValueError, OverflowError):
+        media_manifest_fresh = False
+    media_files = {(row.get('content'), row.get('name')): row for row in media_status.get('files', [])
+                   if isinstance(row, dict) and isinstance(row.get('name'), str)}
+    # Proxmox content listings are cheap metadata calls. Cache each query for
+    # this refresh; never hash large archives from the dashboard refresh path.
+    content_cache = {}
+
+    def archive_observation(node_name, replica, image):
+        volid = replica.get('template_file_id', '')
+        try:
+            storage, path = volid.split(':', 1)
+            content, name = path.split('/', 1)
+            if content != 'vztmpl' or storage != replica.get('datastore_id'):
+                return {'observed': False, 'reason': 'Catalog volume identity is inconsistent'}
+            manifest = media_files.get((content, name), {})
+            digest = image.get('artifact_sha256')
+            if (not media_manifest_fresh or not digest or manifest.get('sha256') != digest or
+                    replica.get('artifact_sha256') != digest or
+                    type(manifest.get('size')) is not int or manifest['size'] <= 0):
+                return {'observed': False, 'reason': 'Central checksum manifest does not verify this archive'}
+            copies = {copy.get('storage'): copy for copy in manifest.get('copies', [])
+                      if isinstance(copy, dict)}
+            copy = copies.get(storage, {})
+            if copy.get('sha256') != digest or copy.get('size') != manifest['size']:
+                return {'observed': False, 'reason': 'Checksum manifest has no verified copy for this storage'}
+            key = (node_name, storage, content)
+            if key not in content_cache:
+                try:
+                    content_cache[key] = api.request('GET', f'/nodes/{node_name}/storage/{storage}/content',
+                                                     {'content': content})
+                except Exception:
+                    content_cache[key] = None
+            rows = content_cache[key]
+            actual = next((row for row in rows or [] if row.get('volid') == volid), None)
+            if not actual or actual.get('size') != manifest['size']:
+                return {'observed': False, 'reason': 'Archive is absent or its size differs from the manifest'}
+            return {'observed': True, 'reason': 'Volume, size and SHA256 manifest match',
+                    'size': manifest['size'], 'sha256': digest}
+        except (ValueError, AttributeError):
+            return {'observed': False, 'reason': 'Catalog archive volume ID is invalid'}
     for name, node in sorted(raw['nodes'].items()):
         blockers = []
         if name not in policy.get('allowed_nodes', scheduling.DEFAULT_POLICY['allowed_nodes']):
@@ -109,17 +162,18 @@ def _refresh_inventory_snapshot(*, api=None):
             'verified_networks': node.get('verified_networks', []), 'guests': []})
     for vmid, guest in sorted(raw['guests'].items(), key=lambda row: int(row[0])):
         image_id, replica = replicas.get(int(vmid), (None, {}))
+        template = bool(guest['template'])
         row = {'vmid': int(vmid), 'node': guest['node_name'], 'kind': guest['kind'],
             'name': guest.get('name'), 'status': guest.get('status', 'unknown'), 'template': guest['template'], 'cache': bool(replica.get('cache_local')),
-            'image_id': image_id, 'memory_mb': guest['memory_mb'], 'cpu_cores': guest['cpu_cores'],
+            'image_id': image_id, 'memory_mb': 0 if template else guest['memory_mb'],
+            'cpu_cores': 0 if template else guest['cpu_cores'],
+            'configured_memory_mb': guest['memory_mb'], 'configured_cpu_cores': guest['cpu_cores'],
             'datastores': guest['disks'], 'clone_modes_verified': replica.get('clone_modes_verified', [])}
         guests.append(row)
         for node in nodes:
             if node['node'] == row['node']: node['guests'].append(row)
     if not policy.get('enabled'): global_blockers.append('Administrator policy has not enabled automatic placement')
     if not any(n['eligibility']['eligible'] for n in nodes): global_blockers.append('No node passes current admission gates')
-    ready_images = [image_id for image_id, image in catalog['images'].items() if image.get('approved_projects') and
-        any(r.get('state') == 'ready' and (r.get('template_file_id') or 'linked' in r.get('clone_modes_verified', [])) for r in image.get('replicas', []))]
     image_distribution = []
     for image_id, image in sorted(catalog['images'].items()):
         locations = []
@@ -130,17 +184,58 @@ def _refresh_inventory_snapshot(*, api=None):
                     continue
                 template_id = replica.get('template_id')
                 observed = raw['guests'].get(str(template_id), {}) if template_id is not None else {}
+                archive = archive_observation(node_name, replica, image) if template_id is None else None
+                actual_guest = observed if observed.get('template') and observed.get('node_name') == node_name else {}
                 replicas_on_node.append({
                     'state': replica.get('state'), 'datastore_id': replica.get('datastore_id'),
                     'template_id': template_id, 'cache_local': bool(replica.get('cache_local')),
-                    'observed': bool(observed.get('template') and observed.get('node_name') == node_name),
+                    'observed': bool(actual_guest) if template_id is not None else bool(archive and archive['observed']),
+                    'actual_datastores': sorted(actual_guest.get('disks', {})),
+                    'observation_reason': ('Template VMID is absent or not a template on the recorded node'
+                        if template_id is not None and not actual_guest else
+                        archive.get('reason') if archive else 'Template exists on the recorded node'),
+                    'observed_size': archive.get('size') if archive else None,
+                    'observed_sha256': archive.get('sha256') if archive else None,
                     'clone_modes': replica.get('clone_modes_verified', []),
                 })
+            if image.get('source_type') == 'stock_archive' and not any(r.get('observed') for r in replicas_on_node):
+                source_replica = next((r for r in image.get('replicas', []) if r.get('template_file_id')), None)
+                if source_replica:
+                    archive = archive_observation(node_name, source_replica, image)
+                    replicas_on_node.append({
+                        'state': 'uncataloged', 'datastore_id': source_replica.get('datastore_id'),
+                        'template_id': None, 'template_file_id': source_replica.get('template_file_id'),
+                        'cache_local': False, 'cataloged': False, 'observed': archive['observed'],
+                        'observation_reason': archive['reason'], 'observed_size': archive.get('size'),
+                        'observed_sha256': archive.get('sha256'), 'clone_modes': [],
+                    })
             locations.append({'node': node_name, 'replicas': replicas_on_node})
+        stock_manifest = False
+        if image.get('source_type') == 'stock_archive':
+            for replica in image.get('replicas', []):
+                volid = replica.get('template_file_id', '')
+                if ':vztmpl/' not in volid:
+                    continue
+                name = volid.split(':vztmpl/', 1)[1]
+                manifest = media_files.get(('vztmpl', name), {})
+                if (media_manifest_fresh and manifest.get('sha256') == image.get('artifact_sha256') and
+                        type(manifest.get('size')) is int and manifest['size'] > 0 and
+                        any(copy.get('sha256') == manifest['sha256'] and copy.get('size') == manifest['size']
+                            for copy in manifest.get('copies', []) if isinstance(copy, dict))):
+                    stock_manifest = True
+                    break
         image_distribution.append({'image_id': image_id, 'kind': image.get('kind'),
             'disk_gb': image.get('disk_gb'), 'approved_projects': image.get('approved_projects', []),
-            'archived': bool(image.get('artifact', {}).get('complete_capture')),
+            'archived': bool(stock_manifest or image.get('artifact', {}).get('complete_capture')),
+            'source_type': image.get('source_type', 'published_template'),
             'locations': locations})
+    ready_images = []
+    for image in image_distribution:
+        replicas = [replica for location in image['locations'] for replica in location['replicas']]
+        has_observed_replica = any(replica['state'] == 'ready' and replica['observed'] for replica in replicas)
+        central_vm_archive = image['kind'] == 'vm' and image['source_type'] != 'stock_archive' and image['archived']
+        if image['approved_projects'] and (has_observed_replica or central_vm_archive):
+            ready_images.append(image['image_id'])
     if not ready_images: global_blockers.append('No approved image version has a verified ready archive or local cache')
     snapshot = {'schema_version': 1, 'captured_at': raw['captured_at'], 'policy_revision': policy['revision'],
         'max_inventory_age_seconds': policy.get('max_inventory_age_seconds', 120), 'nodes': nodes, 'guests': guests,

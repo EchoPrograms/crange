@@ -67,20 +67,28 @@ function renderCluster(c){
   card.append(table(["Resource","Physical capacity","Commitment limit","Commitments","Reservations","Available after reserves"],[["Memory",clusterGB(capacity.memory_mb),clusterGB(capacity.memory_commitment_limit_mb),clusterGB(committed.memory_mb),clusterGB(reserved.memory_mb),clusterGB(available.memory_mb)],["CPU cores",clusterValue(capacity.cpu_cores),clusterValue(capacity.cpu_commitment_limit_cores),clusterValue(committed.cpu_cores),clusterValue(reserved.cpu_cores),clusterValue(available.cpu_cores)]]));
   const storages=Array.isArray(capacity.storages)?capacity.storages:Object.entries(capacity.storages||{}).map(([id,value])=>({datastore_id:id,...value}));
   card.append(el("h4","Datastores"),table(["Storage","Capacity GB","Free GB","Commitment limit GB","Committed GB","Reserved GB","Available GB","Capabilities"],storages.map(storage=>[storage.datastore_id||storage.storage,clusterValue(storage.total_gb),clusterValue(storage.free_gb??(typeof storage.used_gb==="number"?storage.total_gb-storage.used_gb:undefined)),clusterValue(storage.commitment_limit_gb),clusterValue(storage.committed_gb),clusterValue(storage.reserved_gb),clusterValue(storage.available_gb),`${storage.eligibility?.eligible?"Eligible":(storage.eligibility?.blockers||["Unavailable"]).join("; ")} · ${storage.shared?"Shared":"Local"} · ${(storage.clone_modes||[]).join(", ")}`])));
-  card.append(el("h4","Workload and template distribution"),table(["Name","Kind","VM / CT ID","State","Role","Memory GB","CPU","Image"],(node.guests||[]).map(guest=>[guest.name,guest.kind||guest.type,guest.vmid||guest.guest_id,guest.status,guest.cache?"Local image cache":guest.template?"Template":"Workload",clusterGB(guest.memory_mb),clusterValue(guest.cpu_cores),guest.image_id||"—"])));c.append(card)
+  card.append(el("h4","Workload and template distribution"),table(["Name","Kind","VM / CT ID","State","Role","Configured RAM","Committed RAM","Configured CPU","Committed CPU","Image"],(node.guests||[]).map(guest=>[guest.name,guest.kind||guest.type,guest.vmid||guest.guest_id,guest.status,guest.cache?"Local image cache":guest.template?"Template (not committed)":"Workload",clusterGB(guest.configured_memory_mb??guest.memory_mb),clusterGB(guest.memory_mb),clusterValue(guest.configured_cpu_cores??guest.cpu_cores),clusterValue(guest.cpu_cores),guest.image_id||"—"])));c.append(card)
  }
  if(snapshot.images?.length){
   c.append(el("h3","Image distribution"),el("p","Approved immutable images stay archived centrally. Staging prepares a missing local cache automatically; administrators can prepare one ahead of time here.","muted"));
   for(const image of snapshot.images){
    const card=el("section",undefined,"card"),approved=image.approved_projects||[],selected=Number($("project").value),allowed=approved.includes("*")||approved.some(x=>Number(x)===selected);
    card.append(el("h4",`${image.image_id} · ${image.kind||"image"} · ${clusterValue(image.disk_gb," GB")}`));
-   card.append(el("p",`Archive: ${image.archived?"Captured":"No verified captured artifact"} · Approved projects: ${approved.join(", ")||"none"}`,"muted"));
+   const stockArchive=image.source_type==="stock_archive";
+   card.append(el("p",`Source: ${stockArchive?(image.archived?"Verified Proxmox template archive":"Archive checksum manifest unavailable"):(image.archived?"Captured immutable artifact":"No verified captured artifact")} · Approved projects: ${approved.join(", ")||"none"}`,"muted"));
    card.append(table(["Node","Local replica","Status","Action"],(image.locations||[]).map(location=>{
     const node=(snapshot.nodes||[]).find(item=>item.node===location.node),replicas=location.replicas||[],ready=replicas.some(replica=>replica.state==="ready"&&replica.observed),storage=(node?.capacity?.storages||[]).find(item=>item.datastore_id==="local-lvm"),supported=node?.eligibility?.guest_types?.[image.kind]?.eligible===true;
     const button=fixedAction("Prepare local cache","template-distribution-prepare",{image:image.image_id,node:location.node,storage:"local-lvm"});
-    button.disabled=ready||!image.archived||!allowed||!supported||!storage?.eligibility?.eligible||stale;
-    button.title=ready?"A verified local replica is already present.":!allowed?"Select a project approved for this image.":!image.archived?"A complete central archive is required.":!supported?"This node or guest type has not passed placement acceptance.":!storage?.eligibility?.eligible?"Local datastore is not eligible.":stale?"Refresh the cluster inventory before preparing.":"Reserve capacity and verify a local linked-clone cache for the selected project.";
-    return [location.node,replicas.map(replica=>`${replica.template_id||"archive"} on ${replica.datastore_id||"storage"}`).join(", ")||"—",ready?"Ready":replicas.length?"Needs reconciliation":"Missing",button]
+    button.disabled=stockArchive||ready||!image.archived||!allowed||!supported||!storage?.eligibility?.eligible||stale;
+    button.title=stockArchive?"This is a directly usable container archive; it does not need a VM cache.":ready?"A verified local replica is already present.":!allowed?"Select a project approved for this image.":!image.archived?"A complete central archive is required.":!supported?"This node or guest type has not passed placement acceptance.":!storage?.eligibility?.eligible?"Local datastore is not eligible.":stale?"Refresh the cluster inventory before preparing.":"Reserve capacity and verify a local linked-clone cache for the selected project.";
+    const status=replicas.some(replica=>replica.observed&&replica.cataloged===false)?"Present; catalog alias missing":
+      replicas.some(replica=>replica.state==="ready"&&replica.observed)?(stockArchive?"Available (checksum verified)":"Ready"):
+      replicas.some(replica=>replica.state==="missing")?"Stale catalog entry":
+      replicas.length?"Needs reconciliation":(stockArchive?"Not cataloged":"Not cached");
+    const action=stockArchive?el("span","Direct archive source","muted"):button;
+    const details=replicas.map(replica=>`${replica.template_id||replica.template_file_id||"archive"} on ${replica.datastore_id||"storage"}${replica.cataloged===false?" (uncataloged)":""}${replica.actual_datastores?.length?` (actual: ${replica.actual_datastores.join(", ")})`:""}`).join(", ")||"—";
+    const statusCell=el("span",status);statusCell.title=replicas.map(replica=>replica.observation_reason).filter(Boolean).join(" · ");
+    return [location.node,details,statusCell,action]
    })));
    c.append(card)
   }
