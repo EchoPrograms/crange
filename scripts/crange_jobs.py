@@ -126,10 +126,9 @@ def health(value):
         raise ValueError(str(exc)) from exc
     return json.dumps(value, separators=(",", ":"))
 
-def guac_protocol(value):
-    if value not in ("ssh", "rdp"):
-        raise ValueError("Guacamole protocol must be ssh or rdp.")
-    return value
+def guac_protocols(value):
+    from crange_jumpboxes import services
+    return json.dumps(services(value), separators=(',', ':'))
 
 
 def jumpbox_services(value):
@@ -152,6 +151,9 @@ def command(operation, project, options):
         raise ValueError("Invalid project.")
     if operation == 'jumpbox-settings':
         options = {'credentials_mode': 'keep', 'credential_ref': '', 'sealed_credentials': '', **options}
+    if operation in {'scenario-add', 'scenario-edit', 'container-add', 'container-edit'} and 'guac_protocol' in options and 'guac_protocols' not in options:
+        options = {**options, 'guac_protocols': [options['guac_protocol']]}
+        options.pop('guac_protocol')
     p = str(project)
     schemas = {
         "jumpbox-template-save": ({"definition": lambda v: json.dumps(__import__('crange_jumpboxes').preset_settings(v))}, lambda o: ['jumpbox-template-save',p,'--definition',o['definition']]),
@@ -204,11 +206,11 @@ def command(operation, project, options):
         "box-add": ({"name": jump_name, "team": lambda v: integer(v, 0, 253), "node": node, "network": lambda v: '' if v == '' else name(v), "cores": lambda v: integer(v, 1, 16), "memory": lambda v: integer(v, 512, 65536)}, lambda o: ["box-add", p, o["name"], "--team", o["team"], "--node", o["node"], "--cores", o["cores"], "--memory", o["memory"], *(["--network", o["network"]] if o["network"] else [])]),
         "box-remove": ({"name": resource_key}, lambda o: ["box-remove", p, o["name"]]),
         "box-state": ({"name": resource_key, "state": lambda v: v if v in ('start', 'stop') else (_ for _ in ()).throw(ValueError('Invalid power state.'))}, lambda o: ["box-state", p, o["name"], o["state"]]),
-        "scenario-add": ({"name": name, "team": lambda v: integer(v, 0, 253), "ip": lambda v: integer(v, 2, 100), "network": lambda v: "" if v == "" else name(v), "template": name, "node": node, "cores": lambda v: integer(v, 1, 16), "memory": lambda v: integer(v, 512, 65536), "health": health, "guac_protocol": guac_protocol}, lambda o: ["scenario-add", p, o["name"], "--team", o["team"], "--network", o["network"], "--ip", o["ip"], "--template", o["template"], "--node", o["node"], "--cores", o["cores"], "--memory", o["memory"], "--health", o["health"], "--guac-protocol", o["guac_protocol"]]),
-        "scenario-edit": ({"name": scenario_key, "ip": lambda v: integer(v, 2, 100), "network": lambda v: "" if v == "" else name(v), "template": name, "node": node, "cores": lambda v: integer(v, 1, 16), "memory": lambda v: integer(v, 512, 65536), "health": health, "guac_protocol": guac_protocol}, lambda o: ["scenario-edit", p, o["name"], "--network", o["network"], "--ip", o["ip"], "--template", o["template"], "--node", o["node"], "--cores", o["cores"], "--memory", o["memory"], "--health", o["health"], "--guac-protocol", o["guac_protocol"]]),
+        "scenario-add": ({"name": name, "team": lambda v: integer(v, 0, 253), "ip": lambda v: integer(v, 2, 100), "network": lambda v: "" if v == "" else name(v), "template": name, "node": node, "cores": lambda v: integer(v, 1, 16), "memory": lambda v: integer(v, 512, 65536), "health": health, "guac_protocols": guac_protocols}, lambda o: ["scenario-add", p, o["name"], "--team", o["team"], "--network", o["network"], "--ip", o["ip"], "--template", o["template"], "--node", o["node"], "--cores", o["cores"], "--memory", o["memory"], "--health", o["health"], "--guac-protocols", o["guac_protocols"]]),
+        "scenario-edit": ({"name": scenario_key, "ip": lambda v: integer(v, 2, 100), "network": lambda v: "" if v == "" else name(v), "template": name, "node": node, "cores": lambda v: integer(v, 1, 16), "memory": lambda v: integer(v, 512, 65536), "health": health, "guac_protocols": guac_protocols}, lambda o: ["scenario-edit", p, o["name"], "--network", o["network"], "--ip", o["ip"], "--template", o["template"], "--node", o["node"], "--cores", o["cores"], "--memory", o["memory"], "--health", o["health"], "--guac-protocols", o["guac_protocols"]]),
         "scenario-remove": ({"name": scenario_key}, lambda o: ["scenario-remove", p, o["name"]]),
-        "container-add": ({"name": name, "team": lambda v: integer(v, 0, 253), "ip": lambda v: integer(v, 2, 100), "template": name, "node": node, "network": lambda v: '' if v == '' else name(v), "cores": lambda v: integer(v, 1, 16), "memory": lambda v: integer(v, 512, 65536), "health": health, "guac_protocol": guac_protocol}, lambda o: ["container-add", p, o["name"], "--team", o["team"], "--ip", o["ip"], "--template", o["template"], "--node", o["node"], "--cores", o["cores"], "--memory", o["memory"], "--health", o["health"], "--guac-protocol", o["guac_protocol"], *(["--network", o["network"]] if o["network"] else [])]),
-        "container-edit": ({"name": scenario_key, "template": name, "node": node, "ip": lambda v: integer(v, 2, 100), "network": lambda v: '' if v == '' else name(v), "cores": lambda v: integer(v, 1, 16), "memory": lambda v: integer(v, 512, 65536), "health": health, "guac_protocol": guac_protocol}, lambda o: ["container-edit", p, o["name"], "--template", o["template"], "--node", o["node"], "--ip", o["ip"], "--network", o["network"], "--cores", o["cores"], "--memory", o["memory"], "--health", o["health"], "--guac-protocol", o["guac_protocol"]]),
+        "container-add": ({"name": name, "team": lambda v: integer(v, 0, 253), "ip": lambda v: integer(v, 2, 100), "template": name, "node": node, "network": lambda v: '' if v == '' else name(v), "cores": lambda v: integer(v, 1, 16), "memory": lambda v: integer(v, 512, 65536), "health": health, "guac_protocols": guac_protocols}, lambda o: ["container-add", p, o["name"], "--team", o["team"], "--ip", o["ip"], "--template", o["template"], "--node", o["node"], "--cores", o["cores"], "--memory", o["memory"], "--health", o["health"], "--guac-protocols", o["guac_protocols"], *(["--network", o["network"]] if o["network"] else [])]),
+        "container-edit": ({"name": scenario_key, "template": name, "node": node, "ip": lambda v: integer(v, 2, 100), "network": lambda v: '' if v == '' else name(v), "cores": lambda v: integer(v, 1, 16), "memory": lambda v: integer(v, 512, 65536), "health": health, "guac_protocols": guac_protocols}, lambda o: ["container-edit", p, o["name"], "--template", o["template"], "--node", o["node"], "--ip", o["ip"], "--network", o["network"], "--cores", o["cores"], "--memory", o["memory"], "--health", o["health"], "--guac-protocols", o["guac_protocols"]]),
         "container-remove": ({"name": name}, lambda o: ["container-remove", p, o["name"]]),
         "machine-state": ({"name": scenario_key, "kind": lambda v: choice(v, ("vm", "container")), "state": lambda v: choice(v, ("start", "stop"))}, lambda o: ["machine-state", p, o["name"], "--kind", o["kind"], "--state", o["state"]]),
         "scenario-health": ({"name": lambda v: "" if v == "" else scenario_key(v)}, lambda o: ["scenario-health", p, *([o["name"]] if o["name"] else [])]),

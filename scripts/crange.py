@@ -1900,6 +1900,26 @@ def cmd_scenario_list(args: argparse.Namespace) -> None:
         print(f"{key}\tteam={box['team_id']}\t10.{cfg['project_id']}.{box['team_id']}.{box['ip_last_octet']}\t{box['template']}\t{box['node_name']}")
 
 
+def scenario_guac_services(args: argparse.Namespace, existing: dict | None = None, default: str = "ssh") -> list[str]:
+    from crange_jumpboxes import services
+    raw = getattr(args, "guac_protocols", None)
+    if raw is not None:
+        try:
+            raw = json.loads(raw) if isinstance(raw, str) else raw
+        except json.JSONDecodeError as exc:
+            raise CrangeError("Guacamole services must be a JSON list.") from exc
+    elif getattr(args, "guac_protocol", None):
+        raw = [args.guac_protocol]
+    elif existing:
+        raw = existing.get("guac_services", [existing.get("guac_protocol", default)])
+    else:
+        raw = [default]
+    try:
+        return services(raw)
+    except ValueError as exc:
+        raise CrangeError(str(exc)) from exc
+
+
 def cmd_scenario_add(args: argparse.Namespace) -> None:
     path = project_dir(args.project)
     cfg = json_config(path)
@@ -1926,6 +1946,7 @@ def cmd_scenario_add(args: argparse.Namespace) -> None:
         checks = validate_health_checks(json.loads(args.health))
     except json.JSONDecodeError as exc:
         raise CrangeError(f"Health checks are not valid JSON: {exc}") from exc
+    remote_services = scenario_guac_services(args)
     scenario_boxes(cfg)[key] = {
         "team_id": team, "name": args.name, "ip_last_octet": args.ip,
         "network_key": network_key, "network_id": network_id,
@@ -1933,7 +1954,7 @@ def cmd_scenario_add(args: argparse.Namespace) -> None:
         "placement": __import__("crange_scheduling").placement_intent(args.node, getattr(args,"preferred_node","")),
         "cores": args.cores, "memory_mb": args.memory,
         "full_clone": args.full_clone if args.full_clone is not None else args.node != "auto",
-        "started": True, "health_checks": checks, "guac_protocol": getattr(args, "guac_protocol", "ssh"),
+        "started": True, "health_checks": checks, "guac_protocol": remote_services[0], "guac_services": remote_services,
     }
     if templates[args.template].get("image_id"):
         scenario_boxes(cfg)[key]["image"] = templates[args.template]["image_id"]
@@ -1973,9 +1994,10 @@ def cmd_scenario_edit(args: argparse.Namespace) -> None:
         reference = templates_for(path)[args.template]
         box.pop("image", None)
         if reference.get("image_id"):box["image"] = reference["image_id"]
+    remote_services = scenario_guac_services(args, box)
     box.update({"template": args.template, "node_name": args.node,
                 "cores": args.cores, "memory_mb": args.memory,
-                "health_checks": checks, "guac_protocol": getattr(args, "guac_protocol", None) or box.get("guac_protocol", "ssh")})
+                "health_checks": checks, "guac_protocol": remote_services[0], "guac_services": remote_services})
     validate_custom_networks(cfg)
     validate_scenario_config(path, cfg)
     save_config(path, cfg)
@@ -2012,13 +2034,14 @@ def cmd_container_add(args: argparse.Namespace) -> None:
         checks = validate_health_checks(json.loads(args.health))
     except json.JSONDecodeError as exc:
         raise CrangeError(f"Health checks are not valid JSON: {exc}") from exc
+    remote_services = scenario_guac_services(args)
     scenario_containers(cfg)[key] = {
         "team_id": team, "name": args.name, "ip_last_octet": args.ip,
         "template": args.template, "node_name": args.node,
         "placement": __import__("crange_scheduling").placement_intent(args.node, getattr(args,"preferred_node","")),
         "cores": args.cores, "memory_mb": args.memory, "started": True,
         "network_key": network_key, "network_id": network_id,
-        "health_checks": checks, "guac_protocol": getattr(args, "guac_protocol", "ssh"),
+        "health_checks": checks, "guac_protocol": remote_services[0], "guac_services": remote_services,
     }
     reference = container_templates_for(path)[args.template]
     if reference.get("image_id"):scenario_containers(cfg)[key]["image"] = reference["image_id"]
@@ -2065,11 +2088,12 @@ def cmd_container_edit(args: argparse.Namespace) -> None:
         reference = container_templates_for(path)[args.template]
         box.pop("image", None)
         if reference.get("image_id"):box["image"] = reference["image_id"]
+    remote_services = scenario_guac_services(args, box)
     box.update({"template": args.template, "node_name": args.node,
                 "cores": args.cores, "memory_mb": args.memory,
                 "ip_last_octet": args.ip, "network_key": network_key,
                 "network_id": network_id, "health_checks": checks,
-                "guac_protocol": getattr(args, "guac_protocol", None) or box.get("guac_protocol", "ssh")})
+                "guac_protocol": remote_services[0], "guac_services": remote_services})
     validate_custom_networks(cfg)
     validate_scenario_config(path, cfg)
     validate_container_config(path, cfg)
@@ -3146,7 +3170,8 @@ def make_parser() -> argparse.ArgumentParser:
     q.add_argument("--full-clone", action="store_true", default=None)
     q.add_argument("--network", default="", help="Custom network owned by this team or staging")
     q.add_argument("--health", default="[]", help="JSON ping/TCP/HTTP health checks; empty uses ping")
-    q.add_argument("--guac-protocol", choices=("ssh", "rdp"), default="ssh")
+    q.add_argument("--guac-protocol", choices=("ssh", "rdp", "vnc"), default="ssh")
+    q.add_argument("--guac-protocols", default=None, help="JSON list of selected SSH/RDP/VNC services")
     q.set_defaults(func=cmd_scenario_add)
     q = sub.add_parser("scenario-edit", help="Edit a declared scenario VM and its health checks")
     q.add_argument("project"); q.add_argument("name")
@@ -3154,7 +3179,8 @@ def make_parser() -> argparse.ArgumentParser:
     q.add_argument("--template", required=True); q.add_argument("--node", default="auto", choices=sorted(NODES | {"auto"}), help="Legacy explicit node pin; defaults to Automatic"); q.add_argument("--preferred-node", default=None, choices=["",*sorted(NODES)], help="Soft suggestion with Automatic")
     q.add_argument("--cores", type=int, required=True); q.add_argument("--memory", type=int, required=True)
     q.add_argument("--health", required=True, help="JSON ping/TCP/HTTP health checks; empty uses ping")
-    q.add_argument("--guac-protocol", choices=("ssh", "rdp"), default=None)
+    q.add_argument("--guac-protocol", choices=("ssh", "rdp", "vnc"), default=None)
+    q.add_argument("--guac-protocols", default=None, help="JSON list of selected SSH/RDP/VNC services")
     q.set_defaults(func=cmd_scenario_edit)
     q = sub.add_parser("scenario-remove"); q.add_argument("project"); q.add_argument("name"); q.set_defaults(func=cmd_scenario_remove)
     q = sub.add_parser("container-add", help="Declare a scenario CT from an approved template")
@@ -3162,13 +3188,13 @@ def make_parser() -> argparse.ArgumentParser:
     q.add_argument("--ip", type=int, required=True); q.add_argument("--template", required=True)
     q.add_argument("--node", default="auto", choices=sorted(NODES | {"auto"}), help="Legacy explicit node pin; defaults to Automatic"); q.add_argument("--preferred-node", default="", choices=["",*sorted(NODES)], help="Soft suggestion with Automatic"); q.add_argument("--network", help="Custom network key")
     q.add_argument("--cores", type=int, default=1)
-    q.add_argument("--memory", type=int, default=1024); q.add_argument("--health", default="[]", help="JSON ping/TCP/HTTP readiness checks; empty uses ping"); q.add_argument("--guac-protocol", choices=("ssh", "rdp"), default="ssh"); q.set_defaults(func=cmd_container_add)
+    q.add_argument("--memory", type=int, default=1024); q.add_argument("--health", default="[]", help="JSON ping/TCP/HTTP readiness checks; empty uses ping"); q.add_argument("--guac-protocol", choices=("ssh", "rdp", "vnc"), default="ssh"); q.add_argument("--guac-protocols", default=None, help="JSON list of selected SSH/RDP/VNC services"); q.set_defaults(func=cmd_container_add)
     q = sub.add_parser("container-edit", help="Edit a declared scenario CT and its health checks")
     q.add_argument("project"); q.add_argument("name"); q.add_argument("--template", required=True)
     q.add_argument("--node", default="auto", choices=sorted(NODES | {"auto"}), help="Legacy explicit node pin; defaults to Automatic"); q.add_argument("--preferred-node", default=None, choices=["",*sorted(NODES)], help="Soft suggestion with Automatic"); q.add_argument("--ip", type=int, required=True)
     q.add_argument("--network", default="", help="Custom network key, or empty for the team's standard subnet")
     q.add_argument("--cores", type=int, required=True); q.add_argument("--memory", type=int, required=True)
-    q.add_argument("--health", required=True, help="JSON ping/TCP/HTTP health checks; empty uses ping"); q.add_argument("--guac-protocol", choices=("ssh", "rdp"), default=None)
+    q.add_argument("--health", required=True, help="JSON ping/TCP/HTTP health checks; empty uses ping"); q.add_argument("--guac-protocol", choices=("ssh", "rdp", "vnc"), default=None); q.add_argument("--guac-protocols", default=None, help="JSON list of selected SSH/RDP/VNC services")
     q.set_defaults(func=cmd_container_edit)
     q = sub.add_parser("container-remove"); q.add_argument("project"); q.add_argument("name"); q.set_defaults(func=cmd_container_remove)
     q = sub.add_parser("container-health"); q.add_argument("project"); q.add_argument("name", nargs="?"); q.set_defaults(func=cmd_container_health)

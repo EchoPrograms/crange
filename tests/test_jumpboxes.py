@@ -62,7 +62,10 @@ class JumpBoxSettingsTests(unittest.TestCase):
         metadata = after['scenario_boxes']['t254-desktop']
         self.assertTrue(metadata['is_jumpbox'])
         for key, value in before['scenario_boxes']['t254-desktop'].items():
+            if key == 'guac_services':
+                continue
             self.assertEqual(metadata[key], value)
+        self.assertEqual(metadata['guac_services'], ['ssh','rdp','vnc'])
 
     def test_rejects_missing_box_without_persisting(self):
         original = crange.json_config(self.project)
@@ -125,6 +128,12 @@ class RemoteServiceTests(unittest.TestCase):
     def test_legacy_connection_names_and_protocols_remain_stable(self):
         self.assertEqual(connection_records(3,'jumpbox','team1_jump01',{'team_id':'1'},'10.3.1.11')[0]['name'], 'P003 · team1_jump01')
         self.assertEqual(connection_records(3,'vm','web',{'team_id':'1','guac_protocol':'rdp'},'10.3.1.20')[0]['protocol'], 'rdp')
+        records = connection_records(3, 'vm', 'web',
+            {'team_id':'1', 'guac_protocol':'ssh', 'guac_services':['ssh','rdp','vnc']}, '10.3.1.20')
+        self.assertEqual([record['protocol'] for record in records], ['ssh','rdp','vnc'])
+        self.assertEqual(records[0]['name'], 'P003 · VM · web')
+        self.assertEqual([record['name'] for record in records[1:]],
+                         ['P003 · VM · web · RDP', 'P003 · VM · web · VNC'])
 
     def test_invalid_settings_and_arbitrary_job_fields_are_rejected(self):
         good = {'name':'t254-web','kind':'vm','display_name':'Web','is_jumpbox':True,'services':['ssh','vnc']}

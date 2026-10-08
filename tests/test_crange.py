@@ -189,6 +189,17 @@ jump_boxes = {
                 self.assertEqual(next(iter(boxes.values()))['guac_protocol'], protocol or 'ssh')
                 self.assertEqual(next(iter(containers.values()))['guac_protocol'], protocol or 'ssh')
 
+        vm.update(guac_protocol='ssh', guac_services=['ssh','rdp','vnc'])
+        ct.update(guac_protocol='rdp', guac_services=['rdp','vnc'])
+        release = {"release_id": "p003-1.1", "scenario": {
+            "boxes": [vm], "containers": [ct], "templates": {
+                "approved-base": {"template_id": 112, "template_node": "proxmox4"},
+                "approved-ct-base": {"template_id": 120, "template_node": "proxmox4"}}}}
+        boxes = crange.release_scenario_boxes(self.project, release, "1", "release-1")
+        containers = crange.release_scenario_containers(self.project, release, "1", "release-1")
+        self.assertEqual(next(iter(boxes.values()))['guac_services'], ['ssh','rdp','vnc'])
+        self.assertEqual(next(iter(containers.values()))['guac_services'], ['rdp','vnc'])
+
     def test_scenario_add_checks_team_template_and_ip(self):
         args = SimpleNamespace(
             project="3", name="web", team=0, ip=20, template="approved-base",
@@ -203,6 +214,31 @@ jump_boxes = {
         args.name = "other"
         with self.assertRaisesRegex(crange.CrangeError, "already assigned"):
             crange.cmd_scenario_add(args)
+
+    def test_scenario_and_container_protocol_lists_round_trip_and_legacy_edits(self):
+        vm_args = SimpleNamespace(project="3", name="desktop", team=0, ip=30,
+            network="", template="approved-base", node="proxmox4", cores=2,
+            memory=2048, full_clone=None, health='[]',
+            guac_protocols='["ssh","rdp","vnc"]')
+        crange.cmd_scenario_add(vm_args)
+        ct_args = SimpleNamespace(project="3", name="service", team=0, ip=31,
+            network="", template="approved-ct-base", node="proxmox4", cores=1,
+            memory=1024, health='[]', guac_protocols='["rdp","vnc"]')
+        crange.cmd_container_add(ct_args)
+        cfg = crange.json_config(self.project)
+        self.assertEqual(cfg['scenario_boxes']['t254-desktop']['guac_services'], ['ssh','rdp','vnc'])
+        self.assertEqual(cfg['scenario_boxes']['t254-desktop']['guac_protocol'], 'ssh')
+        self.assertEqual(cfg['scenario_containers']['t254-service']['guac_services'], ['rdp','vnc'])
+
+        edit = SimpleNamespace(project="3", name="t254-desktop", ip=30, network="",
+            template="approved-base", node="proxmox4", preferred_node=None,
+            cores=2, memory=2048, health='[]')
+        crange.cmd_scenario_edit(edit)
+        cfg = crange.json_config(self.project)
+        self.assertEqual(cfg['scenario_boxes']['t254-desktop']['guac_services'], ['ssh','rdp','vnc'])
+        edit.guac_protocols='["ssh","vnc"]'
+        crange.cmd_scenario_edit(edit)
+        self.assertEqual(crange.json_config(self.project)['scenario_boxes']['t254-desktop']['guac_services'], ['ssh','vnc'])
 
     def test_scenario_address_cannot_collide_with_jump_box(self):
         args = SimpleNamespace(project="3", name="web", team=1, ip=11, template="approved-base",

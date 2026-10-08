@@ -12,6 +12,24 @@ from test_admin_templates import DEFINITION
 
 
 class DistributionJobTests(unittest.TestCase):
+    def test_scenario_job_protocol_lists_are_unique_and_fixed(self):
+        base = {'name': 'web', 'team': 0, 'ip': 2, 'network': '', 'template': 'base',
+                'cores': 2, 'memory': 2048, 'health': []}
+        for operation in ('scenario-add', 'container-add'):
+            result = command(operation, 3, {**base, 'guac_protocols': ['ssh', 'rdp', 'vnc']})
+            self.assertEqual(result[result.index('--guac-protocols') + 1], '["ssh","rdp","vnc"]')
+        edit = {'name':'t254-web', 'ip':2, 'network':'', 'template':'base',
+                'node':'auto', 'cores':2, 'memory':2048, 'health':[]}
+        for operation in ('scenario-edit', 'container-edit'):
+            result = command(operation, 3, {**edit, 'guac_protocols':['rdp','vnc']})
+            self.assertEqual(result[result.index('--guac-protocols') + 1], '["rdp","vnc"]')
+        # Old callers that send one protocol keep their existing behavior.
+        result = command('scenario-add', 3, {**base, 'guac_protocol': 'rdp'})
+        self.assertEqual(result[result.index('--guac-protocols') + 1], '["rdp"]')
+        for protocols in ([], ['ssh', 'ssh'], ['telnet'], 'ssh'):
+            with self.subTest(protocols=protocols), self.assertRaises(ValueError):
+                command('scenario-add', 3, {**base, 'guac_protocols': protocols})
+
     def test_new_guests_default_to_auto_and_soft_preference_is_explicit(self):
         operations = {
             'network-add': {'name': 'lab', 'team': 0, 'id': 100},
