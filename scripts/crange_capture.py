@@ -14,6 +14,13 @@ from crange_scheduling import CONFIG, DATA, atomic_json, discover, node_locks, r
 
 PLATFORM_BASE_SOURCES = {
     ('proxmox4', 112): {'name': 'parrot-jump-template', 'required_tags': {'range-lan', 'jumpbox'}},
+    ('proxmox4', 115): {
+        'name': 'crange-build-mhl-server-2025-eval',
+        'required_tags': {'crange-template-build',
+                          'crange-build-286a35040ed44d52b36fb30d097d771d',
+                          'crange-image', 'mhl-windows-sealed'},
+        'template': False, 'os_family': 'windows',
+    },
 }
 
 
@@ -65,6 +72,66 @@ def _generalize_platform_derivative(api, node, vmid, *, timeout=120):
     raise DistributionError('Fixed platform identity cleanup timed out; derivative retained.')
 
 
+def _generalize_windows_platform_derivative(api, node, vmid, *, timeout=900):
+    """Run the fixed local Windows Sysprep answer file on an owned derivative.
+
+    The source Windows base is already generalized. This second pass prepares
+    the healthy identity-captured derivative as the immutable image that the
+    later source-probe will clone. Its OOBE answerfile is on the guest disk.
+    """
+    if node != 'proxmox4' or type(vmid) is not int or vmid < 100:
+        raise DistributionError('Invalid fixed Windows derivative scope.')
+    _require_probe_pool(api, node, 'qemu', vmid)
+    base = f'/nodes/{node}/qemu/{vmid}'
+    config = api.request('GET', base + '/config')
+    _owned(config)
+    tags = set(str(config.get('tags', '')).split(';'))
+    if ('crange-capture-windows-server2025-20261008' not in tags or
+            int(config.get('template', 0)) or
+            api.request('GET', base + '/status/current').get('status') != 'running'):
+        raise DistributionError('Windows Sysprep requires the exact running owned capture derivative.')
+    command = [r'C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe',
+        '-NoProfile', '-NonInteractive', '-Command',
+        "$ErrorActionPreference='Stop';$f='C:\\ProgramData\\CRANGE\\clone-unattend.xml';"
+        "if(-not(Test-Path -LiteralPath $f)){throw 'Fixed Windows clone answerfile missing'};"
+        "Start-Process -FilePath 'C:\\Windows\\System32\\Sysprep\\Sysprep.exe' "
+        "-ArgumentList '/generalize /oobe /shutdown /unattend:C:\\ProgramData\\CRANGE\\clone-unattend.xml' "
+        "-PassThru|Out-Null;Write-Output 'CRANGE_WINDOWS_SYSPREP_STARTED'"]
+    response = api.request('POST', base + '/agent/exec', {'command': command})
+    try:
+        pid = int(response['pid'])
+    except (TypeError, KeyError, ValueError) as exc:
+        raise DistributionError('QGA did not accept the fixed Windows Sysprep request.') from exc
+    deadline = time.monotonic() + min(timeout, 120)
+    launched = False
+    while time.monotonic() < deadline:
+        try:
+            result = api.request('GET', base + '/agent/exec-status', {'pid': pid})
+        except Exception:
+            # Sysprep may shut QGA down after PowerShell launched it. We still
+            # require a provider-observed stopped state below.
+            result = None
+        if result and result.get('exited'):
+            if int(result.get('exitcode', -1)) != 0 or result.get('out-data', '').strip() != 'CRANGE_WINDOWS_SYSPREP_STARTED':
+                raise DistributionError('Fixed Windows Sysprep did not launch successfully.')
+            launched = True
+            break
+        if api.request('GET', base + '/status/current').get('status') == 'stopped':
+            launched = True
+            break
+        time.sleep(1)
+    if not launched:
+        raise DistributionError('Fixed Windows Sysprep launch did not complete; derivative retained.')
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        if api.request('GET', base + '/status/current').get('status') == 'stopped':
+            return {'state': 'sysprep-generalized', 'os_family': 'windows',
+                    'answerfile': 'C:\\ProgramData\\CRANGE\\clone-unattend.xml',
+                    'shutdown_observed': True}
+        time.sleep(2)
+    raise DistributionError('Windows Sysprep did not shut down the owned derivative; it was retained.')
+
+
 def capture_policy(node, profile, policy_override=None):
     policy = policy_override if policy_override is not None else read_settings()[0]
     if not profile.get('agent_enabled'):
@@ -108,8 +175,10 @@ def capture_vm(api, *, project, node, source_id, name, description, slug, profil
             if platform_source:
                 admitted = PLATFORM_BASE_SOURCES.get((node, source_id))
                 tags = set(str(source.get('tags', '')).split(';'))
+                expected_template = int(admitted.get('template', True)) if admitted else 1
                 if (not admitted or source.get('name') != admitted['name'] or
-                        not admitted['required_tags'] <= tags or int(source.get('template', 0)) != 1):
+                        not admitted['required_tags'] <= tags or
+                        int(source.get('template', 0)) != expected_template):
                     raise DistributionError('Platform base source is outside the fixed administrator source map.')
             elif int(source.get('template', 0)):
                 raise DistributionError('Staging source must not be an immutable template.')
@@ -168,11 +237,16 @@ def capture_vm(api, *, project, node, source_id, name, description, slug, profil
                             (recorded_task.get('state') == 'confirmed-terminal-error' and
                              (expected_task != shutdown_path or 'powerdown failed - got timeout' not in str(provider_task.get('exitstatus', ''))))):
                         raise DistributionError('Platform provider task is not confirmed successful; retain receipt for review.')
-                if guest_may_be_running:
+                windows_resume = (resume_template and profile.get('init_system') == 'windows' and
+                    expected_task == shutdown_path and
+                    receipt.get('generalization', {}).get('state') == 'sysprep-generalized' and
+                    api.status(node, allocated_vmid) == 'stopped')
+                if guest_may_be_running and not windows_resume:
                     raise DistributionError('Platform recovery has no successful final shutdown task.')
                 if resume_template:
                     if expected_task != start_path:
-                        raise DistributionError('Platform template recovery did not follow a complete start/shutdown pair.')
+                        if not windows_resume:
+                            raise DistributionError('Platform template recovery did not follow a complete guest-generalization sequence.')
                     template_task = receipt['provider_tasks'][-1]
                     if template_task.get('state') != 'confirmed-terminal':
                         raise DistributionError('Platform template conversion is not confirmed terminal.')
@@ -266,8 +340,8 @@ def capture_vm(api, *, project, node, source_id, name, description, slug, profil
                 from crange_catalog import validate_source_identity
                 validate_source_identity(identity.get('source_identity'))
                 generalization = receipt.get('generalization') or {
-                    'state': 'generalized', 'machine_id_reset': True,
-                    'ssh_host_keys_reset': True, 'authorized_keys_touched': False,
+                    'state': 'generalized',
+                    'os_family': 'windows' if profile.get('init_system') == 'windows' else 'linux',
                     'recovered_from_confirmed_template_task': True}
                 receipt['generalization'] = generalization
                 atomic_json(receipt_path, receipt)
@@ -293,8 +367,12 @@ def capture_vm(api, *, project, node, source_id, name, description, slug, profil
                     try:
                         identity = capture_source_identity(api, node=node, kind='vm', vmid=vmid,
                             job_id=identity_job, journal=journal, init_system=profile.get('init_system', 'systemd'))
-                        generalization = (_generalize_platform_derivative(api, node, vmid)
-                                          if platform_source else None)
+                        if platform_source and profile.get('init_system') == 'windows':
+                            generalization = _generalize_windows_platform_derivative(api, node, vmid)
+                        elif platform_source:
+                            generalization = _generalize_platform_derivative(api, node, vmid)
+                        else:
+                            generalization = None
                         break
                     except (DistributionError, RuntimeError):
                         if time.monotonic() >= deadline:
@@ -304,9 +382,13 @@ def capture_vm(api, *, project, node, source_id, name, description, slug, profil
                             task('POST', base + '/status/shutdown', {'timeout': 90, 'forceStop': 0})
                             raise
                         time.sleep(2)
-                task('POST', base + '/status/shutdown', {'timeout': 90, 'forceStop': 0})
+                if not (platform_source and profile.get('init_system') == 'windows'):
+                    task('POST', base + '/status/shutdown', {'timeout': 90, 'forceStop': 0})
                 if api.status(node, vmid) != 'stopped':
                     raise DistributionError('Captured guest did not shut down cleanly.')
+                if generalization:
+                    receipt['generalization'] = generalization
+                    atomic_json(receipt_path, receipt)
                 task('POST', base + '/template', {})
                 config = api.vm(node, vmid)
             if int(config.get('template', 0)) != 1 or _source_config_identity(config, vmid) != identity['source_config_sha256']:

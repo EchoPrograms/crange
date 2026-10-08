@@ -596,6 +596,20 @@ def _source_guest_type(capture):
     return 'qemu' if kind == 'vm' else 'lxc'
 
 
+def _source_capture_profile(capture):
+    identity = capture.get('source_identity', {}) if isinstance(capture, dict) else {}
+    if identity.get('os_family') == 'windows':
+        if (capture.get('os_family') != 'windows' or 'init_system' in capture or
+                capture.get('readiness') != 'windows-ready'):
+            raise DistributionError('Windows identity record is not bound to the Windows capture profile.')
+        return 'windows'
+    init_system = capture.get('init_system') if isinstance(capture, dict) else None
+    expected = 'running' if init_system == 'systemd' else 'default'
+    if init_system not in ('systemd', 'openrc') or capture.get('readiness') != expected:
+        raise DistributionError('Identity record is not bound to a supported guest capture profile.')
+    return init_system
+
+
 def _source_capacity(config, kind):
     if kind == 'qemu':
         return _qemu_capacity(config)
@@ -860,6 +874,23 @@ def _guest_readiness(read, init_system):
     raise DistributionError('OpenRC readiness command failed.') from failure
 
 
+def _windows_guest_identity(read):
+    """Collect fixed Windows identity/readiness fields through QEMU Guest Agent."""
+    script = r"""$ErrorActionPreference='Stop';$os=Get-CimInstance Win32_OperatingSystem;$cs=Get-CimInstance Win32_ComputerSystem;$admin=Get-CimInstance Win32_UserAccount|Where-Object {$_.LocalAccount -and $_.Name -eq 'Administrator'}|Select-Object -First 1;$guid=(Get-ItemProperty 'HKLM:\SOFTWARE\Microsoft\Cryptography').MachineGuid;$imageState=(Get-ItemProperty 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Setup\State').ImageState;$ga=Get-Service QEMU-GA;$term=Get-Service TermService;$winrm=Get-Service WinRM;$rdp=@(Get-NetFirewallRule -DisplayGroup 'Remote Desktop' -Enabled True|Get-NetFirewallAddressFilter|Select-Object -ExpandProperty RemoteAddress -Unique);[ordered]@{os_caption=$os.Caption;os_version=$os.Version;os_build=[string]$os.BuildNumber;computer_name=$cs.Name;part_of_domain=[bool]$cs.PartOfDomain;machine_guid=$guid;local_administrator_sid=$admin.SID;machine_sid=($admin.SID -replace '-500$','');image_state=$imageState;qemu_guest_agent=($ga.Status -eq 'Running');term_service_running=($term.Status -eq 'Running');winrm_service_running=($winrm.Status -eq 'Running');rdp_allowed_sources=$rdp}|ConvertTo-Json -Compress"""
+    raw = read([r'C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe',
+                '-NoProfile', '-NonInteractive', '-Command', script])
+    try:
+        identity = json.loads(raw)
+    except (TypeError, ValueError) as exc:
+        raise DistributionError('Windows source identity response is not valid JSON.') from exc
+    if not isinstance(identity, dict):
+        raise DistributionError('Windows source identity response is not an object.')
+    identity['os_family'] = 'windows'
+    from crange_catalog import validate_source_identity
+    validate_source_identity(identity)
+    return identity
+
+
 def capture_source_identity(api, *, node, kind, vmid, job_id, journal, ct_exec=None, timeout=60, init_system='systemd'):
     """Read fixed identity commands before reviewed stop/template conversion.
 
@@ -869,7 +900,8 @@ def capture_source_identity(api, *, node, kind, vmid, job_id, journal, ct_exec=N
     from crange_catalog import validate_source_identity
     if (node not in {f'proxmox{i}' for i in range(1, 7)} or kind not in ('vm', 'container')
             or type(vmid) is not int or vmid < 100 or not re.fullmatch(r'[a-zA-Z0-9-]{1,64}', job_id)
-            or init_system not in ('systemd', 'openrc') or not 1 <= timeout <= 180):
+            or init_system not in ('systemd', 'openrc', 'windows') or
+            (init_system == 'windows' and kind != 'vm') or not 1 <= timeout <= 180):
         raise DistributionError('Invalid source identity capture scope.')
     guest_type = 'qemu' if kind == 'vm' else 'lxc'
     base = f'/nodes/{node}/{guest_type}/{vmid}'
@@ -879,18 +911,26 @@ def capture_source_identity(api, *, node, kind, vmid, job_id, journal, ct_exec=N
     if int(config.get('template', 0)) or api.request('GET', base + '/status/current').get('status') != 'running':
         raise DistributionError('Identity capture requires an owned running guest before template conversion.')
     read = lambda command: _fixed_guest_read(api, node, guest_type, vmid, command, ct_exec, timeout)
-    readiness = _guest_readiness(read, init_system)
-    if readiness != ('running' if init_system == 'systemd' else 'default'):
-        raise DistributionError('Source guest is not ready for identity capture.')
-    identity = {'machine_id': read(['/bin/cat', '/etc/machine-id']),
-                'ssh_host_key': read(['/bin/cat', '/etc/ssh/ssh_host_ed25519_key.pub'])}
-    validate_source_identity(identity)
+    if init_system == 'windows':
+        identity = _windows_guest_identity(read)
+        readiness = 'windows-ready'
+    else:
+        readiness = _guest_readiness(read, init_system)
+        if readiness != ('running' if init_system == 'systemd' else 'default'):
+            raise DistributionError('Source guest is not ready for identity capture.')
+        identity = {'machine_id': read(['/bin/cat', '/etc/machine-id']),
+                    'ssh_host_key': read(['/bin/cat', '/etc/ssh/ssh_host_ed25519_key.pub'])}
+        validate_source_identity(identity)
     if config != api.request('GET', base + '/config') or api.request('GET', base + '/status/current').get('status') != 'running':
         raise DistributionError('Source changed during identity capture; repeat capture.')
     record = {'state': 'identity-captured', 'job_id': job_id, 'node': node, 'kind': kind,
               'source_id': vmid, 'source_config_sha256': _source_config_identity(config, vmid),
-              'source_identity': identity, 'init_system': init_system, 'readiness': readiness,
+              'source_identity': identity, 'readiness': readiness,
               'captured_at': datetime.now(timezone.utc).isoformat()}
+    if init_system == 'windows':
+        record['os_family'] = 'windows'
+    else:
+        record['init_system'] = init_system
     journal(record)
     return record
 
@@ -928,11 +968,19 @@ def export_image(api, *, node, kind, vmid, storage, job_id, journal,
         if any(str(k).startswith(('lxc.mount', 'dev')) for k in config):
             raise DistributionError('Captured CT external mounts/devices are unsupported.')
     from crange_catalog import validate_source_identity
-    if (not isinstance(identity_record, dict) or identity_record.get('state') != 'identity-captured'
+    identity_record = identity_record if isinstance(identity_record, dict) else {}
+    windows_capture = identity_record.get('source_identity', {}).get('os_family') == 'windows'
+    profile_valid = (
+        identity_record.get('os_family') == 'windows' and
+        'init_system' not in identity_record and identity_record.get('readiness') == 'windows-ready'
+        if windows_capture else
+        identity_record.get('init_system') in ('systemd', 'openrc') and
+        identity_record.get('readiness') == ('running' if identity_record.get('init_system') == 'systemd' else 'default')
+    )
+    if (identity_record.get('state') != 'identity-captured'
             or (identity_record.get('node'), identity_record.get('kind'), identity_record.get('source_id')) != (node, kind, vmid)
             or identity_record.get('source_config_sha256') != _source_config_identity(config, vmid)
-            or identity_record.get('init_system') not in ('systemd', 'openrc')
-            or identity_record.get('readiness') != ('running' if identity_record['init_system'] == 'systemd' else 'default')):
+            or not profile_valid):
         raise DistributionError('Matching worker-captured source identity is required before export.')
     validate_source_identity(identity_record.get('source_identity'))
     content_path = f'/nodes/{node}/storage/{storage}/content'
@@ -949,10 +997,13 @@ def export_image(api, *, node, kind, vmid, storage, job_id, journal,
             'storage': storage, 'disk_gb': disk_gb,
             'source_identity': dict(identity_record['source_identity']),
             'identity_capture': dict(identity_record),
-            'init_system': identity_record['init_system'],
             'memory_mb': int(config.get('memory', 0)),
             'cpu_cores': int(config.get('cores', 0)),
         }
+        if not windows_capture:
+            expected['init_system'] = identity_record['init_system']
+        else:
+            expected['os_family'] = 'windows'
         if any(prior.get(key) != value for key, value in expected.items()):
             raise DistributionError('Existing export journal does not match this exact captured template.')
         if prior.get('state') == 'exported':
@@ -1005,8 +1056,11 @@ def export_image(api, *, node, kind, vmid, storage, job_id, journal,
                   storage=storage, state='exporting', disk_gb=disk_gb,
                   content_before=sorted(before),
                   source_identity=dict(identity_record['source_identity']), identity_capture=dict(identity_record),
-                  init_system=identity_record['init_system'],
                   memory_mb=int(config.get('memory', 0)), cpu_cores=int(config.get('cores', 0)))
+    if windows_capture:
+        record['os_family'] = 'windows'
+    else:
+        record['init_system'] = identity_record['init_system']
     journal(record)
     upid = api.request('POST', f'/nodes/{node}/vzdump',
         {'vmid': vmid, 'storage': storage, 'mode': 'stop', 'compress': 'zstd',
@@ -1079,11 +1133,18 @@ def publish_exported_image(catalog, image_id, export, *, architecture,
     from crange_catalog import validate_source_identity
     validate_source_identity(export.get('source_identity'))
     capture = export.get('identity_capture', {})
+    windows_capture = export['source_identity'].get('os_family') == 'windows'
+    profile_valid = (
+        capture.get('os_family') == 'windows' and 'init_system' not in capture
+        and 'init_system' not in export and capture.get('readiness') == 'windows-ready'
+        if windows_capture else
+        capture.get('init_system') in ('systemd', 'openrc')
+        and export.get('init_system') == capture.get('init_system')
+        and capture.get('readiness') == ('running' if capture.get('init_system') == 'systemd' else 'default')
+    )
     if (capture.get('state') != 'identity-captured' or not capture.get('job_id')
             or capture.get('source_identity') != export['source_identity']
-            or capture.get('init_system') not in ('systemd', 'openrc')
-            or export.get('init_system') != capture['init_system']
-            or capture.get('readiness') != ('running' if capture['init_system'] == 'systemd' else 'default')
+            or not profile_valid
             or (capture.get('node'), capture.get('kind'), capture.get('source_id')) != (export['node'], export['kind'], export['source_id'])
             or not re.fullmatch(r'[a-f0-9]{64}', capture.get('source_config_sha256', ''))):
         raise DistributionError('Export is missing bound source identity capture provenance.')
@@ -1091,11 +1152,10 @@ def publish_exported_image(catalog, image_id, export, *, architecture,
     disk_gb = export.get('disk_gb')
     if not isinstance(disk_gb, (int, float)) or isinstance(disk_gb, bool) or not math.isfinite(disk_gb) or disk_gb <= 0:
         raise DistributionError('Published image requires a defensible configured disk size.')
-    return publish_image(catalog, image_id, {
+    definition = {
         'kind': export['kind'], 'architecture': architecture, 'disk_gb': disk_gb,
         'memory_mb': export.get('memory_mb'), 'cpu_cores': export.get('cpu_cores'),
         'source_identity': dict(export['source_identity']), 'identity_capture': dict(capture),
-        'init_system': capture['init_system'],
         'artifact_sha256': export['artifact_sha256'],
         'artifact': {'volume_id': export['volume_id'], 'node': export['node'],
                      'format': 'vzdump', 'complete_capture': True, 'source_id': export['source_id']},
@@ -1105,23 +1165,34 @@ def publish_exported_image(catalog, image_id, export, *, architecture,
                       'datastore_id': datastore_id, 'state': 'ready',
                       'artifact_sha256': export['artifact_sha256'],
                       'verified_at': datetime.now(timezone.utc).isoformat(),
-                      'verification': verification}]})
+                      'verification': verification}]}
+    if windows_capture:
+        definition['os_family'] = 'windows'
+    else:
+        definition['init_system'] = capture['init_system']
+    return publish_image(catalog, image_id, definition)
 
 
 class ProbeVerifier:
-    """Fixed Linux probe checks on a disconnected administrator-approved bridge.
+    """Fixed guest checks on a disconnected administrator-approved bridge.
 
     Source identities must be collected during reviewed capture, not invented.
-    VM guest-agent must be enabled; CT exec uses the trusted SSH host adapter.
-    This gate checks boot readiness and identity, not scenario service networking.
+    Windows guests use QEMU Agent-collected MachineGuid and local SID values;
+    Linux guests use machine-id and Ed25519 host keys. CT exec remains fixed.
     """
     def __init__(self, isolated_bridge, approved_bridges, source_identity,
                  *, ct_exec=None, timeout=180, init_system="systemd"):
         if isolated_bridge not in approved_bridges or not re.fullmatch(r'[a-zA-Z0-9_-]{1,15}', isolated_bridge):
             raise DistributionError('Probe bridge is not approved.')
-        if not source_identity.get('machine_id') or not source_identity.get('ssh_host_key'):
+        windows_source = source_identity.get('os_family') == 'windows'
+        if windows_source:
+            from crange_catalog import validate_source_identity
+            validate_source_identity(source_identity)
+            if init_system != 'windows':
+                raise DistributionError('Windows source requires the Windows guest profile.')
+        elif not source_identity.get('machine_id') or not source_identity.get('ssh_host_key'):
             raise DistributionError('Captured source identity evidence is required.')
-        if init_system not in ('systemd', 'openrc'):
+        elif init_system not in ('systemd', 'openrc'):
             raise DistributionError('Unsupported reviewed guest readiness profile.')
         self.init_system = init_system
         self.bridge, self.source = isolated_bridge, source_identity
@@ -1175,6 +1246,27 @@ class ProbeVerifier:
                     return str(result.get('out-data', '')).strip()
                 time.sleep(1)
             raise DistributionError('Probe guest-agent check timed out.')
+        if self.init_system == 'windows':
+            deadline = time.monotonic() + self.timeout
+            identity = None
+            while time.monotonic() < deadline:
+                try:
+                    identity = _windows_guest_identity(read)
+                    break
+                except Exception:
+                    # QEMU Agent availability may precede Windows service readiness.
+                    pass
+                time.sleep(2)
+            if identity is None:
+                raise DistributionError('Disposable Windows clone did not become ready.')
+            unique = (identity['machine_guid'] != self.source['machine_guid'] and
+                      identity['machine_sid'] != self.source['machine_sid'] and
+                      identity['local_administrator_sid'] != self.source['local_administrator_sid'] and
+                      identity['os_caption'] == self.source['os_caption'] and
+                      identity['os_build'] == self.source['os_build'])
+            return {'passed': unique, 'identity_unique': unique,
+                    'evidence': {'readiness': 'windows-ready', 'identity': identity,
+                                 'isolated_bridge': self.bridge}}
         deadline = time.monotonic() + self.timeout
         readiness = ''
         while time.monotonic() < deadline:
@@ -1303,7 +1395,7 @@ def main(argv=None):
     capture.add_argument('--kind', choices=['vm', 'container'], required=True)
     capture.add_argument('--source-id', type=int, required=True)
     capture.add_argument('--job-id', required=True)
-    capture.add_argument('--init-system', choices=['systemd', 'openrc'], default='systemd')
+    capture.add_argument('--init-system', choices=['systemd', 'openrc', 'windows'], default='systemd')
     export = commands.add_parser('export')
     export.add_argument('--node', required=True)
     export.add_argument('--kind', choices=['vm', 'container'], required=True)
@@ -1413,14 +1505,13 @@ def main(argv=None):
         capture = json.loads(args.identity_record.read_text())
         validate_source_identity(capture.get('source_identity'))
         kind = _source_guest_type(capture)
+        profile = _source_capture_profile(capture)
         if ((capture.get('state'), capture.get('node'), capture.get('kind'), capture.get('source_id')) !=
                 ('identity-captured', args.source_node, 'vm' if kind == 'qemu' else 'container', args.source_id) or
-                capture.get('init_system') not in ('systemd', 'openrc') or
-                capture.get('readiness') != ('running' if capture['init_system'] == 'systemd' else 'default') or
                 not capture.get('job_id')):
             raise DistributionError('Identity record is not bound to the selected captured source.')
         verify = ProbeVerifier(args.isolated_bridge, policy.get('isolated_bridges', []),
-            capture['source_identity'], ct_exec=SSHContainerExec(), init_system=capture['init_system'])
+            capture['source_identity'], ct_exec=SSHContainerExec(), init_system=profile)
         ledger = ReservationLedger(scheduling.DATA / 'reservations.sqlite3')
         source_ref = f'source:{args.source_node}:{kind}:{args.source_id}'
         source_sha = capture['source_config_sha256']
@@ -1474,14 +1565,13 @@ def main(argv=None):
         capture = json.loads(args.identity_record.read_text())
         validate_source_identity(capture.get('source_identity'))
         kind = _source_guest_type(capture)
+        profile = _source_capture_profile(capture)
         if ((capture.get('state'), capture.get('node'), capture.get('kind'), capture.get('source_id')) !=
                 ('identity-captured', args.source_node, 'vm' if kind == 'qemu' else 'container', args.source_id) or
-                capture.get('init_system') not in ('systemd', 'openrc') or
-                capture.get('readiness') != ('running' if capture['init_system'] == 'systemd' else 'default') or
                 not capture.get('job_id')):
             raise DistributionError('Identity record is not bound to the selected captured source.')
         verify = ProbeVerifier(args.isolated_bridge, policy.get('isolated_bridges', []),
-            capture['source_identity'], ct_exec=SSHContainerExec(), init_system=capture['init_system'])
+            capture['source_identity'], ct_exec=SSHContainerExec(), init_system=profile)
         ledger = ReservationLedger(scheduling.DATA / 'reservations.sqlite3')
         source_ref = f'source:{args.source_node}:{kind}:{args.source_id}'
         source_sha = capture['source_config_sha256']
@@ -1547,7 +1637,8 @@ def main(argv=None):
         from crange_catalog import validate_source_identity
         validate_source_identity(source_identity)
         verify = ProbeVerifier(args.isolated_bridge, policy.get('isolated_bridges', []),
-            source_identity, ct_exec=SSHContainerExec())
+            source_identity, ct_exec=SSHContainerExec(),
+            init_system='windows' if source_identity.get('os_family') == 'windows' else 'systemd')
         archive = json.loads(args.archive.read_text()) if args.archive else None
         ledger = ReservationLedger(scheduling.DATA / 'reservations.sqlite3')
         try:

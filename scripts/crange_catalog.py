@@ -13,6 +13,33 @@ class CatalogError(ValueError):
 
 
 def validate_source_identity(identity):
+    if isinstance(identity, dict) and identity.get('os_family') == 'windows':
+        guid = str(identity.get('machine_guid', ''))
+        sid = str(identity.get('machine_sid', ''))
+        admin_sid = str(identity.get('local_administrator_sid', ''))
+        name = str(identity.get('computer_name', ''))
+        sid_pattern = r'S-1-5-21-([1-9][0-9]{0,9})-([1-9][0-9]{0,9})-([1-9][0-9]{0,9})'
+        valid_sid = re.fullmatch(sid_pattern, sid)
+        valid_name = re.fullmatch(r'[A-Za-z0-9](?:[A-Za-z0-9-]{0,13}[A-Za-z0-9])?', name)
+        try:
+            parsed_guid = __import__('uuid').UUID(guid)
+            valid_guid = str(parsed_guid) == guid.lower() and parsed_guid.int != 0
+        except (ValueError, AttributeError):
+            valid_guid = False
+        if (not valid_guid or not valid_sid or admin_sid != sid + '-500' or not valid_name
+                or not str(identity.get('os_caption', '')).startswith('Microsoft Windows Server ')
+                or not re.fullmatch(r'[0-9]+(?:\.[0-9]+){1,3}', str(identity.get('os_version', '')))
+                or not re.fullmatch(r'[0-9]{4,6}', str(identity.get('os_build', '')))
+                or identity.get('qemu_guest_agent') is not True
+                or identity.get('term_service_running') is not True
+                or identity.get('winrm_service_running') is not True
+                or identity.get('image_state') != 'IMAGE_STATE_COMPLETE'
+                or identity.get('part_of_domain') is not False
+                or identity.get('rdp_allowed_sources') != ['10.60.0.20']):
+            raise CatalogError('Captured Windows source identity or readiness evidence is invalid')
+        return identity
+    if isinstance(identity, dict) and identity.get('os_family') not in (None, 'linux'):
+        raise CatalogError('Captured source operating-system family is invalid')
     if not isinstance(identity, dict) or not re.fullmatch(r'[a-f0-9]{32}', identity.get('machine_id', '')) or identity['machine_id'] == '0' * 32:
         raise CatalogError('Captured source machine identity is invalid')
     parts = str(identity.get('ssh_host_key', '')).split()
@@ -84,7 +111,10 @@ def validate_catalog(catalog):
             capture = image['identity_capture']
             if not isinstance(capture, dict):
                 raise CatalogError(f'{image_id}: identity capture provenance must be an object')
-            if ('init_system' in capture or 'init_system' in image) and (
+            if capture.get('source_identity', {}).get('os_family') == 'windows':
+                if image.get('os_family') != 'windows' or capture.get('os_family') != 'windows' or 'init_system' in capture or 'init_system' in image:
+                    raise CatalogError(f'{image_id}: Windows identity capture profile is inconsistent')
+            elif ('init_system' in capture or 'init_system' in image) and (
                     capture.get('init_system') not in ('systemd', 'openrc')
                     or capture.get('init_system') != image.get('init_system')):
                 raise CatalogError(f'{image_id}: identity capture init_system is invalid or inconsistent')

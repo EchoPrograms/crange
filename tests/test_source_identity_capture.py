@@ -7,12 +7,71 @@ import tempfile
 import unittest
 from unittest.mock import Mock, call
 sys.path.insert(0,str(pathlib.Path(__file__).resolve().parents[1]/'scripts'))
-from crange_distribution import capture_source_identity, export_image, DistributionError, _source_config_identity, FileJournal
+from crange_distribution import (capture_source_identity, export_image, DistributionError,
+                                 _source_config_identity, FileJournal, ProbeVerifier)
 from crange_catalog import validate_source_identity, CatalogError
 
 KEY='ssh-ed25519 '+base64.b64encode(struct.pack('>I',11)+b'ssh-ed25519'+struct.pack('>I',32)+b'a'*32).decode()
+WINDOWS_SOURCE={'os_family':'windows','machine_guid':'bdce686e-757d-492c-8a6a-0451c365d0ea',
+    'machine_sid':'S-1-5-21-1429816746-3004255909-1098465845',
+    'local_administrator_sid':'S-1-5-21-1429816746-3004255909-1098465845-500',
+    'computer_name':'MHL-WINBASE','os_caption':'Microsoft Windows Server 2025 Standard Evaluation',
+    'os_version':'10.0.26100','os_build':'26100','part_of_domain':False,
+    'image_state':'IMAGE_STATE_COMPLETE',
+    'qemu_guest_agent':True,'term_service_running':True,'winrm_service_running':True,
+    'rdp_allowed_sources':['10.60.0.20']}
 
 class CaptureTests(unittest.TestCase):
+    def test_windows_source_identity_requires_realistic_server_and_machine_identifiers(self):
+        self.assertIs(validate_source_identity(WINDOWS_SOURCE), WINDOWS_SOURCE)
+        for key, value in (('machine_guid','not-a-guid'),('machine_sid','S-1-5-21-0-1-2'),
+                           ('local_administrator_sid','S-1-5-21-1-2-3-501'),
+                           ('computer_name','invalid host'),('part_of_domain',True),
+                           ('qemu_guest_agent',False),('rdp_allowed_sources',['0.0.0.0/0']),
+                           ('image_state','IMAGE_STATE_GENERALIZE_RESEAL_TO_OOBE')):
+            with self.subTest(key=key):
+                identity={**WINDOWS_SOURCE,key:value}
+                with self.assertRaises(CatalogError):validate_source_identity(identity)
+
+    def test_windows_capture_reads_identity_through_fixed_qga_command(self):
+        api,config,_=self.fixture('vm')
+        from unittest.mock import patch
+        import json
+        expected={k:v for k,v in WINDOWS_SOURCE.items() if k!='os_family'}
+        with patch('crange_distribution._fixed_guest_read',return_value=json.dumps(expected)) as read:
+            journal=Mock()
+            record=capture_source_identity(api,node='proxmox2',kind='vm',vmid=100,
+                job_id='win-capture-1',journal=journal,init_system='windows')
+        command=read.call_args.args[4]
+        self.assertEqual(command[0],r'C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe')
+        self.assertEqual(command[1:3],['-NoProfile','-NonInteractive'])
+        self.assertIn('Get-CimInstance Win32_OperatingSystem',command[-1])
+        self.assertIn('Setup\\State',command[-1])
+        self.assertEqual(record['readiness'],'windows-ready')
+        self.assertEqual(record['os_family'],'windows')
+        self.assertNotIn('init_system',record)
+        self.assertEqual(record['source_identity'],WINDOWS_SOURCE)
+        journal.assert_called_once_with(record)
+
+    def test_windows_probe_requires_machine_guid_and_local_sid_to_change(self):
+        from unittest.mock import patch
+        import json
+        source=dict(WINDOWS_SOURCE)
+        clone={**source,'machine_guid':'fc9f4512-9372-4428-9364-221e5572ce8b',
+               'machine_sid':'S-1-5-21-120001-220002-330003',
+               'local_administrator_sid':'S-1-5-21-120001-220002-330003-500'}
+        api=Mock()
+        api.request.side_effect=[{'pid':1},{'exited':True,'exitcode':0,'out-data':json.dumps({k:v for k,v in clone.items() if k!='os_family'})}]
+        verifier=ProbeVerifier('crprobe1450',['crprobe1450'],source,init_system='windows')
+        result=verifier._check_guest(api,'proxmox2','qemu',100)
+        self.assertTrue(result['passed'])
+        self.assertTrue(result['identity_unique'])
+        self.assertEqual(result['evidence']['identity']['machine_guid'],clone['machine_guid'])
+
+        same=Mock()
+        same.request.side_effect=[{'pid':1},{'exited':True,'exitcode':0,'out-data':json.dumps({k:v for k,v in source.items() if k!='os_family'})}]
+        self.assertFalse(verifier._check_guest(same,'proxmox2','qemu',100)['identity_unique'])
+
     def test_template_conversion_only_normalizes_same_guest_disk_prefix(self):
         before = {'scsi0': 'local-lvm:vm-8830-disk-0,size=20G', 'memory': 512,
                   'net0': 'virtio=AA:BB,bridge=crprobe1450,link_down=1'}
