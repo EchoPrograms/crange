@@ -49,6 +49,13 @@ application `.40`, CI `.50`, and backups `.60`. Team 0 uses the same host octets
 on network 254. Any additional warehouse subnet must be declared and captured
 with the release, not added through an unmanaged host route.
 
+The current no-secret assignment draft is [`scenario-draft.json`](scenario-draft.json).
+It records all six Team 0 business hosts, ten assessor accounts, and twenty
+participant boxes. Linux jump boxes are declared in Project 100 at `.11` and
+`.13`; their paired Windows boxes are reserved for `.12` and `.14` after the
+Windows base image is published. The draft does not assign a Windows image or
+credential value before those are available through the approved workflow.
+
 ## Design principles
 
 The network uses normal routing and team isolation; do not exploit or weaken

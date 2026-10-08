@@ -15,16 +15,33 @@
     update_cache: true
     cache_valid_time: 3600
 
+- name: Discover the installed PostgreSQL cluster
+  ansible.builtin.command: pg_lsclusters --no-header
+  register: mhl_postgres_clusters
+  changed_when: false
+
+- name: Require one active PostgreSQL cluster
+  ansible.builtin.assert:
+    that:
+      - mhl_postgres_clusters.stdout_lines | length == 1
+      - mhl_postgres_clusters.stdout.split()[0] is match('^[0-9]+$')
+      - mhl_postgres_clusters.stdout.split()[3] == 'online'
+    fail_msg: The database role expects exactly one online Debian PostgreSQL cluster.
+
+- name: Record installed PostgreSQL configuration path
+  ansible.builtin.set_fact:
+    mhl_postgres_config_dir: "/etc/postgresql/{{ mhl_postgres_clusters.stdout.split()[0] }}/{{ mhl_postgres_clusters.stdout.split()[1] }}"
+
 - name: Set PostgreSQL to listen on the team LAN
   ansible.builtin.lineinfile:
-    path: /etc/postgresql/15/main/postgresql.conf
+    path: "{{ mhl_postgres_config_dir }}/postgresql.conf"
     regexp: '^#?listen_addresses\s*='
     line: "listen_addresses = '{{ mhl_db_ip }}'"
   notify: Restart PostgreSQL
 
 - name: Permit only the matching application host to connect
   ansible.builtin.lineinfile:
-    path: /etc/postgresql/15/main/pg_hba.conf
+    path: "{{ mhl_postgres_config_dir }}/pg_hba.conf"
     insertafter: '^# IPv4 local connections:'
     line: "host    mhl_ops    mhl_runtime    {{ mhl_app_ip }}/32    scram-sha-256"
     state: present

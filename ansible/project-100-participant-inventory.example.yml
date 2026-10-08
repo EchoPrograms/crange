@@ -1,0 +1,27 @@
+---
+all:
+  children:
+    mhl_linux_assessors:
+      hosts:
+        MHL-T1-Linux01: { ansible_host: 10.100.1.11, mhl_project_id: 100, mhl_network_id: 1, mhl_assessor_number: 1, mhl_guest_hostname: MHL-LINUX01 }
+        MHL-T1-Linux02: { ansible_host: 10.100.1.13, mhl_project_id: 100, mhl_network_id: 1, mhl_assessor_number: 2, mhl_guest_hostname: MHL-LINUX02 }
+        MHL-T2-Linux01: { ansible_host: 10.100.2.11, mhl_project_id: 100, mhl_network_id: 2, mhl_assessor_number: 1, mhl_guest_hostname: MHL-LINUX01 }
+        MHL-T2-Linux02: { ansible_host: 10.100.2.13, mhl_project_id: 100, mhl_network_id: 2, mhl_assessor_number: 2, mhl_guest_hostname: MHL-LINUX02 }
+        MHL-T3-Linux01: { ansible_host: 10.100.3.11, mhl_project_id: 100, mhl_network_id: 3, mhl_assessor_number: 1, mhl_guest_hostname: MHL-LINUX01 }
+        MHL-T3-Linux02: { ansible_host: 10.100.3.13, mhl_project_id: 100, mhl_network_id: 3, mhl_assessor_number: 2, mhl_guest_hostname: MHL-LINUX02 }
+        MHL-T4-Linux01: { ansible_host: 10.100.4.11, mhl_project_id: 100, mhl_network_id: 4, mhl_assessor_number: 1, mhl_guest_hostname: MHL-LINUX01 }
+        MHL-T4-Linux02: { ansible_host: 10.100.4.13, mhl_project_id: 100, mhl_network_id: 4, mhl_assessor_number: 2, mhl_guest_hostname: MHL-LINUX02 }
+        MHL-T5-Linux01: { ansible_host: 10.100.5.11, mhl_project_id: 100, mhl_network_id: 5, mhl_assessor_number: 1, mhl_guest_hostname: MHL-LINUX01 }
+        MHL-T5-Linux02: { ansible_host: 10.100.5.13, mhl_project_id: 100, mhl_network_id: 5, mhl_assessor_number: 2, mhl_guest_hostname: MHL-LINUX02 }
+    mhl_windows_assessors:
+      hosts:
+        MHL-T1-Windows01: { ansible_host: 10.100.1.12, mhl_project_id: 100, mhl_network_id: 1, mhl_assessor_number: 1, mhl_guest_hostname: MHL-WIN01 }
+        MHL-T1-Windows02: { ansible_host: 10.100.1.14, mhl_project_id: 100, mhl_network_id: 1, mhl_assessor_number: 2, mhl_guest_hostname: MHL-WIN02 }
+        MHL-T2-Windows01: { ansible_host: 10.100.2.12, mhl_project_id: 100, mhl_network_id: 2, mhl_assessor_number: 1, mhl_guest_hostname: MHL-WIN01 }
+        MHL-T2-Windows02: { ansible_host: 10.100.2.14, mhl_project_id: 100, mhl_network_id: 2, mhl_assessor_number: 2, mhl_guest_hostname: MHL-WIN02 }
+        MHL-T3-Windows01: { ansible_host: 10.100.3.12, mhl_project_id: 100, mhl_network_id: 3, mhl_assessor_number: 1, mhl_guest_hostname: MHL-WIN01 }
+        MHL-T3-Windows02: { ansible_host: 10.100.3.14, mhl_project_id: 100, mhl_network_id: 3, mhl_assessor_number: 2, mhl_guest_hostname: MHL-WIN02 }
+        MHL-T4-Windows01: { ansible_host: 10.100.4.12, mhl_project_id: 100, mhl_network_id: 4, mhl_assessor_number: 1, mhl_guest_hostname: MHL-WIN01 }
+        MHL-T4-Windows02: { ansible_host: 10.100.4.14, mhl_project_id: 100, mhl_network_id: 4, mhl_assessor_number: 2, mhl_guest_hostname: MHL-WIN02 }
+        MHL-T5-Windows01: { ansible_host: 10.100.5.12, mhl_project_id: 100, mhl_network_id: 5, mhl_assessor_number: 1, mhl_guest_hostname: MHL-WIN01 }
+        MHL-T5-Windows02: { ansible_host: 10.100.5.14, mhl_project_id: 100, mhl_network_id: 5, mhl_assessor_number: 2, mhl_guest_hostname: MHL-WIN02 }

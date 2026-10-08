@@ -68,12 +68,44 @@ the same `common-session` hash as the earlier PAM adjustment. UFW was inactive
 on sampled CT120/CT117 and missing on CT121/CT116. Current network probe
 failures therefore remain unattributed. No OPNsense changes were made.
 
-Reviewed Linux business roles are now present in `ansible/linux` and
+Reviewed Linux business roles are present in `ansible/linux` and
 `ansible/roles/mhl_*`: PostgreSQL-backed shipment data, a small portal, a
 synthetic warehouse build artifact, and a synthetic dispatch backup export.
 The example inventory declares `.30/.40/.50/.60` host slots for Team 0 and
 Teams 1–5. These roles are not deployed; they require protected
 `mhl_db_runtime_password` and `mhl_ci_synthetic_token` variables and accepted
-team-network connectivity first. `tests/test_project100_linux_scenario.py`
-checks the portal's synthetic-data authorization/query flaws and inventory
-layout offline.
+team-network connectivity first. The schema grants the runtime role read
+access to the seed table while retaining the intended `CREATEDB` overprivilege.
+PostgreSQL configuration discovery uses the installed Debian cluster version
+rather than assuming a major version. A local PostgreSQL server/client is not
+installed in the development workspace, so the role has not been exercised
+against a live local database.
+
+The fixed Project 100 CLI has declared ten Linux assessor jump boxes, two per
+team, from the ready Parrot logical image. Linux addresses are `.11` and `.13`
+so the paired Windows boxes can use `.12` and `.14`. Guacamole services are
+SSH+RDP for Linux and RDP for Windows. No plan or apply was run. The complete
+20-box/10-user assignment and six staging business systems are recorded in
+[`scenario-draft.json`](scenario-draft.json). Four Debian 12 staging containers
+are now declared against the verified project alias; the Windows image remains
+unpublished, and none of these guests has been planned or applied. The separate
+participant inventory example covers all five teams and both operating
+systems.
+
+## Staging desired-state update — 2026-10-08
+
+The signed Debian 12.12-1 archive is linked into Project 100 as the fixed
+`mhl-debian12-stock` template alias. The link records SHA256
+`ff5c55cba730fc1e93bc7de3e0ea4aecb05c692094009cfcf2999973a56f15e5`, the
+official SHA512 aplinfo checksum, size, and independent provider/content
+acceptance receipts on P1, P3, and P5. No claim is made for offline P2. The
+fixed CLI has declared Team 0 containers `mhl-db01`, `mhl-app01`, `mhl-ci01`,
+and `mhl-bkp01` at `.30/.40/.50/.60`; each uses one core and 512 MiB to 1 GiB.
+The desired-state checks currently use ping while the service roles await
+network acceptance and deployment. No plan or apply has been run.
+
+The assignment draft now marks these four containers as declared, not
+deployed. Windows Server images and associated participant boxes remain
+pending immutable publication. The host-management path to Proxmox 2 remains
+unavailable, so router/network acceptance and service deployment are blocked;
+no guest on that node has been recreated or migrated.

@@ -1,0 +1,490 @@
+{
+  "schema_version": 1,
+  "project_id": 100,
+  "project_name": "Meridian Harbor Logistics",
+  "status": "partially_declared_waiting_for_router_acceptance_and_windows_image",
+  "domain": "mhl.test",
+  "team_networks": {
+    "staging": {
+      "team_id": 0,
+      "network_id": 254,
+      "cidr": "10.100.254.0/24"
+    },
+    "teams": [
+      1,
+      2,
+      3,
+      4,
+      5
+    ],
+    "ordinary_team_cidr": "10.100.{team_id}.0/24"
+  },
+  "service_hosts": [
+    {
+      "key": "mhl-dc01",
+      "role": "domain_controller_dns",
+      "hostname": "MHL-DC01",
+      "ip_last_octet": 10,
+      "os": "Windows Server 2025 Desktop Experience",
+      "status": "pending_image_publication",
+      "required_image": null,
+      "blocker": "Windows source VM 115 has not completed the Windows-specific immutable publication and fresh-clone identity checks."
+    },
+    {
+      "key": "mhl-file01",
+      "role": "file_server",
+      "hostname": "MHL-FS01",
+      "ip_last_octet": 20,
+      "os": "Windows Server 2025 Desktop Experience",
+      "status": "pending_image_publication",
+      "required_image": null,
+      "blocker": "Windows source VM 115 has not completed the Windows-specific immutable publication and fresh-clone identity checks."
+    },
+    {
+      "key": "mhl-db01",
+      "role": "postgresql",
+      "hostname": "MHL-DB01",
+      "ip_last_octet": 30,
+      "os": "Debian 12 LXC",
+      "status": "declared_not_applied",
+      "logical_image_id": "debian-12-router-v1",
+      "archive": "crange-library:vztmpl/debian-12-standard_12.12-1_amd64.tar.zst",
+      "blocker": "The CT is declared in Team 0 desired state. Deployment remains pending exact router/network acceptance; no plan or apply has been run.",
+      "template_alias": "mhl-debian12-stock",
+      "health_checks": [
+        {
+          "type": "ping",
+          "timeout": 5
+        }
+      ]
+    },
+    {
+      "key": "mhl-app01",
+      "role": "shipment_portal",
+      "hostname": "MHL-APP01",
+      "ip_last_octet": 40,
+      "os": "Debian 12 LXC",
+      "status": "declared_not_applied",
+      "logical_image_id": "debian-12-router-v1",
+      "archive": "crange-library:vztmpl/debian-12-standard_12.12-1_amd64.tar.zst",
+      "health_checks": [
+        {
+          "type": "ping",
+          "timeout": 5
+        }
+      ],
+      "blocker": "The CT is declared in Team 0 desired state. Deployment remains pending exact router/network acceptance; no plan or apply has been run.",
+      "template_alias": "mhl-debian12-stock"
+    },
+    {
+      "key": "mhl-ci01",
+      "role": "warehouse_build_artifacts",
+      "hostname": "MHL-CI01",
+      "ip_last_octet": 50,
+      "os": "Debian 12 LXC",
+      "status": "declared_not_applied",
+      "logical_image_id": "debian-12-router-v1",
+      "archive": "crange-library:vztmpl/debian-12-standard_12.12-1_amd64.tar.zst",
+      "health_checks": [
+        {
+          "type": "ping",
+          "timeout": 5
+        }
+      ],
+      "blocker": "The CT is declared in Team 0 desired state. Deployment remains pending exact router/network acceptance; no plan or apply has been run.",
+      "template_alias": "mhl-debian12-stock"
+    },
+    {
+      "key": "mhl-bkp01",
+      "role": "dispatch_backup_reports",
+      "hostname": "MHL-BKP01",
+      "ip_last_octet": 60,
+      "os": "Debian 12 LXC",
+      "status": "declared_not_applied",
+      "logical_image_id": "debian-12-router-v1",
+      "archive": "crange-library:vztmpl/debian-12-standard_12.12-1_amd64.tar.zst",
+      "blocker": "The CT is declared in Team 0 desired state. Deployment remains pending exact router/network acceptance; no plan or apply has been run.",
+      "template_alias": "mhl-debian12-stock",
+      "health_checks": [
+        {
+          "type": "ping",
+          "timeout": 5
+        }
+      ]
+    }
+  ],
+  "participant_boxes": [
+    {
+      "team_id": 1,
+      "assessor": 1,
+      "os": "Linux Parrot",
+      "key": "t001-j01",
+      "ip_last_octet": 11,
+      "services": [
+        "ssh",
+        "rdp"
+      ],
+      "status": "declared",
+      "image_id": "parrot-jumpbox-20261007-v1"
+    },
+    {
+      "team_id": 1,
+      "assessor": 1,
+      "os": "Windows Server 2025",
+      "key": "t001-j02",
+      "ip_last_octet": 12,
+      "services": [
+        "rdp"
+      ],
+      "status": "pending_image_publication",
+      "image_id": null
+    },
+    {
+      "team_id": 1,
+      "assessor": 2,
+      "os": "Linux Parrot",
+      "key": "t001-j03",
+      "ip_last_octet": 13,
+      "services": [
+        "ssh",
+        "rdp"
+      ],
+      "status": "declared",
+      "image_id": "parrot-jumpbox-20261007-v1"
+    },
+    {
+      "team_id": 1,
+      "assessor": 2,
+      "os": "Windows Server 2025",
+      "key": "t001-j04",
+      "ip_last_octet": 14,
+      "services": [
+        "rdp"
+      ],
+      "status": "pending_image_publication",
+      "image_id": null
+    },
+    {
+      "team_id": 2,
+      "assessor": 1,
+      "os": "Linux Parrot",
+      "key": "t002-j01",
+      "ip_last_octet": 11,
+      "services": [
+        "ssh",
+        "rdp"
+      ],
+      "status": "declared",
+      "image_id": "parrot-jumpbox-20261007-v1"
+    },
+    {
+      "team_id": 2,
+      "assessor": 1,
+      "os": "Windows Server 2025",
+      "key": "t002-j02",
+      "ip_last_octet": 12,
+      "services": [
+        "rdp"
+      ],
+      "status": "pending_image_publication",
+      "image_id": null
+    },
+    {
+      "team_id": 2,
+      "assessor": 2,
+      "os": "Linux Parrot",
+      "key": "t002-j03",
+      "ip_last_octet": 13,
+      "services": [
+        "ssh",
+        "rdp"
+      ],
+      "status": "declared",
+      "image_id": "parrot-jumpbox-20261007-v1"
+    },
+    {
+      "team_id": 2,
+      "assessor": 2,
+      "os": "Windows Server 2025",
+      "key": "t002-j04",
+      "ip_last_octet": 14,
+      "services": [
+        "rdp"
+      ],
+      "status": "pending_image_publication",
+      "image_id": null
+    },
+    {
+      "team_id": 3,
+      "assessor": 1,
+      "os": "Linux Parrot",
+      "key": "t003-j01",
+      "ip_last_octet": 11,
+      "services": [
+        "ssh",
+        "rdp"
+      ],
+      "status": "declared",
+      "image_id": "parrot-jumpbox-20261007-v1"
+    },
+    {
+      "team_id": 3,
+      "assessor": 1,
+      "os": "Windows Server 2025",
+      "key": "t003-j02",
+      "ip_last_octet": 12,
+      "services": [
+        "rdp"
+      ],
+      "status": "pending_image_publication",
+      "image_id": null
+    },
+    {
+      "team_id": 3,
+      "assessor": 2,
+      "os": "Linux Parrot",
+      "key": "t003-j03",
+      "ip_last_octet": 13,
+      "services": [
+        "ssh",
+        "rdp"
+      ],
+      "status": "declared",
+      "image_id": "parrot-jumpbox-20261007-v1"
+    },
+    {
+      "team_id": 3,
+      "assessor": 2,
+      "os": "Windows Server 2025",
+      "key": "t003-j04",
+      "ip_last_octet": 14,
+      "services": [
+        "rdp"
+      ],
+      "status": "pending_image_publication",
+      "image_id": null
+    },
+    {
+      "team_id": 4,
+      "assessor": 1,
+      "os": "Linux Parrot",
+      "key": "t004-j01",
+      "ip_last_octet": 11,
+      "services": [
+        "ssh",
+        "rdp"
+      ],
+      "status": "declared",
+      "image_id": "parrot-jumpbox-20261007-v1"
+    },
+    {
+      "team_id": 4,
+      "assessor": 1,
+      "os": "Windows Server 2025",
+      "key": "t004-j02",
+      "ip_last_octet": 12,
+      "services": [
+        "rdp"
+      ],
+      "status": "pending_image_publication",
+      "image_id": null
+    },
+    {
+      "team_id": 4,
+      "assessor": 2,
+      "os": "Linux Parrot",
+      "key": "t004-j03",
+      "ip_last_octet": 13,
+      "services": [
+        "ssh",
+        "rdp"
+      ],
+      "status": "declared",
+      "image_id": "parrot-jumpbox-20261007-v1"
+    },
+    {
+      "team_id": 4,
+      "assessor": 2,
+      "os": "Windows Server 2025",
+      "key": "t004-j04",
+      "ip_last_octet": 14,
+      "services": [
+        "rdp"
+      ],
+      "status": "pending_image_publication",
+      "image_id": null
+    },
+    {
+      "team_id": 5,
+      "assessor": 1,
+      "os": "Linux Parrot",
+      "key": "t005-j01",
+      "ip_last_octet": 11,
+      "services": [
+        "ssh",
+        "rdp"
+      ],
+      "status": "declared",
+      "image_id": "parrot-jumpbox-20261007-v1"
+    },
+    {
+      "team_id": 5,
+      "assessor": 1,
+      "os": "Windows Server 2025",
+      "key": "t005-j02",
+      "ip_last_octet": 12,
+      "services": [
+        "rdp"
+      ],
+      "status": "pending_image_publication",
+      "image_id": null
+    },
+    {
+      "team_id": 5,
+      "assessor": 2,
+      "os": "Linux Parrot",
+      "key": "t005-j03",
+      "ip_last_octet": 13,
+      "services": [
+        "ssh",
+        "rdp"
+      ],
+      "status": "declared",
+      "image_id": "parrot-jumpbox-20261007-v1"
+    },
+    {
+      "team_id": 5,
+      "assessor": 2,
+      "os": "Windows Server 2025",
+      "key": "t005-j04",
+      "ip_last_octet": 14,
+      "services": [
+        "rdp"
+      ],
+      "status": "pending_image_publication",
+      "image_id": null
+    }
+  ],
+  "assessor_users": [
+    {
+      "username": "assessor-t01-01",
+      "login_pattern": "p100-assessor-t01-01",
+      "team_id": 1,
+      "assigned_boxes": [
+        "t001-j01",
+        "t001-j02"
+      ],
+      "credential_source": "protected user-secret workflow"
+    },
+    {
+      "username": "assessor-t01-02",
+      "login_pattern": "p100-assessor-t01-02",
+      "team_id": 1,
+      "assigned_boxes": [
+        "t001-j03",
+        "t001-j04"
+      ],
+      "credential_source": "protected user-secret workflow"
+    },
+    {
+      "username": "assessor-t02-01",
+      "login_pattern": "p100-assessor-t02-01",
+      "team_id": 2,
+      "assigned_boxes": [
+        "t002-j01",
+        "t002-j02"
+      ],
+      "credential_source": "protected user-secret workflow"
+    },
+    {
+      "username": "assessor-t02-02",
+      "login_pattern": "p100-assessor-t02-02",
+      "team_id": 2,
+      "assigned_boxes": [
+        "t002-j03",
+        "t002-j04"
+      ],
+      "credential_source": "protected user-secret workflow"
+    },
+    {
+      "username": "assessor-t03-01",
+      "login_pattern": "p100-assessor-t03-01",
+      "team_id": 3,
+      "assigned_boxes": [
+        "t003-j01",
+        "t003-j02"
+      ],
+      "credential_source": "protected user-secret workflow"
+    },
+    {
+      "username": "assessor-t03-02",
+      "login_pattern": "p100-assessor-t03-02",
+      "team_id": 3,
+      "assigned_boxes": [
+        "t003-j03",
+        "t003-j04"
+      ],
+      "credential_source": "protected user-secret workflow"
+    },
+    {
+      "username": "assessor-t04-01",
+      "login_pattern": "p100-assessor-t04-01",
+      "team_id": 4,
+      "assigned_boxes": [
+        "t004-j01",
+        "t004-j02"
+      ],
+      "credential_source": "protected user-secret workflow"
+    },
+    {
+      "username": "assessor-t04-02",
+      "login_pattern": "p100-assessor-t04-02",
+      "team_id": 4,
+      "assigned_boxes": [
+        "t004-j03",
+        "t004-j04"
+      ],
+      "credential_source": "protected user-secret workflow"
+    },
+    {
+      "username": "assessor-t05-01",
+      "login_pattern": "p100-assessor-t05-01",
+      "team_id": 5,
+      "assigned_boxes": [
+        "t005-j01",
+        "t005-j02"
+      ],
+      "credential_source": "protected user-secret workflow"
+    },
+    {
+      "username": "assessor-t05-02",
+      "login_pattern": "p100-assessor-t05-02",
+      "team_id": 5,
+      "assigned_boxes": [
+        "t005-j03",
+        "t005-j04"
+      ],
+      "credential_source": "protected user-secret workflow"
+    }
+  ],
+  "protected_variable_names": [
+    "mhl_db_runtime_password",
+    "mhl_ci_synthetic_token",
+    "mhl_windows_local_admin_passwords",
+    "mhl_assessor_guac_passwords"
+  ],
+  "release_workflow": [
+    "complete Team 0 service setup",
+    "run service health checks",
+    "capture one immutable release",
+    "fresh-clone test",
+    "explicitly deploy to selected teams",
+    "verify team-scoped Guacamole access"
+  ],
+  "blockers": [
+    "Proxmox 2 is offline; CTs 113, 118 and 119 are unknown and no network acceptance can be claimed.",
+    "Windows source image is not published; Windows service hosts and ten Windows participant boxes remain pending.",
+    "Project 100 has no approved-container alias for the verified Debian 12 archive; Linux business-service CT declarations remain pending.",
+    "Guacamole users are definitions only; no account passwords or user rows have been created."
+  ]
+}

@@ -3,6 +3,7 @@ import importlib.util
 import sys
 import types
 import unittest
+from decimal import Decimal
 from pathlib import Path
 
 
@@ -37,7 +38,7 @@ class PortalQueryTests(unittest.TestCase):
                 return (1,)
 
             def fetchall(inner):
-                return [(61001, 4101, "Northwind Cold Storage", "Duluth, MN", "delayed", "18420.00", "synthetic record")]
+                return [(61001, 4101, "Northwind Cold Storage", "Duluth, MN", "delayed", Decimal("18420.00"), "synthetic record")]
 
         class Connection:
             def __enter__(inner):
@@ -73,6 +74,7 @@ class PortalQueryTests(unittest.TestCase):
         self.assertEqual(captured["status"], "200 OK")
         self.assertIn(b'"customer_id": 4101', body)
         self.assertIn(b'"shipment_id": 61001', body)
+        self.assertIn(b'"invoice_total": "18420.00"', body)
         self.assertEqual(self.executed[0][1], (61001,))
 
     def test_report_endpoint_passes_injected_filter_to_database(self):

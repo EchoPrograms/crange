@@ -14,3 +14,5 @@ VALUES
   (61002, 4102, 'Cedar Freight Cooperative', 'Madison, WI', 'in_transit', 9730.50, 'Warehouse handoff scheduled after 18:00.'),
   (61003, 4101, 'Northwind Cold Storage', 'Green Bay, WI', 'delivered', 1280.00, 'Signed at receiving dock.')
 ON CONFLICT (shipment_id) DO NOTHING;
+
+GRANT SELECT ON shipments TO mhl_runtime;
