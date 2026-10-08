@@ -93,7 +93,11 @@ def pending(actor):
     if not SPOOL.exists():return []
     result=[]
     for meta in SPOOL.glob('*.json'):
-        info=json.loads(meta.read_text())
+        # The spool also holds protected operational records (for example,
+        # import provenance). Only UUID-named upload metadata belongs here.
+        if not re.fullmatch(r'[0-9a-f]{32}\.json',meta.name):continue
+        try:info=json.loads(meta.read_text())
+        except (OSError,ValueError):continue
         if info['actor']==actor and info['status'] in ('uploading','ready'):
             result.append({'id':meta.stem,'name':info['name'],'size':info['size'],'status':info['status']})
     return result
