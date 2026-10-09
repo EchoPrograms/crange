@@ -2,6 +2,8 @@
 from __future__ import annotations
 
 import json
+import codecs
+import selectors
 import ipaddress
 import os
 from pathlib import Path
@@ -322,6 +324,62 @@ class JobStore:
             result.append(item)
         return result
 
+    def get(self, job_id, projects, admin=False):
+        """Return one job only when it is within the caller's project scope."""
+        with self.connect() as db:
+            row = db.execute("SELECT id,actor,project,operation,options,status,output,created,finished FROM jobs WHERE id=?",
+                             (job_id,)).fetchone()
+        if row is None or (not admin and str(row['project']) not in {str(value) for value in projects}):
+            return None
+        item = dict(row)
+        options = json.loads(item.pop('options'))
+        if item['operation'] in ('apply', 'stage-deploy', 'release-apply'):
+            item['plan_id'] = options.get('plan_id')
+        return item
+
+    def list_page(self, projects, admin=False, *, page=1, page_size=25, project=None):
+        """Return all authorized active jobs and one authorized terminal-history page."""
+        allowed = None if admin else [int(value) for value in projects]
+        if project is not None and allowed is not None and project not in allowed:
+            allowed = []
+        scope = []
+        if project is not None:
+            scope.append(('project=?', [project]))
+        elif allowed is not None:
+            if allowed:
+                scope.append(('project IN (' + ','.join('?' for _ in allowed) + ')', allowed))
+            else:
+                scope.append(('0', []))
+        where = ' AND '.join(part for part, _ in scope) or '1'
+        params = [value for _, values in scope for value in values]
+        offset = (page - 1) * page_size
+        columns = "SELECT id,actor,project,operation,options,status,output,created,finished FROM jobs"
+        with self.connect() as db:
+            # Active work remains available on every page for notifications and task tracking.
+            if admin:
+                active_where, active_params = 'status IN (\'queued\',\'running\')', []
+            elif allowed:
+                active_where = "project IN (" + ','.join('?' for _ in allowed) + ") AND status IN ('queued','running')"
+                active_params = allowed
+            else:
+                active_where, active_params = '0', []
+            active = db.execute(columns + ' WHERE ' + active_where + ' ORDER BY created DESC,id DESC', active_params).fetchall()
+            total = db.execute('SELECT COUNT(*) FROM jobs WHERE ' + where + " AND status NOT IN ('queued','running')", params).fetchone()[0]
+            terminal = db.execute(columns + ' WHERE ' + where + " AND status NOT IN ('queued','running') ORDER BY created DESC,id DESC LIMIT ? OFFSET ?", (*params, page_size, offset)).fetchall()
+        def present(rows):
+            result = []
+            for row in rows:
+                item = dict(row)
+                options = json.loads(item.pop('options'))
+                if item['operation'] in ('apply', 'stage-deploy', 'release-apply'):
+                    item['plan_id'] = options.get('plan_id')
+                result.append(item)
+            return result
+        page_count = (total + page_size - 1) // page_size
+        return {'jobs': present(active + terminal), 'total': total, 'page': page,
+                'page_size': page_size, 'page_count': page_count,
+                'has_previous': page > 1, 'has_next': page < page_count}
+
     def cancel(self, job_id, projects, admin=False):
         """Cancel a queued job or terminate the subprocess for a running job."""
         if not isinstance(job_id, str) or not re.fullmatch(r'[0-9a-f]{32}', job_id):
@@ -339,12 +397,67 @@ class JobStore:
                 proc = self._processes.get(job_id)
                 if proc is None:
                     return False
-                db.execute("UPDATE jobs SET status='interrupted',output='Stop requested; waiting for the current command to exit.',finished=? WHERE id=? AND status='running'", (time.time(), job_id))
+                db.execute("UPDATE jobs SET status='interrupted',output=substr(output || '\nStop requested; waiting for the current command to exit.', -50000),finished=? WHERE id=? AND status='running'", (time.time(), job_id))
                 try:
                     os.killpg(proc.pid, signal.SIGTERM)
                 except ProcessLookupError:
                     pass
         return True
+
+    def _run_streamed(self, job_id, args, env, output, timeout=3600):
+        """Merge both streams at the child pipe and persist bounded progress."""
+        child = subprocess.Popen(args, cwd=ROOT, env=env, stdout=subprocess.PIPE,
+                                 stderr=subprocess.STDOUT, start_new_session=True)
+        decoder = codecs.getincrementaldecoder('utf-8')(errors='replace')
+        deadline = time.monotonic() + timeout
+        last_flush = 0.0
+        dirty = False
+        stopping = None
+        timed_out = False
+        with self._process_lock:
+            self._processes[job_id] = child
+        try:
+            with selectors.DefaultSelector() as selector:
+                selector.register(child.stdout, selectors.EVENT_READ)
+                while selector.get_map() or child.poll() is None:
+                    now = time.monotonic()
+                    if now >= deadline and stopping is None:
+                        timed_out = True
+                        stopping = now
+                    with self.connect() as db:
+                        state = db.execute('SELECT status FROM jobs WHERE id=?', (job_id,)).fetchone()
+                    if state and state['status'] == 'interrupted' and stopping is None:
+                        stopping = now
+                    if stopping is not None:
+                        try:
+                            os.killpg(child.pid, signal.SIGKILL if now - stopping >= 2 else signal.SIGTERM)
+                        except ProcessLookupError:
+                            pass
+                    for key, _ in selector.select(0.1):
+                        chunk = os.read(key.fileobj.fileno(), 8192)
+                        if chunk:
+                            output = (output + decoder.decode(chunk))[-50000:]
+                            dirty = True
+                        else:
+                            output = (output + decoder.decode(b'', final=True))[-50000:]
+                            selector.unregister(key.fileobj)
+                    if dirty and now - last_flush >= 0.25:
+                        with self.connect() as db:
+                            db.execute('UPDATE jobs SET output=? WHERE id=?', (output, job_id))
+                        last_flush = now
+                        dirty = False
+            child.wait()
+            if timed_out:
+                output = (output + '\ncrange: Operation exceeded its time limit.')[-50000:]
+            with self.connect() as db:
+                db.execute('UPDATE jobs SET output=? WHERE id=?', (output, job_id))
+                state = db.execute('SELECT status FROM jobs WHERE id=?', (job_id,)).fetchone()
+            returncode = 124 if timed_out else (130 if state and state['status'] == 'interrupted' else child.returncode)
+            return subprocess.CompletedProcess(args, returncode, output, '')
+        finally:
+            child.stdout.close()
+            with self._process_lock:
+                self._processes.pop(job_id, None)
 
     def run_next(self, force_only=None):
         with self.connect() as db:
@@ -353,10 +466,10 @@ class JobStore:
             lane = '' if force_only is None else (' AND (' + force + ')' if force_only else ' AND NOT (' + force + ')')
             row = db.execute("SELECT * FROM jobs WHERE status='queued'" + lane + " ORDER BY created LIMIT 1").fetchone()
             if row:
-                db.execute("UPDATE jobs SET status='running' WHERE id=?", (row['id'],))
+                db.execute("UPDATE jobs SET status='running',output='Worker picked up this action; starting…\n' WHERE id=?", (row['id'],))
         if row is None:
             return False
-        output = ''
+        output = 'Worker picked up this action; starting…\n'
         try:
             auth_path = self.auth_path
             if auth_path:
@@ -377,29 +490,15 @@ class JobStore:
                         raise ValueError('Project manager access was revoked before this job started.')
             argv = command(row['operation'], row['project'], json.loads(row['options']))
             args = [sys.executable, str(ROOT / 'scripts/crange.py'), *argv]
-            worker_env = {**os.environ, 'CRANGE_ACTOR': row['actor']}
+            worker_env = {**os.environ, 'CRANGE_ACTOR': row['actor'], 'PYTHONUNBUFFERED': '1'}
             if subprocess.run.__module__ != 'subprocess':
                 # Preserve the conventional mock seam used by worker tests.
                 proc = subprocess.run(args, cwd=ROOT, env=worker_env, capture_output=True,
                                       text=True, timeout=3600)
             else:
-                child = subprocess.Popen(args, cwd=ROOT, env=worker_env, stdout=subprocess.PIPE,
-                                         stderr=subprocess.PIPE, text=True,
-                                         start_new_session=True)
-                with self._process_lock:
-                    self._processes[row['id']] = child
-                try:
-                    stdout, stderr = child.communicate(timeout=3600)
-                    proc = subprocess.CompletedProcess(args, child.returncode, stdout, stderr)
-                except subprocess.TimeoutExpired as exc:
-                    child.kill()
-                    stdout, stderr = child.communicate()
-                    raise subprocess.TimeoutExpired(args, 3600, output=stdout, stderr=stderr) from exc
-                finally:
-                    with self._process_lock:
-                        self._processes.pop(row['id'], None)
+                proc = self._run_streamed(row['id'], args, worker_env, output)
             status = 'succeeded' if proc.returncode == 0 else 'failed'
-            output = (proc.stdout + proc.stderr)[-50000:]
+            output = ((output if subprocess.run.__module__ != 'subprocess' else '') + proc.stdout + proc.stderr)[-50000:]
             if status == 'succeeded' and row['operation'] in {
                 'custom-jumpbox-create', 'box-add', 'box-remove', 'scenario-add', 'scenario-edit',
                 'scenario-remove', 'container-add', 'container-edit',
@@ -425,7 +524,8 @@ class JobStore:
                         break
         except (ValueError, subprocess.TimeoutExpired, OSError) as exc:
             status = 'failed'
-            output = (output + '\ncrange: ' + str(exc))[-50000:]
+            message = 'Operation exceeded its time limit.' if isinstance(exc, subprocess.TimeoutExpired) else str(exc)
+            output = (output + '\ncrange: ' + message)[-50000:]
         with self.connect() as db:
             current = db.execute('SELECT status FROM jobs WHERE id=?', (row['id'],)).fetchone()
             if current and current['status'] == 'interrupted':

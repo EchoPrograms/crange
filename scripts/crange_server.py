@@ -5,6 +5,7 @@ from http import cookies
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import json
 import os
+import re
 from pathlib import Path
 from urllib.parse import parse_qs, urlsplit
 
@@ -12,6 +13,27 @@ from crange_auth import AuthStore
 from crange_jobs import JobStore
 
 ROOT = Path(__file__).resolve().parents[1]
+
+
+def job_query_params(query, user):
+    def integer_parameter(name, default, minimum, maximum):
+        values = query.get(name, [str(default)])
+        if len(values) != 1 or not values[0].isdigit():
+            raise ValueError(f'Invalid {name}.')
+        value = int(values[0])
+        if value < minimum or value > maximum:
+            raise ValueError(f'Invalid {name}.')
+        return value
+    page = integer_parameter('page', 1, 1, 1_000_000)
+    # Preserve the historical unparameterized response size for older callers.
+    page_size = integer_parameter('page_size', 100, 10, 100)
+    project_values = query.get('project', [])
+    if len(project_values) > 1 or (project_values and not project_values[0].isdigit()):
+        raise ValueError('Invalid project.')
+    project = int(project_values[0]) if project_values else None
+    if project is not None and not user['admin'] and str(project) not in user['managed_projects']:
+        raise PermissionError('Project manager access required.')
+    return page, page_size, project
 
 
 def serve(host='127.0.0.1', port=8000):
@@ -157,7 +179,29 @@ def serve(host='127.0.0.1', port=8000):
                     return self.reply(401, {'error': 'Sign in required.'})
                 if not user['admin'] and not user['managed_projects']:
                     return self.reply(403, {'error': 'Project manager access required.'})
-                return self.reply(200, {'jobs': jobs.list(user['managed_projects'], user['admin'])})
+                query = parse_qs(urlsplit(self.path).query, keep_blank_values=True)
+                try:
+                    page, page_size, project = job_query_params(query, user)
+                except PermissionError as exc:
+                    return self.reply(403, {'error': str(exc)})
+                except ValueError as exc:
+                    return self.reply(400, {'error': str(exc)})
+                result = jobs.list_page(user['managed_projects'], user['admin'], page=page,
+                                        page_size=page_size, project=project)
+                return self.reply(200, result)
+            if path.startswith('/api/jobs/'):
+                user = auth.session(self.token())
+                if not user:
+                    return self.reply(401, {'error': 'Sign in required.'})
+                if not user['admin'] and not user['managed_projects']:
+                    return self.reply(403, {'error': 'Project manager access required.'})
+                job_id = path.removeprefix('/api/jobs/')
+                if not re.fullmatch(r'[0-9a-f]{32}', job_id):
+                    return self.reply(400, {'error': 'Invalid job ID.'})
+                job = jobs.get(job_id, user['managed_projects'], user['admin'])
+                if job is None:
+                    return self.reply(404, {'error': 'Job not found.'})
+                return self.reply(200, {'job': job})
             if path == '/api/users':
                 user = auth.session(self.token())
                 if not user:

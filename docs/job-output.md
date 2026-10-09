@@ -1,0 +1,3 @@
+Dashboard jobs persist a worker-start message as soon as they are claimed. The primary CLI process merges stdout and stderr into one pipe, preserving the order in which writes reach the pipe. Python child output is unbuffered; other tools can still buffer their own output.
+
+The worker decodes UTF-8 across chunk boundaries and retains the most recent 50,000 characters. Progress writes are limited to four per second, with a final flush at completion. Cancelled and timed-out commands retain their partial output. Cancellation terminates the process group and escalates to SIGKILL after two seconds, including descendants that keep the output pipe open. Force Stop keeps its separate worker lane.

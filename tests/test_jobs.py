@@ -1,15 +1,29 @@
 import sys
 import tempfile
+import time
 import unittest
+from urllib.parse import parse_qs
 from types import SimpleNamespace
 from unittest.mock import patch
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'scripts'))
 from crange_jobs import JobStore, command
+from crange_server import job_query_params
 
 
 class JobTests(unittest.TestCase):
+    def test_job_query_parameters_are_bounded_and_project_authorized(self):
+        manager = {'admin': False, 'managed_projects': ['3']}
+        self.assertEqual(job_query_params(parse_qs('page=2&page_size=50&project=3'), manager), (2, 50, 3))
+        self.assertEqual(job_query_params({}, manager), (1, 100, None))
+        for query in ('page=0', 'page=-1', 'page=1000001', 'page=1.5', 'page_size=9',
+                      'page_size=101', 'page_size=10&page_size=25', 'project=3&project=3', 'project=3x'):
+            with self.subTest(query=query), self.assertRaises(ValueError):
+                job_query_params(parse_qs(query, keep_blank_values=True), manager)
+        with self.assertRaises(PermissionError):
+            job_query_params(parse_qs('project=4'), manager)
+
     def test_rejects_arbitrary_commands_and_fields(self):
         for op, fields in [('shell', {}), ('team-add', {'team': '; id'}),
                            ('box-add', {'name': 'x', 'team': 1, 'node': 'proxmox4', 'command': 'id'}),
@@ -39,6 +53,60 @@ class JobTests(unittest.TestCase):
             rows = store.list(['3'], limit=1)
             self.assertEqual([row['id'] for row in rows if row['status'] == 'running'], [running])
             self.assertEqual(sum(row['status'] == 'succeeded' for row in rows), 1)
+
+    def test_paginated_history_keeps_authorized_active_jobs_and_counts_scope(self):
+        with tempfile.TemporaryDirectory() as directory:
+            store = JobStore(Path(directory) / 'jobs.sqlite3')
+            ids = []
+            for i in range(35):
+                job = store.submit('alice', 3 if i < 30 else 4, 'team-add', {'team': i % 10 + 1})
+                ids.append(job)
+            active = store.submit('alice', 3, 'team-add', {'team': 1})
+            with store.connect() as db:
+                db.execute("UPDATE jobs SET status='running' WHERE id=?", (active,))
+                for index, job in enumerate(ids):
+                    db.execute("UPDATE jobs SET status='succeeded',created=?,finished=? WHERE id=?",
+                               (1000 + index, 1000 + index, job))
+
+            first = store.list_page(['3'], page=1, page_size=10, project=3)
+            second = store.list_page(['3'], page=2, page_size=10, project=3)
+            self.assertEqual((first['total'], first['page_count']), (30, 3))
+            self.assertTrue(first['has_next'])
+            self.assertTrue(second['has_previous'])
+            first_terminal = [job for job in first['jobs'] if job['status'] == 'succeeded']
+            second_terminal = [job for job in second['jobs'] if job['status'] == 'succeeded']
+            self.assertEqual(len(first_terminal), 10)
+            self.assertEqual(len(second_terminal), 10)
+            self.assertGreater(first_terminal[0]['created'], second_terminal[0]['created'])
+            self.assertEqual([job['id'] for job in first['jobs'] if job['status'] == 'running'], [active])
+            self.assertNotIn(4, {job['project'] for job in first['jobs']})
+
+            manager_page = store.list_page(['3'], page=1, page_size=25)
+            self.assertEqual(manager_page['total'], 30)
+            self.assertNotIn(4, {job['project'] for job in manager_page['jobs'] if job['status'] != 'running'})
+
+    def test_active_job_completion_and_pinned_lookup_survive_older_history_page(self):
+        with tempfile.TemporaryDirectory() as directory:
+            store = JobStore(Path(directory) / 'jobs.sqlite3')
+            for index in range(35):
+                job = store.submit('alice', 3, 'team-add', {'team': index % 10 + 1})
+                with store.connect() as db:
+                    db.execute("UPDATE jobs SET status='succeeded',created=?,finished=? WHERE id=?",
+                               (1000 + index, 1000 + index, job))
+            running = store.submit('alice', 3, 'team-add', {'team': 1})
+            with store.connect() as db:
+                db.execute("UPDATE jobs SET status='running' WHERE id=?", (running,))
+            page_two = store.list_page(['3'], page=2, page_size=10, project=3)
+            self.assertNotIn(running, {job['id'] for job in page_two['jobs'] if job['status'] != 'running'})
+            with store.connect() as db:
+                db.execute("UPDATE jobs SET status='failed',output='worker failed',finished=? WHERE id=?",
+                           (time.time(), running))
+
+            current_page = store.list_page(['3'], page=2, page_size=10, project=3)
+            self.assertNotIn(running, {job['id'] for job in current_page['jobs']})
+            pinned = store.get(running, ['3'])
+            self.assertEqual((pinned['status'], pinned['output']), ('failed', 'worker failed'))
+            self.assertIsNone(store.get(running, ['4']))
 
     def test_cancel_queued_job_is_project_scoped(self):
         with tempfile.TemporaryDirectory() as directory:
