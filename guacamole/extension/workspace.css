@@ -256,3 +256,10 @@
  .cr-settings-header-actions > .cr-settings-back { grid-column: 1; grid-row: 2; justify-self: start; }
  .cr-settings-header-actions > .cr-controller-link { grid-column: 2; grid-row: 2; }
 }
+
+/* Native action icons participate in layout instead of covering their labels. */
+.cr-account-popover button::before { content: none !important; }
+.cr-settings-content .action-buttons .button::before { position: static; display: inline-block; flex: none; width: 16px; height: 16px; margin-right: 7px; background-position: center; background-size: contain; }
+.cr-settings-content .connection-list .connection > .caption,
+.cr-settings-content .connection-list .connection-group > .caption { min-height: 40px; padding: 0 8px; border-bottom: 1px solid var(--cr-line); }
+.settings-view.cr-admin-settings { background: var(--cr-bg); min-height: 100vh; }
