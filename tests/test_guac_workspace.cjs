@@ -1,0 +1,48 @@
+'use strict';
+// Exercise the presentation adapters against Guacamole's public service shapes.
+const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const vm = require('node:vm');
+const directives = {}, configs = [];
+const moduleStub = {config(args) {configs.push(args.at(-1));return this;},run() {return this;},directive(name,args) {directives[name]=args.at(-1);return this;}};
+const document = {addEventListener(){},removeEventListener(){}};
+const local=new Map(),sessionLocal=new Map(),events={};const handle={addEventListener(n,f){events[n]=f;},removeEventListener(){},setPointerCapture(){}};const shell={style:{},offsetWidth:700,offsetHeight:44,classList:{toggle(){}},getBoundingClientRect(){return{left:parseInt(this.style.left||10),top:parseInt(this.style.top||10)}}};
+const sandbox={URL,Math,Date,Object,angular:{module(){return moduleStub;}},document,window:{confirm(){return true;},innerWidth:1400,innerHeight:900,addEventListener(){},removeEventListener(){},requestAnimationFrame(fn){fn();},sessionStorage:{getItem(k){return sessionLocal.get(k);},setItem(k,v){sessionLocal.set(k,v);}},localStorage:{getItem(k){return local.get(k);},setItem(k,v){local.set(k,v);}}},navigator:{},Intl,Number};
+vm.runInNewContext(fs.readFileSync('guacamole/extension/workspace.js','utf8'),sandbox);
+async function flush(){await new Promise(resolve=>setImmediate(resolve));}
+(async()=>{
+ let saves=0;
+ const preferenceService={preferences:{timezone:'America/Chicago',language:'en_US'},save(){saves++;}};
+ const fields=directives.crangePreferenceFields(preferenceService,{getLanguages:async()=>({en:'English'})});
+ const preferences={};fields.link(preferences);await flush();
+ assert.equal(preferenceService.preferences.language,'en');
+ preferences.presentation.displayScale=4;preferences.savePresentation();assert.equal(saves,0);
+ preferences.presentation.displayScale=1.5;preferenceService.preferences.timezone='not-a-timezone';preferences.savePresentation();assert.equal(saves,0);
+ preferenceService.preferences.timezone='America/Chicago';preferences.presentation.machineLayout='list';preferences.savePresentation();assert.equal(saves,1);assert.equal(preferenceService.preferences.crangeMachineLayout,'list');
+ let decorator;
+ configs[0]({decorator(_key,definition){decorator=definition.at(-1);}});
+ const templates={};decorator({put(key,value){templates[key]=value;return value;}}).put('app/client/templates/client.html','<guac-viewport><guac-tiled-clients></guac-tiled-clients><div ng-class="{open: menu.shown}" id="guac-menu"></div></guac-viewport>');
+ assert.match(templates['app/client/templates/client.html'],/<crange-session-toolbar>/);assert.match(templates['app/client/templates/client.html'],/<guac-tiled-clients>/);assert.match(templates['app/client/templates/client.html'],/menu.shown && crSession.advanced/);
+ assert.match(directives.crangeSessionToolbar({},()=>{},{},{},{preferences:{}},{}).template,/context="connectionListContext"/);
+ assert.match(directives.crangeSessionToolbar({},()=>{},{},{},{preferences:{}},{}).template,/aria-label="Select connections"/);
+ const requests=[],timers=[],watchers={};
+ const http={post(_url,payload){requests.push(payload);if(payload.operation==='list')return Promise.resolve({data:{boxes:[{project:100,resource_key:'container:ci',name:'ci',team:0,protocols:[{connection_name:'CI SSH',protocol:'ssh'}]}]}});if(payload.operation==='status')return Promise.resolve({data:{state:'running'}});if(payload.operation==='submit')return Promise.resolve({data:{job_id:'job-'+payload.action}});return Promise.resolve({data:{job:{status:'running'}}});}};
+ const interval=fn=>{timers.push(fn);return fn;};interval.cancel=()=>{};
+ const scope={menu:{shown:false},focusedClient:{id:'native-ci',name:'CI SSH',protocol:null,clientProperties:{scale:1}},$watch(name,fn){watchers[name]=fn;},$on(){},$evalAsync(fn){fn();},disconnect(){}};
+ let destination=null;const toolbar=directives.crangeSessionToolbar(http,interval,{url(value){destination=value;}},{getCurrentToken(){return 'test-token';},getDataSource(){return 'postgresql';}},preferenceService,{toggleFullscreenMode(){}});
+ toolbar.link(scope,{0:{querySelector(s){return s.includes('shell')?shell:handle;}}});await flush();assert.equal(scope.crSession.box.resource_key,'container:ci');
+ scope.crSession.power('shutdown');await flush();scope.crSession.power('stop');await flush();
+ const submissions=requests.filter(r=>r.operation==='submit');assert.deepEqual(submissions.map(r=>r.action),['shutdown','stop']);assert.equal(submissions[1].resource_key,'container:ci');assert.equal(submissions[1].project,100);
+ scope.crSession.displayScale=1000;scope.crSession.setScale();assert.equal(scope.focusedClient.clientProperties.scale,1.5);
+ const session=scope.crSession;session.home();assert.equal(destination,'/');assert.equal(sessionLocal.get('crange-return-project'),'100');
+ session.editHost(session.network[0]);session.hostDraft.name='Build host';session.hostDraft.notes='Check service';session.hostDraft.ip='192.0.2.10';session.saveHost();
+ assert.equal(session.network[0].name,'Build host');assert.equal(session.network[0].ip,undefined,'managed addresses cannot be edited');
+ session.editHost(session.network[0]);session.deleteHost();assert.equal(session.network.length,1,'managed hosts cannot be deleted');
+ session.addHost();Object.assign(session.hostDraft,{name:'Discovered server',ip:'999.1.2.3'});session.saveHost();assert.match(session.hostError,/valid IPv4/);
+ session.hostDraft.ip='192.0.2.20';session.saveHost();assert.equal(session.network.length,2);
+ session.editHost(session.network[1]);session.deleteHost();assert.equal(session.network.length,1);
+ session.hide();assert.equal(session.visible,false);session.show();assert.equal(session.visible,true);
+ events.pointerdown({button:0,clientX:15,clientY:15,preventDefault(){},stopPropagation(){}});events.pointermove({clientX:500,clientY:300,preventDefault(){},stopPropagation(){}});events.pointerup({preventDefault(){},stopPropagation(){}});assert.equal(shell.style.left,'495px');assert.equal(shell.style.top,'295px');
+ assert.equal(requests.filter(r=>r.operation==='submit').length,2,'map edits never submit server jobs');
+ console.log('Guacamole workspace: preference validation, native template preservation, authorized power payload and force-stop override passed.');
+})().catch(error=>{console.error(error);process.exitCode=1;});

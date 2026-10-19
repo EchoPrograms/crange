@@ -1,0 +1,268 @@
+{
+  "updated": "2026-10-17",
+  "status": "in-progress",
+  "selector_changes": {
+    "release_images_excluded_from_new_vm_and_container_creation": true,
+    "historical_release_references_retained": true,
+    "node_readiness_suffixes_removed": true,
+    "duplicate_equivalent_aliases_collapsed": true,
+    "vm_container_labels_separated": true
+  },
+  "publication_jobs": {
+    "debian-13-container": "7fa3522d71a34852bcdc596a9f849077",
+    "ubuntu-24-04-container": "6829affb70974a73b02033d3d8b473bc",
+    "alpine-container": "a61d6f0686104083949e11a76c5dfe65",
+    "debian-13-vm": "0d52acd2dd6a442d83cfb33e1987886a",
+    "ubuntu-24-04-vm": "d50804e68f134b42a3366e50c2d502bf"
+  },
+  "parrot_distribution": {
+    "proxmox5": {
+      "job": "c46c7754b5bd49e0b5480c60aa0c7deb",
+      "observed_status": "succeeded"
+    },
+    "proxmox2": {
+      "job": "4e33d82f4c4f4eb39da9ad87d1bb1112",
+      "observed_status": "failed",
+      "reason": "6000 MB verification probe exceeds safe host memory headroom",
+      "retry_id": "c314368e7adf4265ab2ffd52d1aa30ed",
+      "retry_observed_status": "failed: inherited balloon minimum4128 exceeds proposed2048MB probe RAM",
+      "guarded_resume_job": "8383a85b8e6d478bba10f76a02428a2e",
+      "guarded_resume_status": "deferred; cancelled before starting"
+    },
+    "proxmox3": {
+      "job": "a1653623bc9945e2a04a89ce5ac8e4b2",
+      "observed_status": "failed",
+      "reason": "6000 MB verification probe exceeds safe host memory headroom",
+      "retry_id": "03f0ade1208f4f1b9a8531a56f6cca65",
+      "retry_observed_status": "failed: default4096MB host reserve leaves insufficient observed headroom",
+      "reserve_tuning_job": "324d536df86441fa87e68c0194e33e31",
+      "reserve_tuning_status": "deferred; cancelled before starting",
+      "retry_after_tuning_job": "81d4815ece1d4a5db09218625fe9c708"
+    },
+    "proxmox6": {
+      "job": "80bc4a6f4b4a4fc0a1d51df07c995f8b",
+      "observed_status": "failed-observation-timeout",
+      "provider_restore_observed": "stopped/OK",
+      "cache_job": "cache-fc6663d316e04f98aa36a512d2a9d6e0",
+      "restore_resume_job": "e815e5b7c47243d094b696a4cfe99cf6",
+      "first_resume_result": "failed volume ownership check because read-only shared ISO was counted as a writable disk",
+      "corrected_resume_job": "bc7f9e938d174c95b607ab84edb89693",
+      "corrected_resume_status": "deferred; cancelled before starting"
+    }
+  },
+  "remaining": [
+    "Verify version3 Linux-base publications and their local cache verification on all nodes.",
+    "Restore verified node4 placement enrollment; global policy currently excludes node4.",
+    "Confirm real reduced-resource Parrot boot/identity verification on the 8GB nodes.",
+    "Complete exact retained node6 Parrot restore verification; no second restore.",
+    "Verify Windows base compatibility on all nodes.",
+    "Review and apply fresh release0.1.2 cohort plan, configure and test it.",
+    "Clean owned failed v1 source copies only after exact provider/ownership/dependency review; none were deleted ad hoc."
+  ],
+  "regression_tests": {
+    "count": 347,
+    "result": "passed",
+    "log": "/tmp/p100-lab-and-template-regression.log"
+  },
+  "browser_checks": {
+    "creation_selectors": {
+      "Make VM": [
+        {
+          "value": "approved-base",
+          "label": "ParrotOS-Jumpbox",
+          "disabled": false
+        },
+        {
+          "value": "custom-mhl-server-2025-gui-verified",
+          "label": "mhl-server-2025-gui-verified",
+          "disabled": true
+        },
+        {
+          "value": "debian-13",
+          "label": "Debian13-VM",
+          "disabled": true
+        },
+        {
+          "value": "mhl-windows-server-2025-base-p100-v1",
+          "label": "Windows Server 2025 Desktop Experience",
+          "disabled": false
+        },
+        {
+          "value": "ubuntu-server-24-04",
+          "label": "UbuntuServer24.04-VM",
+          "disabled": true
+        }
+      ],
+      "Make container": [
+        {
+          "value": "alpine-3-24",
+          "label": "Alpine3.24-Container",
+          "disabled": true
+        },
+        {
+          "value": "approved-ct-base",
+          "label": "Debian13-Container",
+          "disabled": true
+        },
+        {
+          "value": "mhl-debian12-stock",
+          "label": "Debian 12.12 stock container archive",
+          "disabled": false
+        },
+        {
+          "value": "ubuntu-server-24-04",
+          "label": "UbuntuServer24.04-Container",
+          "disabled": true
+        }
+      ]
+    },
+    "maintained_base_dialog": {
+      "checked": "Actual admin Templates button and fixed-source selection dialog; no job submitted",
+      "choices": [
+        {
+          "value": "debian-13-vm",
+          "label": "Debian 13 VM"
+        },
+        {
+          "value": "ubuntu-24-04-vm",
+          "label": "Ubuntu Server 24.04 VM"
+        },
+        {
+          "value": "debian-13-container",
+          "label": "Debian 13 Container"
+        },
+        {
+          "value": "ubuntu-24-04-container",
+          "label": "Ubuntu Server 24.04 Container"
+        },
+        {
+          "value": "alpine-container",
+          "label": "Alpine Container"
+        }
+      ],
+      "javascript_errors": [],
+      "post_requests": []
+    },
+    "latest_selector_check": {
+      "log": "/tmp/p100-template-picker-latest.log",
+      "javascript_errors": [],
+      "result": "passed"
+    }
+  },
+  "publication_version": 3,
+  "node_template_support_jobs": {
+    "proxmox2": {
+      "id": "e9b4fe7e00f642879c2256a5c57f0208",
+      "observed_status": "succeeded",
+      "qemu_server": "9.0.18",
+      "pve_container": "6.0.10",
+      "guest_reboots": false
+    },
+    "proxmox3": {
+      "id": "ff04588e59cf43eb8c9665f9ec379b4f",
+      "observed_status": "succeeded",
+      "qemu_server": "9.0.18",
+      "pve_container": "6.0.10",
+      "guest_reboots": false
+    },
+    "proxmox6": {
+      "id": "6851a2ee48314f04a1a8bafa0745e4e4",
+      "observed_status": "succeeded",
+      "qemu_server": "9.0.18",
+      "pve_container": "6.0.10",
+      "guest_reboots": false
+    },
+    "proxmox5": {
+      "failed_id": "8677a3f488d64db28c14f99c23005cb6",
+      "failure": "IPv6 download route unavailable",
+      "ipv4_retry_id": "1edcbbfa64d7439a9b25043cbc69845f"
+    }
+  },
+  "release_capture": {
+    "version": "0.1.2",
+    "id": "a096e2912cca4949bd13b794c8852f07",
+    "observed_status": "succeeded",
+    "images_verified": 6,
+    "integrity_sha256": "c6ed914f71ead90a6bfa63419edb8cef8710d9bd519fa1cd5cef5fab53dadfcd",
+    "source_status_observed": "All six original business servers running on proxmox1/proxmox2 after capture."
+  },
+  "release_test": {
+    "prepare_job": "7b77d103fc0248f3b4644e8619b0b1fb",
+    "prepare_observed_status": "succeeded",
+    "declared_vms": 2,
+    "declared_containers": 4,
+    "declared_isolated_networks": 1,
+    "stage_job": "4c93e63692124615b1dcf92c2795080e",
+    "deployment_verified": false
+  },
+  "historical_allocations": {
+    "170": "Failed Debian v1 restore was removed by PVE; ID170 was reused by the Ubuntu v1 template restore. Never delete 170 to recover the old Debian receipt.",
+    "171": "Retained Alpine v1 restored template; no published image ID.",
+    "172": "Retained Debian VM v1 restored template; no published image ID."
+  },
+  "publication_status": {
+    "debian-13-vm": "failed: source identity collector failed on owned derivative175/P6; original3015/P4 unchanged",
+    "ubuntu-24-04-vm": "failed before readiness fix: owned stopped derivative176 retained; no publication",
+    "containers": "deferred; original queued jobs cancelled before starting"
+  },
+  "retained_allocations": {
+    "debian_v3": {
+      "node": "proxmox6",
+      "id": 175,
+      "temporary_transport_template21000": "full clone confirmed and temporary template retired; ID subsequently reused by Ubuntu transport",
+      "publication": "not approved"
+    },
+    "diagnostic": "fixed readonly collectors on exact owned derivative; results pending; no changes to original"
+  },
+  "performance_observation": {
+    "node": "proxmox6",
+    "io_pressure_avg60_percent": 85.64,
+    "conclusion": "HDD copy contention; preserve current provider tasks, do not launch duplicate restore/clone"
+  },
+  "diagnostic_result": {
+    "guest_agent": "not available within bounded inspection during HDD contention",
+    "graceful_shutdown": "confirmed timeout",
+    "exact_isolated_derivative175": "stopped with guarded provider stop",
+    "original_source3015": "not modified",
+    "diagnostic_receipt": "/var/lib/crange-distribution/base-distribution/debian-v3-diagnostic-stop.json",
+    "confirmed_cause": "only systemd-networkd-wait-online.service failed while all NICs deliberately disconnected",
+    "machine_id_present": true,
+    "ssh_host_public_key_present": true,
+    "idle_diagnostic_final_status": "stopped"
+  },
+  "new_build_preferences": {
+    "nodes": [
+      "proxmox5",
+      "proxmox1",
+      "proxmox2",
+      "proxmox3",
+      "proxmox6"
+    ],
+    "proxmox6_storage": "local-lvm",
+    "existing_allocations": "retain recorded storage; never implicitly restore again",
+    "hdd_pool": "remains approved; not removed"
+  },
+  "deferred_maintenance": {
+    "state": "cancelled before starting through dashboard API; requests retained privately for requeue after lab test deployment",
+    "request_file": "/home/crange/.local/share/crange/deferred-template-maintenance.json",
+    "count": 7,
+    "requires_policy_revision_review_before_requeue": true
+  },
+  "readiness_recovery": {
+    "deployed": true,
+    "live_publication_verified": false,
+    "only_expected_offline_wait_status_is_reset": true,
+    "other_failed_units_still_block": true,
+    "independent_identity_still_required": true,
+    "retained_derivative_recovery": "exact provider history, reservation, ownership, pool, NIC and disk guards; no second restore or clone",
+    "independent_probe_storage": "approved SSD preferred; immutable source storage preserved"
+  },
+  "stage_timeout": {
+    "new_seconds": 43200,
+    "ordinary_seconds": 3600,
+    "source_deployed": true,
+    "worker_refresh_pending_until_idle": true,
+    "current_job_retains_old_limit": true,
+    "targeted_job_tests_passed": 25
+  }
+}

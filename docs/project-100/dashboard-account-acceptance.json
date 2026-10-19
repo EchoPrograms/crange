@@ -1,0 +1,15 @@
+{
+  "fixture": "audit-p100-2cf4c4df",
+  "checks": {
+    "integer_project_access_and_role": true,
+    "duplicate_rejected": true,
+    "project_visibility_scoped": true,
+    "cluster_admin_denied": true,
+    "foreign_project_jobs_denied": true,
+    "assigned_project_jobs_visible": true,
+    "fixture_deleted": true,
+    "deleted_session_revoked": true
+  },
+  "passed": true,
+  "time": 1792028002
+}

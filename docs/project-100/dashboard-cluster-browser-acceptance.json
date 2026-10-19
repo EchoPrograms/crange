@@ -1,0 +1,14 @@
+{
+  "checks": {
+    "six_enrolled_nodes_visible": true,
+    "capacity_and_commitments_visible": true,
+    "storage_in_gb": true,
+    "guest_distribution_visible": true,
+    "stopped_and_template_compute_zero": true,
+    "maintenance_node_selector_keeps_explicit_node6": true,
+    "hdd_capture_storage_visible": true
+  },
+  "non_compute_guest_rows_checked": 43,
+  "passed": true,
+  "time": 1792108689
+}

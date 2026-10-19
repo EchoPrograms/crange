@@ -1,0 +1,53 @@
+{
+  "state": "blocked-unattended-source-oobe-locale",
+  "source_vmid": 115,
+  "source_stayed_stopped": true,
+  "source_historical_sid": "not_recorded",
+  "first_clone": {
+    "vmid": 8910,
+    "node": "proxmox4",
+    "identity": {
+      "os_caption": "Microsoft Windows Server 2025 Standard Evaluation",
+      "os_version": "10.0.26100",
+      "os_build": "26100",
+      "computer_name": "MERIDIA-F1MSLM9",
+      "part_of_domain": false,
+      "machine_guid": "6e97700b-9619-4ca0-b9f0-f27122819896",
+      "local_administrator_sid": "S-1-5-21-2584229225-535534933-2584267345-500",
+      "machine_sid": "S-1-5-21-2584229225-535534933-2584267345",
+      "image_state": "IMAGE_STATE_COMPLETE",
+      "oobe_in_progress": 0,
+      "system_setup_in_progress": 0,
+      "setup_type": 0,
+      "qemu_guest_agent": true,
+      "term_service_running": true,
+      "winrm_service_running": true,
+      "rdp_allowed_sources": [
+        "10.60.0.20"
+      ],
+      "os_family": "windows"
+    },
+    "collection": "fixed-QGA-Windows-identity-collector",
+    "guest_exec_pid": 4208,
+    "exitcode": 0,
+    "manual_interventions": [
+      "graceful-PVE-reboot-for-stalled-OOBE",
+      "console-login-for-read-only-Setup/service-diagnosis",
+      "service-restart-attempt-for-QGA-hang-observed-after-diagnostic",
+      "clean-Windows-console-reboot-before-small-QGA-read"
+    ]
+  },
+  "second_clone": {
+    "vmid": 8911,
+    "state": "interactive-oobe-locale-page",
+    "upid": "UPID:proxmox4:001A1D4B:1C376D93:6AC7EAFC:qmclone:115:root@pam:",
+    "clone_completed": true,
+    "isolation_before_boot_verified": true,
+    "source_config_unchanged": true,
+    "manual_interventions": [],
+    "identity_collector_pid": 3768,
+    "identity_collector_state": "pending-then-agent-unavailable"
+  },
+  "publishable": false,
+  "blocker": "Source clone answer lacks International-Core; independent unmodified clone requests locale input."
+}

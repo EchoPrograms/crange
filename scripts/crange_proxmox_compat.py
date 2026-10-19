@@ -14,6 +14,7 @@ from pathlib import Path
 import re
 import ssl
 import threading
+import time
 from urllib import error, parse, request
 
 
@@ -53,7 +54,7 @@ def load_config(path=None, *, owner_uid=None):
     if not config.get('revision') or not isinstance(config.get('nodes'), dict):
         raise CompatError('Compatibility revision and measured node schema evidence required.')
     for node, proof in config['nodes'].items():
-        if (node not in {f'proxmox{i}' for i in range(1, 6)} or proof.get('version') != '9.0.3' or
+        if (node not in {f'proxmox{i}' for i in range(1, 7)} or proof.get('version') != '9.0.3' or
                 proof.get('host_managed_supported') is not False or not proof.get('job_id') or
                 not re.fullmatch(r'[a-f0-9]{64}', proof.get('schema_sha256', ''))):
             raise CompatError('Only explicitly measured unsupported 9.0.3 node schemas are approved.')
@@ -115,7 +116,7 @@ def rewrite(method, path, content_type, body, config):
     url = validate_path(path)
     if method not in ('GET', 'POST', 'PUT', 'DELETE'):
         raise CompatError('Unsupported provider API method.')
-    match = re.fullmatch(r'/api2/json/nodes/(proxmox[1-5])/lxc(?:/([0-9]+)/config)?', url.path)
+    match = re.fullmatch(r'/api2/json/nodes/(proxmox[1-6])/lxc(?:/([0-9]+)/config)?', url.path)
     if not match or match[1] not in config['nodes'] or method not in ('POST', 'PUT'):
         return body, None
     if match[2] is None and method != 'POST': return body, None
@@ -150,6 +151,13 @@ class Adapter:
         self.config = load_config(self.path)
         self.identity = fingerprint(self.path)
         self.origin = parse.urlsplit(self.config['upstream'])
+        self.gateway_origins = []
+        if self.origin.hostname in ('10.0.0.101', '10.0.0.104', '10.0.0.106') and self.origin.port == 8006:
+            # Fixed administrator-owned cluster gateways, never caller URLs.
+            self.gateway_origins = [self.origin] + [parse.urlsplit(f'https://10.0.0.{n}:8006')
+                for n in (104, 106, 101) if self.origin.hostname != f'10.0.0.{n}']
+        self.gateway_lock = threading.RLock()
+        self.gateway_verified_until = 0
         context = ssl._create_unverified_context() if self.config.get('insecure_tls') is True else ssl.create_default_context()
         self.opener = request.build_opener(NoRedirect(), request.HTTPSHandler(context=context), request.ProxyHandler({}))
         self.slots = threading.BoundedSemaphore(self.config.get('concurrency', 4))
@@ -158,9 +166,10 @@ class Adapter:
         if fingerprint(self.path) != self.identity:
             raise CompatError('Compatibility code/settings changed; restart and restage reviewed plans.')
 
-    def _request(self, method, path, headers, body=None):
+    def _request(self, method, path, headers, body=None, *, origin=None):
         validate_path(path)
-        url = parse.urlunsplit((self.origin.scheme, self.origin.netloc, path.split('?')[0], parse.urlsplit(path).query, ''))
+        origin = origin or self.origin
+        url = parse.urlunsplit((origin.scheme, origin.netloc, path.split('?')[0], parse.urlsplit(path).query, ''))
         req = request.Request(url, data=body, method=method, headers=headers)
         try:
             response = self.opener.open(req, timeout=self.config.get('timeout_seconds', 20))
@@ -172,6 +181,52 @@ class Adapter:
             if len(data) > 32 * 1024 * 1024: raise CompatError('Upstream response exceeds bound.')
             return response.code, {name.title(): value for name, value in response.headers.items()}, data
 
+    def _select_gateway(self, headers, *, exclude=None):
+        with self.gateway_lock:
+            if self.origin != exclude and time.monotonic() < self.gateway_verified_until:
+                return self.origin
+            candidates = [self.origin] + [origin for origin in self.gateway_origins if origin != self.origin]
+            for origin in candidates:
+                if origin == exclude:
+                    continue
+                try:
+                    status, _, raw = self._request('GET', '/api2/json/cluster/status',
+                        {'Authorization': headers['Authorization']}, origin=origin)
+                    if status in (401, 403):
+                        raise CompatError('Scoped cluster credentials were denied; gateway failover refused.')
+                    if status != 200:
+                        continue
+                    rows = json.loads(raw).get('data', [])
+                    number = int(origin.hostname.rsplit('.', 1)[1]) - 100
+                    if (not isinstance(rows, list) or
+                            not any(row.get('type') == 'cluster' and row.get('name') == 'proxmoxcluster'
+                                    and row.get('quorate') == 1 for row in rows) or
+                            {row.get('name') for row in rows if row.get('type') == 'node'} !=
+                            {f'proxmox{i}' for i in range(1, 7)} or
+                            not any(row.get('type') == 'node' and row.get('name') == f'proxmox{number}'
+                                    and row.get('online') == 1 and row.get('local') == 1 for row in rows)):
+                        continue
+                except CompatError:
+                    raise
+                except (error.URLError, OSError, TimeoutError, ValueError):
+                    continue
+                self.origin = origin
+                self.gateway_verified_until = time.monotonic() + 10
+                return origin
+            raise CompatError('No verified quorate cluster API gateway is reachable; no write submitted.')
+
+    def _gateway_request(self, method, path, headers, body=None):
+        if not self.gateway_origins:
+            return self._request(method, path, headers, body)
+        origin = self._select_gateway(headers)
+        try:
+            return self._request(method, path, headers, body, origin=origin)
+        except (error.URLError, OSError, TimeoutError) as exc:
+            if method != 'GET':
+                raise CompatError('Cluster API write outcome is uncertain; reconcile its provider task. The write was not replayed.') from exc
+            origin = self._select_gateway(headers, exclude=origin)
+            return self._request(method, path, headers, body, origin=origin)
+
     def forward(self, method, path, headers, body):
         self.assert_unchanged()
         auth = headers.get('Authorization', '')
@@ -181,13 +236,13 @@ class Adapter:
         if headers.get('Content-Type'): forwarded['Content-Type'] = headers['Content-Type']
         payload, node = rewrite(method, path, forwarded.get('Content-Type', ''), body, self.config)
         if node:
-            status, _, raw = self._request('GET', f'/api2/json/nodes/{node}/status', {'Authorization': auth})
+            status, _, raw = self._gateway_request('GET', f'/api2/json/nodes/{node}/status', {'Authorization': auth})
             data = json.loads(raw).get('data', {}) if status == 200 else {}
             version = data.get('pveversion', '')
             expected = self.config['nodes'][node]['version']
             if not re.search(r'(?:^|/)' + re.escape(expected) + r'(?:/|$)', version):
                 raise CompatError('Measured target node version changed or is unavailable; compatibility refused.')
-        return self._request(method, path, forwarded, payload if body or method in ('POST', 'PUT') else None)
+        return self._gateway_request(method, path, forwarded, payload if body or method in ('POST', 'PUT') else None)
 
 
 def serve(path=None):
@@ -205,6 +260,14 @@ def serve(path=None):
                 payload = json.dumps(adapter.identity).encode()
                 self.send_response(200); self.send_header('Content-Type', 'application/json')
                 self.send_header('Content-Length', str(len(payload))); self.end_headers(); self.wfile.write(payload); return
+            if self.path == '/__crange_compat/status' and self.command == 'GET':
+                try: adapter.assert_unchanged()
+                except Exception: return self.send_error(409, 'Compatibility identity changed; restage')
+                with adapter.gateway_lock:
+                    payload = json.dumps({'active_upstream': adapter.origin.geturl(),
+                        'recently_verified': time.monotonic() < adapter.gateway_verified_until}).encode()
+                self.send_response(200); self.send_header('Content-Type', 'application/json')
+                self.send_header('Content-Length', str(len(payload))); self.end_headers(); self.wfile.write(payload); return
             try:
                 if self.headers.get('Transfer-Encoding'): raise CompatError('Chunked provider requests are unsupported.')
                 lengths = self.headers.get_all('Content-Length', [])
@@ -218,7 +281,12 @@ def serve(path=None):
                 for name in ('Content-Type', 'Content-Encoding'):
                     if name in headers: self.send_header(name, headers[name])
                 self.send_header('Content-Length', str(len(payload))); self.end_headers(); self.wfile.write(payload)
-            except (CompatError, ValueError): self.send_error(400, 'Compatibility request refused; inspect fixed worker settings')
+            except CompatError as exc:
+                # Only fixed validation messages, never request bodies or credentials.
+                print(f'proxmox-compat: {exc}', flush=True)
+                self.send_error(400, str(exc))
+            except ValueError:
+                self.send_error(400, 'Invalid compatibility request framing')
             except Exception: self.send_error(502, 'Proxmox upstream request failed')
         do_GET = do_POST = do_PUT = do_DELETE = do_request
     class BoundedServer(ThreadingHTTPServer):

@@ -2,7 +2,7 @@
 - name: Validate assigned build host
   ansible.builtin.assert:
     that:
-      - mhl_network_id | int in [1, 2, 3, 4, 5, 254]
+      - (mhl_network_id | int in [1, 2, 3, 4, 5, 254]) or ((mhl_test_scope | default(false) | bool) and (1 <= mhl_network_id | int <= 253))
       - ansible_host == '10.100.' ~ (mhl_network_id | string) ~ '.50'
       - mhl_ci_synthetic_token is defined
       - mhl_ci_synthetic_token is match('^[A-Za-z0-9_-]{16,128}$')
@@ -10,10 +10,50 @@
 
 - name: Install build review utilities
   ansible.builtin.apt:
-    name: [nginx, python3]
+    name: [nginx, python3, openssl, openssh-server, openssh-client, sshpass]
     state: present
     update_cache: true
     cache_valid_time: 3600
+
+- name: Hash the local warehouse deployment credential
+  ansible.builtin.command:
+    argv: [openssl, passwd, '-6', '-salt', 'mhlci{{ mhl_network_id }}', '-stdin']
+    stdin: '{{ mhl_ci_synthetic_token }}'
+  register: mhl_ci_password_hash
+  changed_when: false
+  no_log: true
+
+- name: Bind the warehouse artifact credential to its limited build account
+  ansible.builtin.user:
+    name: warehouse-bot
+    shell: /bin/sh
+    create_home: true
+    groups: ''
+    append: false
+    password: '{{ mhl_ci_password_hash.stdout }}'
+    update_password: always
+    state: present
+  no_log: true
+
+- name: Remove any managed sudo grant from the limited build account
+  ansible.builtin.file:
+    path: /etc/sudoers.d/crange-account-warehouse-bot
+    state: absent
+
+- name: Configure password login only for the warehouse build identity
+  ansible.builtin.copy:
+    dest: /etc/ssh/sshd_config.d/80-mhl-warehouse.conf
+    owner: root
+    group: root
+    mode: '0644'
+    content: |
+      Match User warehouse-bot
+          PasswordAuthentication yes
+          AllowTcpForwarding no
+          X11Forwarding no
+      Match all
+    validate: '/usr/sbin/sshd -t -f %s'
+  notify: Reload MHL build SSH
 
 - name: Create warehouse build artifact directory
   ansible.builtin.file:
@@ -37,6 +77,7 @@
     src: /srv/mhl-ci/artifacts
     dest: /var/www/html/artifacts
     state: link
+    follow: false
     owner: root
     group: root
 
@@ -45,3 +86,44 @@
     name: nginx
     enabled: true
     state: started
+
+- name: Verify the published warehouse artifact is readable over HTTP
+  ansible.builtin.uri:
+    url: http://127.0.0.1/artifacts/warehouse-release.env
+    status_code: 200
+    return_content: true
+  register: mhl_ci_artifact
+  no_log: true
+
+- name: Apply build login configuration before verifying the credential
+  ansible.builtin.meta: flush_handlers
+
+- name: Verify the published credential authenticates to its local build account
+  ansible.builtin.command:
+    argv: [sshpass, '-e', ssh, '-T', '-oBatchMode=no', '-oPreferredAuthentications=password',
+           '-oPubkeyAuthentication=no', '-oNumberOfPasswordPrompts=1', '-oConnectTimeout=5',
+           '-oStrictHostKeyChecking=no', '-oUserKnownHostsFile=/dev/null',
+           'warehouse-bot@127.0.0.1', '/usr/bin/id', '-u']
+  environment:
+    SSHPASS: "{{ mhl_ci_artifact.content.splitlines() | select('match', '^MHL_DEPLOY_TOKEN=') | first | regex_replace('^MHL_DEPLOY_TOKEN=', '') }}"
+  register: mhl_ci_login
+  changed_when: false
+  no_log: true
+
+- name: Require a non-root deployment identity
+  ansible.builtin.assert:
+    that:
+      - mhl_ci_login.stdout is match('^[0-9]+$')
+      - mhl_ci_login.stdout | int >= 1000
+      - mhl_ci_login.stdout | int < 65534
+    fail_msg: The warehouse credential must authenticate to a limited local account.
+
+- name: Read warehouse deployment group membership
+  ansible.builtin.command:
+    argv: [id, '-nG', warehouse-bot]
+  register: mhl_ci_groups
+  changed_when: false
+
+- name: Require the deployment account to have no administrative groups
+  ansible.builtin.assert:
+    that: mhl_ci_groups.stdout.split() | intersect(['root', 'sudo', 'wheel', 'admin']) | length == 0

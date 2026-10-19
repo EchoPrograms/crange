@@ -20,7 +20,15 @@ def allocate_networks(cfg, release, team, scope, reserved_parent=()):
     used_parent.update(int(net['uplink_last_octet']) for net in [*networks.values(), *applied_networks]
                        if str(net['owner_team_id']) == team)
     mapping, owned = {}, {}
-    for source_key, source in sorted(release['scenario'].get('networks', {}).items()):
+    sources = dict(release['scenario'].get('networks', {}))
+    primary_key = None
+    if scope == 'test' and any(not box.get('network_key') for field in ('boxes', 'containers')
+                              for box in release['scenario'].get(field, [])):
+        primary_key = 'test-primary'
+        while primary_key in sources:
+            primary_key += '-x'
+        sources[primary_key] = {'node_name':'auto', 'cores':1, 'memory_mb':512}
+    for source_key, source in sorted(sources.items()):
         identity = f"{release['release_id']}:{team}:{scope}:{source_key}"
         digest = hashlib.sha256(identity.encode()).hexdigest()[:10]
         key = f"{'t' if scope == 'test' else 'r'}{digest}-{source_key[:12]}"
@@ -43,14 +51,14 @@ def allocate_networks(cfg, release, team, scope, reserved_parent=()):
             raise ValueError('Existing release network differs from the immutable declaration.')
         networks[key] = value
         used_ids.add(network_id); used_parent.add(uplink)
-        mapping[source_key] = {'key': key, 'network_id': network_id}
+        mapping['' if source_key == primary_key else source_key] = {'key': key, 'network_id': network_id}
         owned[key] = dict(value)
     return mapping, owned
 
 
 def attachment(source, team, mapping):
     source_key = source.get('network_key', '')
-    if not source_key:
+    if not source_key and '' not in mapping:
         return {'network_key': '', 'network_id': int(team)}
     if source_key not in mapping:
         raise ValueError('Release guest refers to a network missing from its captured topology.')

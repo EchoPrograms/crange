@@ -156,7 +156,7 @@ class SchedulingTests(unittest.TestCase):
         self.assertEqual(api.task_fields,{'source':'active','limit':1000})
         self.assertEqual(ledger.reconciled[0],('bootstrap-finish-test',))
 
-    def test_discovery_counts_stopped_guests_and_template_disks_without_double_ram(self):
+    def test_discovery_counts_unknown_guests_and_template_disks_without_double_ram(self):
         policy = dict(scheduling.DEFAULT_POLICY, allowed_nodes=['proxmox2'])
         result = scheduling.discover(API(),policy)
         node = result['nodes']['proxmox2']
@@ -166,6 +166,32 @@ class SchedulingTests(unittest.TestCase):
         self.assertEqual(node['storages']['local-lvm']['committed_gb'],28)
         self.assertFalse(node['management_verified'])
         self.assertEqual(node['verified_networks'],[])
+
+    def test_stopped_vms_and_containers_keep_disks_but_release_compute(self):
+        class StatefulAPI(API):
+            def __init__(self, state, kind):
+                self.state, self.kind = state, kind
+            def request(self, method, path, fields=None):
+                if path == '/cluster/resources' and fields == {'type': 'vm'}:
+                    return [{'node': 'proxmox2', 'type': self.kind, 'vmid': 101,
+                             'status': self.state}]
+                return super().request(method, path, fields)
+        policy = dict(scheduling.DEFAULT_POLICY, allowed_nodes=['proxmox2'])
+        for kind in ('qemu', 'lxc'):
+            for state in ('stopped', 'running', 'paused', 'unknown'):
+                with self.subTest(kind=kind, state=state):
+                    result = scheduling.discover(StatefulAPI(state, kind), policy)
+                    node = result['nodes']['proxmox2']
+                    active = state != 'stopped'
+                    self.assertEqual(node['committed_memory_mb'], 2048 if active else 0)
+                    self.assertEqual(node['committed_cpu_cores'], 2 if active else 0)
+                    self.assertEqual(node['storages']['local-lvm']['committed_gb'], 20)
+                    self.assertEqual(node['observed_memory_mb'], 2048)
+                    for scope in ('global', '3'):
+                        self.assertEqual(result['quota_usage'][scope], {
+                            'memory_mb': 2048 if active else 0,
+                            'cpu_cores': 2 if active else 0, 'disk_gb': 20})
+                    self.assertEqual(result['guests']['101']['memory_mb'], 2048)
 
     def test_discovery_ignores_only_a_guest_confirmed_absent_after_config_http_500(self):
         class RacyAPI(API):
@@ -376,6 +402,25 @@ class SchedulingTests(unittest.TestCase):
         self.assertEqual(result['resolved']['node_name'],'proxmox2')
         self.assertEqual(result['resolved']['template_id'],301)
         self.assertEqual(row['box']['placement']['preferred_node'],'proxmox5')
+
+    def test_new_archive_routers_use_four_gb_and_existing_disks_remain_pinned(self):
+        row={'resource_key':'router:project','kind':'container','box':{}}
+        archive={'source_type':'stock_archive','disk_gb':8}
+        self.assertEqual(scheduling.requested_disk_gb(row,archive),4)
+        self.assertEqual(scheduling.requested_disk_gb(row,{'disk_gb':8}),8)
+        live={'node_name':'proxmox2','disk':[{'datastore_id':'local-lvm','size':8}],
+              'operating_system':[{'template_file_id':'local:vztmpl/debian.tar.zst'}]}
+        frozen=scheduling.freeze(row,live)
+        self.assertEqual(frozen['resolved']['disk_gb'],8)
+        self.assertEqual(scheduling.tf_overrides({'placements':[frozen],'requests':[]})['resolved_placements']['router:project']['disk_gb'],8)
+        growing={**row,'retained':frozen['resolved']}
+        self.assertEqual(scheduling.requested_disk_gb(growing,archive),8)
+        ordinary={**row,'resource_key':'container:web'}
+        self.assertEqual(scheduling.requested_disk_gb(ordinary,archive),8)
+
+    def test_unknown_existing_router_disk_is_not_replaced_by_new_default(self):
+        with self.assertRaisesRegex(PlacementError,'preserve'):
+            scheduling.freeze({'resource_key':'router:project','box':{}},{'node_name':'proxmox2'})
 
     def test_legacy_pin_and_soft_preference_are_distinct(self):
         self.assertEqual(scheduling.placement_intent('proxmox2'),{'mode':'pin','pinned_node':'proxmox2'})

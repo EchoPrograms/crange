@@ -103,10 +103,11 @@ class AuthStore:
         return hashlib.scrypt(password.encode(), salt=bytes.fromhex(salt),
                               n=16384, r=8, p=1).hex()
 
-    def set_password(self, username, password, *, admin=False, projects=(), role=None):
+    def set_password(self, username, password, *, admin=False, projects=(), role=None, create_only=False):
         import re
+        username = username.strip().lower() if isinstance(username, str) else username
         if not re.fullmatch(r'[a-z][a-z0-9_.-]{0,63}', username):
-            raise ValueError('Use a lowercase username of up to 64 characters.')
+            raise ValueError('Use 1–64 letters, numbers, dots, underscores or hyphens for the username.')
         if not 12 <= len(password) <= 1024:
             raise ValueError('Password must contain 12–1024 characters.')
         projects = sorted({str(int(p)) for p in projects})
@@ -115,6 +116,8 @@ class AuthStore:
         salt = secrets.token_hex(16)
         hashed = self.password_hash(password, salt)
         with self.connect() as db:
+            if create_only and db.execute('SELECT 1 FROM users WHERE name=? COLLATE NOCASE', (username,)).fetchone():
+                raise ValueError('A dashboard account with that username already exists.')
             if db.execute('SELECT 1 FROM guacamole_users WHERE login=? COLLATE NOCASE', (username,)).fetchone():
                 raise ValueError('This username belongs to a Guacamole account.')
             if re.match(r'^p[0-9]{3}-', username) and not db.execute('SELECT 1 FROM users WHERE name=?', (username,)).fetchone():
@@ -134,6 +137,7 @@ class AuthStore:
                     db.executemany('INSERT INTO project_managers VALUES (?,?)', [(username, p) for p in projects])
 
     def login(self, username, password):
+        username = username.strip().lower() if isinstance(username, str) else username
         now = time.time()
         with self.connect() as db:
             db.execute('BEGIN IMMEDIATE')
@@ -270,6 +274,20 @@ class AuthStore:
             db.execute('UPDATE users SET enabled=? WHERE name=?', (int(bool(enabled)), username))
             if not enabled:
                 db.execute('DELETE FROM sessions WHERE username=?', (username,))
+
+    def delete_user(self, username):
+        """Delete one non-administrator dashboard account and its access records."""
+        with self.connect() as db:
+            row = db.execute('SELECT admin FROM users WHERE name=?', (username,)).fetchone()
+            if not row:
+                raise ValueError('Unknown dashboard user.')
+            if row['admin'] and db.execute('SELECT COUNT(*) FROM users WHERE admin=1').fetchone()[0] <= 1:
+                raise ValueError('The last administrator account cannot be deleted.')
+            db.execute('DELETE FROM sessions WHERE username=?', (username,))
+            db.execute('DELETE FROM user_teams WHERE username=?', (username,))
+            db.execute('DELETE FROM user_connections WHERE username=?', (username,))
+            db.execute('DELETE FROM project_managers WHERE username=?', (username,))
+            db.execute('DELETE FROM users WHERE name=?', (username,))
 
     def audit(self, actor, action, target, detail=None):
         with self.connect() as db:

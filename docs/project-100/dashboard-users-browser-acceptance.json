@@ -1,0 +1,13 @@
+{
+  "fixture": "browser-p100-81873893",
+  "checks": {
+    "rendered_create_posts_integer_project_access": true,
+    "saved_access_visible": true,
+    "invalid_project_input_explained": true,
+    "duplicate_inline_error_visible": true,
+    "rendered_delete_removes_fixture": true,
+    "no_javascript_errors": true
+  },
+  "passed": true,
+  "time": 1792028113
+}

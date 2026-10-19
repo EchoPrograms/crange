@@ -1,0 +1,47 @@
+{
+  "cache_job": "cache-9d9d22dc04d24e349d31f75244fad7ad",
+  "gui_job": "c6dfdbc9e340494c93d0fc8481c6283b",
+  "image_id": "mhl-windows-server-2025-base-p100-v1",
+  "template_id": 219,
+  "node": "proxmox6",
+  "storage": "local-hdd",
+  "state": "ready",
+  "verification": {
+    "evidence": {
+      "identity": {
+        "computer_name": "MERIDIA-EIBQ3KH",
+        "image_state": "IMAGE_STATE_COMPLETE",
+        "installation_type": "Server",
+        "local_administrator_sid": "S-1-5-21-3792425069-3172388583-535330733-500",
+        "machine_guid": "1b5d1f12-808f-4e3b-88e0-4c4886083f46",
+        "machine_sid": "S-1-5-21-3792425069-3172388583-535330733",
+        "oobe_in_progress": 0,
+        "os_build": "26100",
+        "os_caption": "Microsoft Windows Server 2025 Standard Evaluation",
+        "os_family": "windows",
+        "os_version": "10.0.26100",
+        "part_of_domain": false,
+        "qemu_guest_agent": true,
+        "qemu_guest_agent_automatic": true,
+        "rdp_allowed_sources": [
+          "10.60.0.20"
+        ],
+        "setup_type": 0,
+        "system_setup_in_progress": 0,
+        "term_service_automatic": true,
+        "term_service_running": true,
+        "winrm_service_automatic": true,
+        "winrm_service_running": true
+      },
+      "isolated_bridge": "crprobe1450",
+      "readiness": "windows-ready"
+    },
+    "identity_unique": true,
+    "passed": true
+  },
+  "probe_deleted": true,
+  "parent_stopped": true,
+  "reservation_state": "released",
+  "archive_pin_removed": true,
+  "no_new_restore_submitted": true
+}

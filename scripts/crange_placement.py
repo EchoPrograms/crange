@@ -1,7 +1,8 @@
 """Deterministic conservative placement and a shared transactional capacity ledger.
 
 Inventory memory is MB, storage GB, CPU logical cores; committed values include
-ALL configured guests (including stopped guests). observed_memory_mb is normalized
+active and unknown-status guests for CPU/RAM, and all guest disks for storage.
+Stopped guests and templates do not commit CPU/RAM. observed_memory_mb is normalized
 non-reclaimable host use including platform overhead, not added to commitments.
 """
 import copy
@@ -32,9 +33,9 @@ def capacity_window(node, policy, node_name, storage=None, clone_mode='linked'):
     but current free space and a physical reserve still bound new writes.
     """
     settings = {**policy, **policy.get('nodes', {}).get(node_name, {})}
-    ratios = (('cpu_overcommit_ratio', 3.5),
+    ratios = (('cpu_overcommit_ratio', 6.0),
               ('memory_overcommit_ratio', 2.0),
-              ('local_linked_disk_overcommit_ratio', 1.5))
+              ('local_linked_disk_overcommit_ratio', 2.0))
     for field, maximum in ratios:
         value = _number(settings.get(field, 1), field, 1)
         if value > maximum:
@@ -233,6 +234,11 @@ def schedule_batch(requests, inventory, catalog, policy, reservations=(), now=No
                     if r['disk_gb'] > available_disk:
                         continue
                     score = (r['memory_mb'] / max(available_mem, 1) + r['cpu_cores'] / max(available_cpu, .01) + r['disk_gb'] / max(available_disk, .01)) / 3 + node.get('load', 0) * .1 + node.get('provisioning_tasks', 0) * .1
+                    # A large archive HDD must not win every small boot-disk
+                    # allocation merely because it has more unused capacity.
+                    # Keep it eligible when faster storage cannot fit the guest.
+                    if storage_id in ('local-hdd', 'hdd-lvm'):
+                        score += .15
                     if intent.get('preferred_node') == name:
                         score -= min(policy.get('preference_bonus', .05), .1)
                     choices.append((score, name, storage_id, replica, clone_mode, {'memory_mb': available_mem-r['memory_mb'], 'cpu_cores': available_cpu-r['cpu_cores'], 'disk_gb': available_disk-r['disk_gb']}))
@@ -288,6 +294,66 @@ class ReservationLedger:
             for a in json.loads(allocations):
                 result.append({'project_id': project, 'reservation_id': a['reservation_id'], 'resource_key': a['resource_key'], **a['resolved'], **a['resources']})
         return result
+
+    def reserve_external_capacity(self, *, project_id, job_id, owner, operation,
+                                  node_name, datastore_id, demand, inventory,
+                                  policy, build_id, vmid, now=None):
+        """Atomically reserve capacity for a fixed non-scenario VM operation."""
+        now = time.time() if now is None else now
+        if (not isinstance(project_id, int) or isinstance(project_id, bool) or
+                not 0 <= project_id <= 255 or not job_id or not owner or
+                operation != 'template-create' or
+                not isinstance(build_id, str) or not re.fullmatch(r'[0-9a-f]{32}', build_id) or
+                isinstance(vmid, bool) or not isinstance(vmid, int) or vmid < 100):
+            raise PlacementError('invalid external capacity reservation identity')
+        captured = _number(inventory.get('captured_at'), 'capacity inventory')
+        if now - captured > policy.get('max_inventory_age_seconds', 120) or captured > now + 5:
+            raise PlacementError('stale capacity inventory; refresh before creating an installer')
+        node = inventory.get('nodes', {}).get(node_name, {})
+        storage = node.get('storages', {}).get(datastore_id, {})
+        if (node_name not in policy.get('allowed_nodes', []) or not node.get('online') or
+                node.get('draining') or node.get('load', 0) > policy.get('max_load', 1) or
+                not node.get('management_verified')):
+            raise PlacementError('installer node is unavailable or not approved for placement')
+        if (datastore_id not in policy.get('allowed_storages', []) or not storage.get('available') or
+                storage.get('inventory_complete') is False):
+            raise PlacementError('installer datastore capacity is unavailable or incomplete')
+        if not isinstance(storage.get('snapshots_verified'), bool) or not storage['snapshots_verified']:
+            raise PlacementError('installer datastore snapshot capability is not verified')
+        requested = {key: _number(demand.get(key), 'installer ' + key, .001)
+                     for key in ('memory_mb', 'cpu_cores', 'disk_gb')}
+        window = capacity_window(node, policy, node_name, storage, 'full')
+        self.db.execute('BEGIN IMMEDIATE')
+        try:
+            if self.db.execute('SELECT 1 FROM jobs WHERE job_id=?', (job_id,)).fetchone():
+                raise PlacementError('installer job already has a capacity reservation')
+            pending = self.active_reservations()
+            available = {
+                'memory_mb': window['memory_mb'] - sum(r['memory_mb'] for r in pending if r['node_name'] == node_name),
+                'cpu_cores': window['cpu_cores'] - sum(r['cpu_cores'] for r in pending if r['node_name'] == node_name),
+                'disk_gb': window['disk_gb'] - sum(r['disk_gb'] for r in pending if r['node_name'] == node_name and r['datastore_id'] == datastore_id),
+            }
+            for key, value in requested.items():
+                if value > available[key]:
+                    raise PlacementError('installer has insufficient ' + key.replace('_', ' ') + ' headroom')
+            item = {'operation': operation, 'resource_key': 'installer:' + job_id,
+                    'project_id': project_id, 'image': 'admin-installer',
+                    'artifact_sha256': 'fixed-reviewed-installer-workflow',
+                    'build_id': build_id, 'vmid': vmid,
+                    'resolved': {'node_name': node_name, 'datastore_id': datastore_id,
+                                 'clone_mode': 'full', 'build_id': build_id, 'vmid': vmid},
+                    'resources': requested, 'headroom': {key: available[key] - requested[key] for key in requested},
+                    'policy_revision': policy['revision'],
+                    'reservation_id': str(uuid.uuid4()),
+                    'reason': 'Fixed administrator installer capacity reserved'}
+            self.db.execute('INSERT INTO jobs (job_id,project_id,owner,state,expires,heartbeat,allocations) VALUES (?, ?, ?, ?, ?, ?, ?)',
+                            (job_id, project_id, owner, 'running', now + 7200, now,
+                             json.dumps([item], sort_keys=True)))
+            self.db.execute('COMMIT')
+            return item
+        except Exception:
+            self.db.execute('ROLLBACK')
+            raise
 
     def reserve_batch(self, requests, inventory, catalog, policy, project_id, job_id, owner, now=None, known_existing_allocations=(), *, bootstrap=False, replace_reviewed_job_ids=()):
         now = time.time() if now is None else now
@@ -438,7 +504,8 @@ class ReservationLedger:
 
     def reserve_source_probe(self, *, project_id, job_id, owner, source_ref,
                              source_sha256, node_name, datastore_id, capacity,
-                             inventory, policy, now=None, kind="vm", clone_mode="full", network_scope=None):
+                             inventory, policy, now=None, kind="vm", clone_mode="full", network_scope=None,
+                             source_node=None):
         """Reserve one direct, disposable source-verification clone.
 
         This reservation is deliberately independent of the immutable image
@@ -453,16 +520,17 @@ class ReservationLedger:
             except (ValueError, TypeError, KeyError) as error:
                 raise PlacementError('Invalid exact network-probe scope') from error
             if (network_scope['project_id'] != project_id or network_scope['node'] != node_name
-                    or network_scope['job_id'] != job_id or kind != 'vm' or clone_mode != 'full'):
-                raise PlacementError('network probe must be one exact scoped full VM clone')
+                    or network_scope['job_id'] != job_id or kind != 'vm' or clone_mode != 'linked'):
+                raise PlacementError('Network probe must be one exact scoped local linked VM clone.')
             if str(network_scope['vmid']) in inventory.get('guests', {}):
                 raise PlacementError('network probe VMID is already allocated')
             if not isinstance(inventory.get('declared_addresses'), list):
                 raise PlacementError('network probe requires a desired/live static address inventory')
             if network_scope['address'].split('/')[0] in inventory['declared_addresses']:
                 raise PlacementError('network probe address is already declared')
-        if clone_mode not in ('full', 'linked') or (clone_mode == 'linked' and kind != 'container'):
-            raise PlacementError('linked source probes require an explicit container source')
+        if clone_mode not in ('full', 'linked') or (clone_mode == 'linked' and kind != 'container'
+                                                  and not (kind == 'vm' and network_scope is not None)):
+            raise PlacementError('Linked VM source probes require an exact owned network scope.')
         if kind not in ('vm', 'container'):
             raise PlacementError('unsupported source-probe guest kind')
         if (isinstance(project_id, bool) or not isinstance(project_id, int) or
@@ -475,7 +543,13 @@ class ReservationLedger:
                 policy.get('max_inventory_age_seconds', 120) or inventory['captured_at'] > now + 5):
             raise PlacementError('stale source-probe capacity inventory')
         api_kind = 'qemu' if kind == 'vm' else 'lxc'
-        if not re.fullmatch(r'source:' + re.escape(node_name) + ':' + api_kind + r':[0-9]+', source_ref):
+        source_node = source_node or node_name
+        if source_node != node_name and (network_scope is not None or
+                (kind != 'vm' and not (kind=='container' and owner=='release-capture')) or clone_mode != 'full'
+                or source_node not in policy.get('allowed_nodes', [])
+                or not inventory.get('nodes', {}).get(source_node, {}).get('online')):
+            raise PlacementError('remote source capture requires an enrolled online source and a reviewed full copy')
+        if not re.fullmatch(r'source:' + re.escape(source_node) + ':' + api_kind + r':[0-9]+', source_ref):
             raise PlacementError('source-probe reference does not match node and guest kind')
         demand = {key: _number(capacity.get(key), 'source-probe ' + key, .001)
                   for key in ('memory_mb', 'cpu_cores', 'disk_gb')}
@@ -490,7 +564,11 @@ class ReservationLedger:
                     not storage.get('available') or kind not in storage.get('guest_types', []) or
                     'amd64' not in node.get('architectures', []) or
                     (kind == 'vm' and 'vm' not in node.get('guest_types', []))):
-                raise PlacementError('source-probe datastore or guest capability unavailable')
+                raise PlacementError('source-probe datastore or guest capability unavailable: ' + json.dumps({
+                    'node':node_name,'storage':datastore_id,'storage_allowed':datastore_id in policy.get('allowed_storages',[]),
+                    'available':storage.get('available'),'inventory_complete':storage.get('inventory_complete'),
+                    'inventory_error':node.get('storage_inventory_error'),'guest_types':storage.get('guest_types'),
+                    'architectures':node.get('architectures')},sort_keys=True))
             if self.db.execute('SELECT 1 FROM jobs WHERE job_id=?', (job_id,)).fetchone():
                 raise PlacementError('job already has reservations; reconcile instead of duplicating')
             count = self.db.execute("SELECT COUNT(*) FROM jobs WHERE project_id=? AND owner=? AND state='reviewed'", (project_id, owner)).fetchone()[0]
@@ -546,7 +624,8 @@ class ReservationLedger:
                               datastore_id, capacity, inventory, policy, now=None):
         """Shared capacity plus globally unique probe VMID/exact LAN static lease.
 
-        Uses the existing full-clone resource budget and all normal capacity,
+        Uses the local linked-clone budget matching the reviewed probe plan,
+        including snapshot proof, physical free space, and all normal capacity,
         node, storage and quota gates. Network trust is intentionally not a
         prerequisite for the probe that measures it. The privileged caller must
         separately verify approved source identity and collect desired/live
@@ -556,7 +635,7 @@ class ReservationLedger:
             job_id=target['job_id'], owner=owner, source_ref=source_ref,
             source_sha256=source_sha256, node_name=target['node'],
             datastore_id=datastore_id, capacity=capacity, inventory=inventory,
-            policy=policy, now=now, kind='vm', clone_mode='full', network_scope=target)
+            policy=policy, now=now, kind='vm', clone_mode='linked', network_scope=target)
 
     def validate_job(self, job_id, now=None):
         now = time.time() if now is None else now

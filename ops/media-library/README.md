@@ -8,13 +8,13 @@ Read-only fallback storages (available on every cluster node):
 
 Only `template/iso` and `template/cache` are mirrored. Guest disks, backup archives,
 snippets and CRANGE disk caches are unaffected. Kernel NFS on nodes1/4 allows only
-cluster management addresses `10.0.0.101` through `.105`, read-only, root-squashed.
+cluster management addresses `10.0.0.101` through `.106`, read-only, root-squashed.
 The storage mounts use bounded soft retries because installation media is read-only;
 these options must not be reused for active guest disks.
 
 Run `configure-mirrors.py` as root on each designated mirror after installing
 `nfs-kernel-server`. It enables boot-persistent exports without changing existing
-exports. Register both NFS storage IDs with `iso,vztmpl` content and all five nodes.
+exports. Register both NFS storage IDs with `iso,vztmpl` content and all six nodes.
 Install `sync.py` at `/usr/local/sbin/crange-media-sync` on node1 and the units in
 `/etc/systemd/system`; enable `crange-media-sync.timer`. This requires the existing
 node root SSH trust and NFS primary mount. Sync runs every fifteen minutes.
@@ -54,3 +54,12 @@ Scoped controller permissions: reuse `CrangeISOUpload` (only
 `Datastore.AllocateTemplate`) on `/storage/crange-library` for both the service user
 and its privilege-separated Terraform token. Mirror storage paths get read-only
 `PVEAuditor`. The primary already had `PVEDatastoreUser`; guest/pool ACLs are unchanged.
+
+Library CT145 resource floor: 2 GiB RAM, 2 GiB swap and 2 CPU cores. The
+administrator Cluster actions can raise the verified container's resource floor
+online and recover only its NFS service with a journaled graceful restart. A
+768 MiB/no-swap library experienced severe reclaim and blocked NFS threads
+during Windows archive export; avoid restoring that undersized configuration.
+The primary share also has guest-disk users: never use read-only mirror/soft
+mount semantics for those disks, reboot the storage container as routine
+recovery, or treat an observation timeout as a failed backup.

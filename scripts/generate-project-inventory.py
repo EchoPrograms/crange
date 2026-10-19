@@ -1,9 +1,11 @@
 #!/usr/bin/env python3
 """Generate an Ansible JSON inventory from an applied Terraform environment."""
 import argparse
+import ipaddress
 import json
 from pathlib import Path
 import subprocess
+from crange_guest_outputs import has_guest_id, complete_metadata
 
 KEY = "/home/crange/.ssh/id_ed25519_range"
 PROJECT_ROUTER = "p{project:03d}_router"
@@ -32,15 +34,33 @@ def main():
         check=True, text=True, capture_output=True
     )
     outputs = json.loads(proc.stdout)
+    required_outputs = ("project_id", "routers", "jump_boxes", "scenario_boxes", "scenario_containers")
+    missing_outputs = [
+        name for name in required_outputs
+        if not isinstance(outputs, dict) or not isinstance(outputs.get(name), dict)
+        or "value" not in outputs[name]
+    ]
+    if missing_outputs:
+        parser.exit(
+            2,
+            "inventory generation failed: required applied Terraform outputs are missing: "
+            + ", ".join(missing_outputs) + ". Apply the project infrastructure first.\n",
+        )
+    desired_file = args.terraform_dir / 'crange.auto.tfvars.json'
+    desired = json.loads(desired_file.read_text()) if desired_file.exists() else {}
+    applied_file = args.terraform_dir / 'crange-applied-placements.json'
+    applied = json.loads(applied_file.read_text()) if applied_file.exists() else {}
+    outputs = complete_metadata(outputs, desired, applied)
     def val(name):
-        return outputs[name]["value"]
+        value = outputs[name]["value"]
+        if name in ("jump_boxes", "scenario_boxes", "scenario_containers"):
+            return {key: guest for key, guest in (value or {}).items() if has_guest_id(guest)}
+        return value
 
     project_id = int(val("project_id"))
     routers = val("routers")
     jumps = val("jump_boxes")
     from crange_jumpboxes import effective_services
-    desired_file = args.terraform_dir / 'crange.auto.tfvars.json'
-    desired = json.loads(desired_file.read_text()) if desired_file.exists() else {}
     scenario_hosts = []
     vnc_hosts = []
     for kind, output_name in (('jumpbox', 'jump_boxes'), ('vm', 'scenario_boxes'), ('container', 'scenario_containers')):
@@ -76,6 +96,10 @@ def main():
                 "ansible_become": False,
                 "ansible_ssh_private_key_file": KEY,
                 "ansible_python_interpreter": "/usr/bin/python3",
+                # Connection-plugin SSH arguments precede common arguments;
+                # set the bootstrap allowance here so an older global value
+                # cannot disconnect PAM's first LXC login after 15 seconds.
+                "ansible_ssh_args": "-C -o ControlMaster=no -o ControlPersist=no -o ControlPath=none -o ServerAliveInterval=5 -o ServerAliveCountMax=8",
             },
             "children": {
                 "project_routers": {
@@ -121,7 +145,7 @@ def main():
     common_ssh = (
         "-o IdentitiesOnly=yes -o StrictHostKeyChecking=no "
         "-o ControlMaster=no -o ControlPersist=no -o ControlPath=none "
-        "-o ServerAliveInterval=5 -o ServerAliveCountMax=3 -o ConnectTimeout=10"
+        "-o ServerAliveInterval=5 -o ServerAliveCountMax=8 -o ConnectTimeout=10"
     )
     proxy = (
         f'ssh {common_ssh} -i {KEY} -W %h:%p root@{project_router_ip}'
@@ -257,10 +281,31 @@ def main():
                  "ansible_ssh_private_key_file": KEY, "ansible_python_interpreter": "/usr/bin/python3"},
         "hosts": {}, "children": {},
     }
+    ct_file = args.terraform_dir / 'approved-container-templates.json'
+    approved_containers = json.loads(ct_file.read_text()) if ct_file.exists() else {}
     containers = val("scenario_containers") or {}
     for key, container in containers.items():
         host = f"p{project_id:03d}_ct_{key}"
-        values = {"ansible_host": container["address"]}
+        placement = container.get("placement", {}) or {}
+        desired_container = desired.get("scenario_containers", {}).get(key, {})
+        values = {
+            "ansible_host": container["address"],
+            "crange_project_id": project_id,
+            "crange_box_key": key,
+            "crange_guest_id": container.get("id"),
+            "crange_image_id": placement.get("image_id", ""),
+            "crange_template_id": placement.get("template_id"),
+            "crange_template_node": placement.get("template_node"),
+            "crange_node_name": placement.get("node_name"),
+            "crange_template": desired_container.get("template", ""),
+        }
+        management_user = 'root' if placement.get('template_file_id') else approved_containers.get(desired_container.get('template'), {}).get('profile', {}).get('management_user', 'user')
+        if management_user not in ('root', 'user'):
+            parser.exit(2, 'crange: Unsupported approved container management account.\n')
+        values['crange_management_user'] = management_user
+        if management_user == 'root':
+            values["ansible_user"] = "root"
+            values["ansible_ssh_args"] = "-C -o ControlMaster=auto -o ControlPersist=60s -o ServerAliveInterval=30 -o ServerAliveCountMax=3"
         groups["scenario_containers"]["hosts"][host] = values
         scope = "staging_containers" if int(container["team_id"]) == 254 else f"team_{int(container['team_id']):03d}_containers"
         groups["scenario_containers"]["children"].setdefault(scope, {"hosts": {}})["hosts"][host] = values
@@ -275,6 +320,8 @@ def main():
             "ansible_connection": "winrm",
             "ansible_port": 5985,
             "ansible_winrm_transport": "ntlm",
+            "ansible_winrm_message_encryption": "always",
+            "ansible_winrm_connection_timeout": 60,
             "ansible_winrm_server_cert_validation": "ignore",
         },
         "hosts": {},
@@ -294,10 +341,16 @@ def main():
             groups["scenario_vms"]["children"].setdefault(scope, {"hosts": {}})["hosts"][host] = values
         elif isinstance(os_type, str) and os_type.startswith('win'):
             values.update({
+                "crange_project_id": project_id,
+                "crange_box_key": key,
+                # Preserve the approved logical image identity from the applied
+                # Terraform placement; Windows credentials are bound to it.
+                "crange_image_id": machine.get("placement", {}).get("image_id", ""),
                 "crange_template": template,
                 "crange_template_id": machine.get("placement", {}).get("template_id"),
                 "crange_template_node": machine.get("placement", {}).get("template_node"),
                 "crange_guest_id": machine.get("id"),
+                "crange_node_name": machine.get("placement", {}).get("node_name"),
                 "crange_guest_network_id": str(machine.get("network_id", machine["team_id"])),
                 "crange_windows_jumpbox": bool(desired.get('scenario_boxes', {}).get(key, {}).get('is_jumpbox')),
             })
@@ -316,6 +369,18 @@ def main():
         groups["jumpboxes"]["hosts"][name] = {"ansible_host": address}
         scope = "staging_jumpboxes" if int(jump["team_id"]) == 254 else f"team_{int(jump['team_id']):03d}_jumpboxes"
         groups["jumpboxes"]["children"].setdefault(scope, {"hosts": {}})["hosts"][name] = {"ansible_host": address}
+
+    windows_hosts = groups['windows_guests']['hosts'].values()
+    for group_name, group in groups['routers']['children'].items():
+        for router in group.get('hosts', {}).values():
+            subnet = ipaddress.ip_network(router['router_team_network'])
+            networks = [subnet]
+            if group_name in ('team_routers', 'staging_routers'):
+                owner = str(subnet.network_address).split('.')[2]
+                networks += [ipaddress.ip_network(net['lan']) for net in custom_networks.values()
+                             if str(net['owner_team_id']) == owner]
+            router['router_controller_winrm_targets'] = sorted({host['ansible_host'] for host in windows_hosts
+                if group_name == 'project_routers' or any(ipaddress.ip_address(host['ansible_host']) in network for network in networks)})
 
     document = {"all": {"children": groups}}
     args.output.parent.mkdir(parents=True, exist_ok=True)

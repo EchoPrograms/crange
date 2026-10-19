@@ -8,6 +8,7 @@ variable "box" {
     ip_last_octet = number
     datastore_id  = optional(string, "local-lvm")
     image_id      = optional(string, "")
+    machine       = optional(string)
     node_name     = string
     template_id   = number
     template_node = string

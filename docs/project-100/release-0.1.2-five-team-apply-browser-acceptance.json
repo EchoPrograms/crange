@@ -1,0 +1,25 @@
+{
+  "plan_id": "0d1d2fecd2c86b84ca3dab24b5fcf4c2",
+  "reviewed_creates_only": 30,
+  "real_dashboard_request": {
+    "project": 100,
+    "operation": "release-apply",
+    "options": {
+      "teams": [
+        1,
+        2,
+        3,
+        4,
+        5
+      ],
+      "plan_id": "0d1d2fecd2c86b84ca3dab24b5fcf4c2",
+      "allow_destroy": false,
+      "allow_replace": false
+    }
+  },
+  "apply_job_id": "83754c92f74c44d3b6fc6096806ccb25",
+  "centered_job_popup_opened": true,
+  "popup_closed_without_cancel": true,
+  "javascript_errors": [],
+  "completion_not_yet_accepted": true
+}

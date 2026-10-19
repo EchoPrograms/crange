@@ -26,7 +26,8 @@ class GuestUsersTests(unittest.TestCase):
         cfg={'scenario_containers': {'t254-web': {'team_id':'254','name':'web','node_name':'proxmox4'}}}
         live={'scenario_containers': {'value': {'t254-web': {'id':999,'address':'10.3.254.20'}}}}
         with patch.object(crange,'project_dir'),patch.object(crange,'json_config',return_value=cfg),patch.object(crange,'output_json',return_value=live),patch.object(crange,'ProxmoxAPI') as api:
-            api.return_value.container.return_value={'hostname':'p003t254-web','template':0}
+            api.return_value.request.return_value=[{'vmid':999,'type':'lxc','node':'proxmox4'}]
+            api.return_value.container.return_value={'hostname':'p003t254-web','template':0,'net0':'name=eth0,bridge=p003t254'}
             api.return_value.container_status.return_value='running'
             self.assertEqual(users.resolve(3,'container','t254-web')[0],'10.3.254.20')
             for actual in [{'hostname':'unrelated-guest','template':0},{'hostname':'p003t254-web','template':1}]:
@@ -36,6 +37,22 @@ class GuestUsersTests(unittest.TestCase):
             live['scenario_containers']['value']['t254-web']['address']='10.4.254.20'
             with self.assertRaises(ValueError): users.resolve(3,'container','t254-web')
             with self.assertRaises(ValueError): users.resolve(3,'container','other')
+
+    def test_automatic_placement_uses_live_node_after_migration(self):
+        import crange
+        cfg={'scenario_containers': {'t254-web': {'team_id':'254','name':'web','node_name':'auto'}}}
+        live={'scenario_containers': {'value': {'t254-web': {'id':999,'address':'10.3.254.20',
+              'placement':{'node_name':'proxmox4'}}}}}
+        with patch.object(crange,'project_dir'),patch.object(crange,'json_config',return_value=cfg),patch.object(crange,'output_json',return_value=live),patch.object(crange,'ProxmoxAPI') as api:
+            api.return_value.request.return_value=[{'vmid':999,'type':'lxc','node':'proxmox6'}]
+            api.return_value.container.return_value={'hostname':'p003t254-web','template':0,'net0':'name=eth0,bridge=p003t254'}
+            api.return_value.container_status.return_value='running'
+            self.assertEqual(users.resolve(3,'container','t254-web'),
+                             ('10.3.254.20','crange-3-container-999-p003t254-web'))
+            api.return_value.container.assert_called_with('proxmox6',999)
+            api.return_value.container_status.assert_called_once_with('proxmox6',999)
+            api.return_value.container.return_value['net0']='name=eth0,bridge=p004t254'
+            with self.assertRaises(ValueError):users.resolve(3,'container','t254-web')
 
     def test_queue_accepts_only_fixed_operations_and_ciphertext(self):
         fields={'name':'t254-web','kind':'vm','action':'delete','username':'student01','sealed_password':''}

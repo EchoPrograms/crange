@@ -1,0 +1,8 @@
+[Unit]
+Description=Check Proxmox2 management address every 20 seconds
+[Timer]
+OnBootSec=40s
+OnUnitActiveSec=20s
+AccuracySec=2s
+[Install]
+WantedBy=timers.target

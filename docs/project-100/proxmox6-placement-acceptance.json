@@ -1,0 +1,94 @@
+{
+  "passed": true,
+  "automatic_soft_preference_selected_node6_hdd": true,
+  "placements": [
+    {
+      "resource_key": "container:node6-readonly-acceptance",
+      "project_id": 100,
+      "image": "alpine-ct-portable-20261006",
+      "artifact_sha256": "e9ffdc4824c31bac32a732f14b81b3631578526740fc3dae8c5e80c10b4debe9",
+      "resolved": {
+        "node_name": "proxmox6",
+        "datastore_id": "local-hdd",
+        "template_id": 156,
+        "template_file_id": null,
+        "template_node": "proxmox6",
+        "clone_mode": "linked",
+        "verified_local_cache": true
+      },
+      "resources": {
+        "memory_mb": 512,
+        "cpu_cores": 1,
+        "disk_gb": 4.4
+      },
+      "headroom": {
+        "memory_mb": 569880.6875,
+        "cpu_cores": 287.0,
+        "disk_gb": 3208.0077738288787
+      },
+      "reason": "Preferred node is eligible and has sufficient headroom; verified local linked clone",
+      "policy_revision": "container-cache-04e01dec55fd4bca86b186ad476051fa"
+    },
+    {
+      "resource_key": "vm:node6-readonly-acceptance",
+      "project_id": 100,
+      "image": "alpine-3-24-portable-20261005",
+      "artifact_sha256": "d78dcf9ac1a779f60f7e77badbddb9dfd73c6fa799d434dd0e4486c7d6108cb5",
+      "resolved": {
+        "node_name": "proxmox6",
+        "datastore_id": "local-hdd",
+        "template_id": 155,
+        "template_file_id": null,
+        "template_node": "proxmox6",
+        "clone_mode": "linked",
+        "verified_local_cache": true
+      },
+      "resources": {
+        "memory_mb": 512,
+        "cpu_cores": 1,
+        "disk_gb": 22.0
+      },
+      "headroom": {
+        "memory_mb": 569368.6875,
+        "cpu_cores": 286.0,
+        "disk_gb": 3186.0077738288787
+      },
+      "reason": "Preferred node is eligible and has sufficient headroom; verified local linked clone",
+      "policy_revision": "container-cache-04e01dec55fd4bca86b186ad476051fa"
+    }
+  ],
+  "cache_evidence": [
+    {
+      "job_id": "cache-7befd6f018094f42ade701976315510c",
+      "state": "ready",
+      "reservation": "released",
+      "template_id": 155,
+      "probe_id": 156,
+      "physical_backing": null
+    },
+    {
+      "job_id": "cache-67fc0c22253947eabb3dfbff1497bd7f",
+      "state": "ready",
+      "reservation": "released",
+      "template_id": 156,
+      "probe_id": 157,
+      "physical_backing": {
+        "origin": "base-156-disk-0",
+        "probe_id": 157,
+        "probe_volume": "local-hdd:vm-157-disk-0",
+        "source_id": 156,
+        "source_volume": "local-hdd:base-156-disk-0",
+        "verified": true
+      }
+    }
+  ],
+  "networks_verified": [
+    "p100t001",
+    "p100t002",
+    "p100t003",
+    "p100t004",
+    "p100t005",
+    "p100t254"
+  ],
+  "read_only_no_reservation_or_guest_created": true
+}

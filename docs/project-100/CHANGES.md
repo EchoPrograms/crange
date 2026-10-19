@@ -119,3 +119,136 @@ remaining blockers. Do not place secrets or fabricated verification here.
   not proved by those checks.
 - Empty project launch tickets now explain that boxes must first be deployed,
   rather than directing the user to reapply an empty access manifest.
+
+## October 18–19 — workstation deployment and release-transition guard
+
+- Fixed incompatible QEMU machine inheritance for isolated probes and reviewed
+  new-VM deployment overrides, preserving existing guest machine types. Windows
+  cache recovery c6dfdbc9e340494c93d0fc8481c6283b passed readiness/identity and
+  cleanup; no second archive restore ran.
+- Project Overview planning now invokes guarded expired guest review cleanup;
+  dedicated jump-box names are derived correctly. Live plan preparation
+  released one confirmed unused expired review.
+- Reviewed corrected plan 5613c70c92cea61d9bf5675253ed618d: 20 linked workstation
+  creates, ten empty-CD-ROM boot-order updates, no replacements/deletes.
+  Apply 8fafed50dda9423b949aea82964f3a13 is running. Provider boot-order changes
+  rebooted company Windows guests; repeat their health checks after completion.
+- Added a release-transition stop phase under the existing reviewed Apply
+  workflow: verify all retiring old release guests and their exact endpoints,
+  lock both old/new nodes, journal stop task handles, stop the old guests, and
+  verify they remain stopped before creating peers with reused IPs. Uncertain
+  submissions/tasks block Terraform rather than being replayed. This code has
+  eight focused tests including saved-apply ordering/failure, plus existing
+  review/recovery regressions. Actual upgrade/rollback acceptance remains open.
+- Fixed staging CI artifact credentials to authenticate a real unprivileged
+  account, and published immutable service update 0.1.3 while preserving the
+  parent and six image references. Fresh testing/rollout remains pending.
+
+- Participant authentication acceptance now covers all ten native Guacamole
+  password logins, revoked test sessions, absent self UPDATE permissions and a
+  sampled self-password-change request returning HTTP403 without changing its
+  effective credential. Workstation sessions/grants remain a separate gate.
+- Source now grants apply and stage-deploy the existing bounded 12-hour batch
+  budget; interactive actions retain one hour. The 26-job suite passes. Do not
+  restart the current worker mid-apply; activate this change when it is idle.
+
+## October 19 — partial apply and unexpected host outage
+
+- Recorded the workstation apply timeout and seven retained Windows guests on
+  Proxmox6; configuration and desktop acceptance remain pending. Fixed both
+  Terraform apply and ordinary apply-worker budgets, without replaying the old plan.
+- Deployed verified same-cluster API gateway failover, with actual read acceptance
+  through Proxmox4 while Proxmox1 is unavailable. Uncertain writes are not retried.
+- Reservation reconciliation stopped on inaccessible Proxmox1 router CT120; no
+  reservation release or quorum override was forced. Root cause is unknown.
+
+- Post-outage exact dashboard release-check passed for Teams 2–4 (18 business
+  servers). Teams 1 and 5 still depend on unreachable Proxmox1 routers.
+- Native Guacamole admin console connections to Team 2 Linux and Windows guests
+  passed through the Proxmox4 API gateway; native sessions survived console close
+  and reload. No additional guest network services were opened.
+
+## October 19 — Guacamole account lifecycle acceptance
+
+- Recovered controller access after the local session workspace was replaced.
+- Verified the actual browser account lifecycle and a serialized native lock
+  check. Completed lock job b74ceab50e1b4eada8e43b079214d4d3 rejected login HTTP403;
+  unlock job 9bf753ded5244b7d940b75eae6f3b572 accepted a six-character password.
+- Deleted the isolated audit account through dashboard API job
+  21ab73557cdf41bea6dbb739d5e614d2 and confirmed native/directory absence.
+- Kept the existing Guacamole 1.6 disabled flag payload: the earlier overlapping
+  lock/login/unlock experiment did not establish a product defect.
+
+## October 19 — staging snapshots and power through Guacamole
+
+- Used actual Guacamole extension HTTP payloads as configured native management
+  account crange-sync to create, restore and delete one staging-only LXC snapshot,
+  and to force-stop/start the same CT124. No company deployment was changed.
+- Proved filesystem rollback by creating a temporary account after snapshot,
+  confirming its presence, and confirming its absence after restore. Preserved
+  warehouse-bot and controller root-key access; final ping/two HTTP checks passed.
+- Removed the disposable snapshot and returned CI to running. Clarified the native
+  identity scope in earlier console evidence; no literal guacadmin password login
+  was established by that harness. QEMU/override acceptance remains pending.
+
+
+## 2026-10-19 — Interface maintenance
+
+Deployed the controller/Guacamole contrast and layout audit, project/server cards,
+grouped preferences and floating remote-session controls. Applied square corners,
+neutral status/alert treatments and self-hosted IBM Plex Mono. Live search, session
+network mapping, native advanced controls and mobile layout were checked.
+No guest deployment, power or network configuration was changed. Evidence:
+[interface-polish-acceptance.json](interface-polish-acceptance.json); design rules:
+[interface-design.md](../interface-design.md).
+
+
+- 2026-10-19 — Controller/Guacamole UI follow-up: compact Plex Sans typography,
+  semantic colors on neutral surfaces, project selector in the sidebar, corrected
+  remote-access favicon, project creation/name settings and project user context.
+  Browser writes were tested with an isolated API fixture; no lab guests, release
+  contents or network policy changed.
+
+
+- 2026-10-19 — Guacamole follow-up: corrected connection-icon vertical alignment,
+  larger server text, heavier symbols, neutral icons on white Connect buttons,
+  and Linux/Windows/BSD indicators from recorded OS metadata. Native verification
+  no longer aborts when Proxmox1 is offline: it skips offline nodes and individual
+  failed guest reads, bounds interactive reads, and uses cluster-reported power.
+  The authenticated Guacamole-to-controller inventory returned HTTP 200 with 36
+  permitted connections, 33 matched to reachable guests. No guest power, disk or
+  network settings were changed.
+
+
+## October 19 — project retention and access interface
+
+- Added manager deletion from Project Settings, retained-project admin restore,
+  and dependency-checked permanent removal. Saved definitions/releases survive
+  ordinary deletion; restoring a project requires redeploying its infrastructure.
+- Added queue/lifecycle fences, exact Terraform ownership checks, managed route
+  and gateway cleanup, and archived administrator job history on permanent removal.
+- Guacamole displays the saved company project name with `(p100)`. CRANGE admin
+  launch preserves native Guacamole login instead of impersonating the dashboard
+  username. Thickened dashboard icons and changed force-stop indication to red.
+- Fixed floating Guacamole management menu positioning and prioritized selected
+  server power checks. Verified current authorized sample box states read as running.
+- Validation uses temporary projects and intercepted browser requests. No live
+  Project 100 resources were deleted or reset. Proxmox1 remains unavailable and
+  blocks complete release-image dependency proof for permanent cleanup.
+
+### Project lifecycle and session controls (2026-10-19)
+
+- Project managers can delete deployed infrastructure from Settings while retaining definitions and immutable releases. Administrators can restore a deleted project for redeployment or purge its private artifacts. The administrator project list exposes Delete; Deleted projects offers Restore and Permanently delete after teardown succeeds. Both destructive actions require the exact project identifier.
+- A reused project number no longer makes teardown fail on an unrelated old OPNsense gateway when the new project has no aggregate route. The legacy gateway is preserved. Routing cleanup is preflighted before infrastructure destruction; firewall policy is unchanged.
+- Guacamole headings use saved project names. Dashboard administrators open native Guacamole authentication, preserving the separate guacadmin account. Floating server menus have viewport anchoring and complete power controls.
+- Interactive power and node status use short-lived, identity-checked cluster observations instead of per-guest Terraform subprocesses or old capacity snapshots. Offline or unverified hosts cannot be displayed as online from stale capacity data. Capacity age remains visible.
+- CRANGE Users is a compact table with a plus button and a focused account editor. Project access, per-project roles, account status and deletion remain available.
+- The connection network map includes authorized machines in the current team. Each browser/account/team can retain host aliases, notes and manually entered custom hosts. Managed addresses refresh from the authorized inventory; managed hosts cannot be deleted or have their IP overridden. These edits never submit a controller job.
+- The session toolbar can be dragged by its grip or moved with arrow keys, hidden and reopened. Position and visibility are retained locally. Native clipboard, display, advanced controls and power authorization are preserved.
+- Lifecycle destructive operations are covered by mocked safety tests and live routing dry-runs; verification does not delete a live project. Private-image purge remains blocked where dependency evidence cannot be collected from an offline node.
+
+- Deletion and permanent deletion now persist `waiting-for-node` jobs when required hosts are offline. These jobs retain their project fence and appear as active jobs, but release the execution lane. The worker checks reconnection every 15 seconds, then requeues the same job and rechecks authorization and exact ownership before proceeding. Unrelated offline hosts do not block projects whose guests are on available nodes. Private-image deletion waits for all dependency evidence.
+- Templates returns saved builds immediately and refreshes live availability once in a shared background collector with short interactive API timeouts. The tab polls only while collecting and preserves open dialogs. Cached display hints never authorize publication or guest mutations.
+- The connection title opens Guacamole’s native connection selector, with checkboxes for multiple connections displayed together. Existing authentication, permission filtering, connection grouping and tiling remain native.
+
+- Preferences now has a Back action; leaving a connection returns to its active project instead of the project directory. The Access icon is a simplified inverse CR monogram, with SVG and touch-icon assets updated together.

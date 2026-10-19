@@ -1,0 +1,50 @@
+{
+  "dashboard_job": "7215e99442154084af7cc0ec95985ba4",
+  "before_gib": 400,
+  "after_gib": 464,
+  "node_storage": [
+    {
+      "node": "proxmox1",
+      "observation_error": "TimeoutError"
+    },
+    {
+      "node": "proxmox2",
+      "observation_error": "TimeoutError"
+    },
+    {
+      "node": "proxmox3",
+      "observation_error": "TimeoutError"
+    },
+    {
+      "node": "proxmox4",
+      "observation_error": "TimeoutError"
+    },
+    {
+      "node": "proxmox5",
+      "observation_error": "TimeoutError"
+    },
+    {
+      "node": "proxmox6",
+      "observation_error": "TimeoutError"
+    }
+  ],
+  "extra_root_arguments_rejected": true,
+  "network_relay_pin_unchanged": true,
+  "all_nodes_archive_observation": "inconclusive: 10-second read deadlines during active backup",
+  "server_observation": {
+    "nfs_service": "active",
+    "ssd_vg_total_bytes": 1000203091968,
+    "ssd_vg_free_bytes": 149778595840,
+    "reserve_floor_bytes": 107374182400,
+    "reserve_preserved": true,
+    "io_pressure_avg10_full": 46.63,
+    "observed_during_backup": true
+  },
+  "post_growth_archive_observed_before_backup": {
+    "node": "proxmox6",
+    "active": 1,
+    "shared": 1,
+    "total": 489248784384,
+    "avail": 169718317056
+  }
+}

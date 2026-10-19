@@ -1,0 +1,38 @@
+{
+  "checks": [
+    {
+      "name": "MHL-DC01",
+      "connection_id": "49",
+      "protocol": "rdp",
+      "tunnel_open": true,
+      "screen_size_received": true,
+      "rendered": true,
+      "protocol_error_codes": [
+        "776"
+      ],
+      "session_query_exitcode": 1,
+      "session_rows": 0,
+      "active_authenticated_rdp_session": false,
+      "received_bytes": 57506,
+      "protocol_error": true,
+      "passed": false
+    },
+    {
+      "name": "MHL-FS01",
+      "connection_id": "50",
+      "protocol": "rdp",
+      "tunnel_open": true,
+      "screen_size_received": true,
+      "rendered": true,
+      "protocol_error_codes": [],
+      "session_query_exitcode": 0,
+      "session_rows": 1,
+      "active_authenticated_rdp_session": true,
+      "received_bytes": 54130,
+      "protocol_error": false,
+      "passed": true
+    }
+  ],
+  "passed": false,
+  "used_native_authenticated_guacamole_connections": true
+}

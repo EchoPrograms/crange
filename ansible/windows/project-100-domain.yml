@@ -4,7 +4,7 @@
   gather_facts: false
   serial: 1
   vars_files:
-    - /etc/crange-secrets/project-100/windows.vault.yml
+    - "{{ lookup('env', 'CRANGE_MHL_WINDOWS_VAULT_FILE') | default('/etc/crange-secrets/project-100/windows.vault.yml', true) }}"
   vars:
     mhl_domain_name: mhl.test
     mhl_netbios_name: MHL
@@ -12,9 +12,13 @@
     - name: Require the expected MHL controller and protected bootstrap secrets
       ansible.builtin.assert:
         that:
-          - ansible_host is match('^10\.100\.(?:[0-5]|254)\.')
+          - ansible_host == ('10.100.' ~ (mhl_network_id | string) ~ '.10')
+          - ansible_host is match('^10\.100\.(?:[0-5]|254)\.') or (mhl_test_scope | default(false) | bool)
           - mhl_project_id | int == 100
-          - mhl_network_id | int in [1, 2, 3, 4, 5, 254]
+          - >-
+            mhl_network_id | int in [1, 2, 3, 4, 5, 254] or
+            ((mhl_test_scope | default(false) | bool) and
+             mhl_network_id | int >= 1 and mhl_network_id | int <= 253)
           - mhl_local_admin_user | length > 0
           - mhl_local_admin_password | length >= 16
           - mhl_guest_admin_passwords[inventory_hostname] is defined
@@ -25,6 +29,23 @@
           MHL forest provisioning requires the scoped MHL-DC01 inventory entry
           and credentials from the protected Project 100 Ansible vault.
       no_log: true
+    - name: Read controller identity before workgroup or domain configuration
+      ansible.windows.win_powershell:
+        script: |
+          $Ansible.Changed = $false
+          $c = Get-CimInstance Win32_ComputerSystem
+          [pscustomobject]@{ Name = $c.Name; Domain = $c.Domain; Role = [int]$c.DomainRole }
+      register: mhl_controller_identity
+    - name: Require a workgroup server or this network's existing MHL controller
+      ansible.builtin.assert:
+        that:
+          - mhl_controller_identity.output | length == 1
+          - mhl_controller_identity.output[0].Role | int in [2, 4, 5]
+          - >-
+            mhl_controller_identity.output[0].Role | int == 2 or
+            (mhl_controller_identity.output[0].Domain | lower == mhl_domain_name and
+             mhl_controller_identity.output[0].Name | upper == mhl_guest_hostname)
+        fail_msg: Refusing to configure a Windows guest with an unexpected domain role or forest identity.
     - name: Rotate this clone's shared base-image local administrator credential
       ansible.windows.win_user:
         name: "{{ mhl_local_admin_user }}"
@@ -32,9 +53,11 @@
         update_password: always
         state: present
       no_log: true
+      when: mhl_controller_identity.output[0].Role | int == 2
     - name: Use the rotated local credential for subsequent controller access
       ansible.builtin.set_fact:
         ansible_password: "{{ mhl_guest_admin_passwords[inventory_hostname] }}"
+        ansible_user: "{{ mhl_domain_admin_user if mhl_controller_identity.output[0].Role | int in [4, 5] else mhl_local_admin_user }}"
       no_log: true
     - name: Set the same in-forest controller hostname in this isolated team
       ansible.windows.win_hostname:
@@ -72,7 +95,7 @@
   gather_facts: false
   serial: 1
   vars_files:
-    - /etc/crange-secrets/project-100/windows.vault.yml
+    - "{{ lookup('env', 'CRANGE_MHL_WINDOWS_VAULT_FILE') | default('/etc/crange-secrets/project-100/windows.vault.yml', true) }}"
   vars:
     mhl_domain_name: mhl.test
     ansible_user: "{{ mhl_domain_admin_user }}"
@@ -127,7 +150,8 @@
         enabled: true
         password_never_expires: true
         groups:
-          - Domain Users
+          add:
+            - Domain Users
         state: present
       no_log: true
 
@@ -148,7 +172,8 @@
         enabled: true
         password_never_expires: true
         groups:
-          - WarehouseDeployers
+          add:
+            - WarehouseDeployers
         state: present
       no_log: true
 
@@ -179,7 +204,8 @@
         path: OU=Users,OU=MHL,DC=mhl,DC=test
         password: "{{ item.password }}"
         groups:
-          - MHL-Employees
+          add:
+            - MHL-Employees
         enabled: true
         password_never_expires: false
         state: present

@@ -26,6 +26,22 @@ class NetworkAcceptanceTests(unittest.TestCase):
                                                 'temporary_rules_absent','input_unchanged'), True)}
         self.report['cleanup']['artifact_sha256'] = hashlib.sha256(b'bounded evidence').hexdigest()
 
+    def test_schema_two_requires_exact_controller_and_actual_relay_binding(self):
+        report=copy.deepcopy(self.report)
+        report['schema_version']=2
+        report['source_binding']={'schema_version':1,'controller_sha256':{
+            name:'c'*64 for name in acceptance.CONTROLLER_SOURCE_FILES},'relay_sha256':'d'*64,'git_dirty':True}
+        report['checks']['guacamole'].update(source_address='10.60.0.10',
+            target_address=self.scope['address'].split('/')[0],target_port=22,relay_sha256='d'*64)
+        acceptance.validate_receipt(report,self.create,self.delete)
+        changed=copy.deepcopy(report);changed['checks']['guacamole']['relay_sha256']='e'*64
+        with self.assertRaises(ValueError):acceptance.validate_receipt(changed,self.create,self.delete)
+        changed=copy.deepcopy(report);del changed['source_binding']['controller_sha256']['crange_network_worker.py']
+        with self.assertRaises(ValueError):acceptance.validate_receipt(changed,self.create,self.delete)
+        changed=copy.deepcopy(report);changed['schema_version']=1
+        with self.assertRaisesRegex(ValueError,'Legacy'):
+            acceptance.validate_receipt(changed,self.create,self.delete)
+
     def plan(self, action):
         return {'resource_changes':[{'address':acceptance.PROBE_ADDRESS,'mode':'managed',
                 'type':'proxmox_virtual_environment_vm','change':{'actions':[action],

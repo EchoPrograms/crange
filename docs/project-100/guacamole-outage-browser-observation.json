@@ -1,0 +1,317 @@
+{
+  "actual_dashboard_launch": true,
+  "launch_transport": [
+    {
+      "http_query_empty": true,
+      "fragment_has_grant": true
+    }
+  ],
+  "real_server_rows": 36,
+  "company_addresses_verified": 30,
+  "selected_project": "All projects",
+  "rows": [
+    {
+      "name": "\u25a3t254-mhl-app01container",
+      "ip": "10.100.254.40",
+      "power": "running",
+      "protocols": [
+        "SSH"
+      ]
+    },
+    {
+      "name": "\u25a3t254-mhl-bkp01container",
+      "ip": "10.100.254.60",
+      "power": "running",
+      "protocols": [
+        "SSH"
+      ]
+    },
+    {
+      "name": "\u25a3t254-mhl-ci01container",
+      "ip": "10.100.254.50",
+      "power": "running",
+      "protocols": [
+        "SSH"
+      ]
+    },
+    {
+      "name": "\u25a3t254-mhl-db01container",
+      "ip": "10.100.254.30",
+      "power": "unknown",
+      "protocols": [
+        "SSH"
+      ]
+    },
+    {
+      "name": "\u25a3t254-mhl-dc01vm",
+      "ip": "10.100.254.10",
+      "power": "Checking\u2026",
+      "protocols": [
+        "RDP"
+      ]
+    },
+    {
+      "name": "\u25a3t254-mhl-file01vm",
+      "ip": "10.100.254.20",
+      "power": "Checking\u2026",
+      "protocols": [
+        "RDP"
+      ]
+    },
+    {
+      "name": "\u25a3r0.1.2-mhl-app01-t001container",
+      "ip": "10.100.1.40",
+      "power": "running",
+      "protocols": [
+        "SSH"
+      ]
+    },
+    {
+      "name": "\u25a3r0.1.2-mhl-bkp01-t001container",
+      "ip": "10.100.1.60",
+      "power": "running",
+      "protocols": [
+        "SSH"
+      ]
+    },
+    {
+      "name": "\u25a3r0.1.2-mhl-ci01-t001container",
+      "ip": "10.100.1.50",
+      "power": "running",
+      "protocols": [
+        "SSH"
+      ]
+    },
+    {
+      "name": "\u25a3r0.1.2-mhl-db01-t001container",
+      "ip": "10.100.1.30",
+      "power": "running",
+      "protocols": [
+        "SSH"
+      ]
+    },
+    {
+      "name": "\u25a3r0.1.2-mhl-dc01-t001vm",
+      "ip": "10.100.1.10",
+      "power": "running",
+      "protocols": [
+        "RDP"
+      ]
+    },
+    {
+      "name": "\u25a3r0.1.2-mhl-file01-t001vm",
+      "ip": "10.100.1.20",
+      "power": "running",
+      "protocols": [
+        "RDP"
+      ]
+    },
+    {
+      "name": "\u25a3r0.1.2-mhl-app01-t002container",
+      "ip": "10.100.2.40",
+      "power": "running",
+      "protocols": [
+        "SSH"
+      ]
+    },
+    {
+      "name": "\u25a3r0.1.2-mhl-bkp01-t002container",
+      "ip": "10.100.2.60",
+      "power": "running",
+      "protocols": [
+        "SSH"
+      ]
+    },
+    {
+      "name": "\u25a3r0.1.2-mhl-ci01-t002container",
+      "ip": "10.100.2.50",
+      "power": "running",
+      "protocols": [
+        "SSH"
+      ]
+    },
+    {
+      "name": "\u25a3r0.1.2-mhl-db01-t002container",
+      "ip": "10.100.2.30",
+      "power": "running",
+      "protocols": [
+        "SSH"
+      ]
+    },
+    {
+      "name": "\u25a3r0.1.2-mhl-dc01-t002vm",
+      "ip": "10.100.2.10",
+      "power": "running",
+      "protocols": [
+        "RDP"
+      ]
+    },
+    {
+      "name": "\u25a3r0.1.2-mhl-file01-t002vm",
+      "ip": "10.100.2.20",
+      "power": "running",
+      "protocols": [
+        "RDP"
+      ]
+    },
+    {
+      "name": "\u25a3r0.1.2-mhl-app01-t003container",
+      "ip": "10.100.3.40",
+      "power": "running",
+      "protocols": [
+        "SSH"
+      ]
+    },
+    {
+      "name": "\u25a3r0.1.2-mhl-bkp01-t003container",
+      "ip": "10.100.3.60",
+      "power": "running",
+      "protocols": [
+        "SSH"
+      ]
+    },
+    {
+      "name": "\u25a3r0.1.2-mhl-ci01-t003container",
+      "ip": "10.100.3.50",
+      "power": "running",
+      "protocols": [
+        "SSH"
+      ]
+    },
+    {
+      "name": "\u25a3r0.1.2-mhl-db01-t003container",
+      "ip": "10.100.3.30",
+      "power": "running",
+      "protocols": [
+        "SSH"
+      ]
+    },
+    {
+      "name": "\u25a3r0.1.2-mhl-dc01-t003vm",
+      "ip": "10.100.3.10",
+      "power": "running",
+      "protocols": [
+        "RDP"
+      ]
+    },
+    {
+      "name": "\u25a3r0.1.2-mhl-file01-t003vm",
+      "ip": "10.100.3.20",
+      "power": "running",
+      "protocols": [
+        "RDP"
+      ]
+    },
+    {
+      "name": "\u25a3r0.1.2-mhl-app01-t004container",
+      "ip": "10.100.4.40",
+      "power": "running",
+      "protocols": [
+        "SSH"
+      ]
+    },
+    {
+      "name": "\u25a3r0.1.2-mhl-bkp01-t004container",
+      "ip": "10.100.4.60",
+      "power": "running",
+      "protocols": [
+        "SSH"
+      ]
+    },
+    {
+      "name": "\u25a3r0.1.2-mhl-ci01-t004container",
+      "ip": "10.100.4.50",
+      "power": "running",
+      "protocols": [
+        "SSH"
+      ]
+    },
+    {
+      "name": "\u25a3r0.1.2-mhl-db01-t004container",
+      "ip": "10.100.4.30",
+      "power": "running",
+      "protocols": [
+        "SSH"
+      ]
+    },
+    {
+      "name": "\u25a3r0.1.2-mhl-dc01-t004vm",
+      "ip": "10.100.4.10",
+      "power": "running",
+      "protocols": [
+        "RDP"
+      ]
+    },
+    {
+      "name": "\u25a3r0.1.2-mhl-file01-t004vm",
+      "ip": "10.100.4.20",
+      "power": "running",
+      "protocols": [
+        "RDP"
+      ]
+    },
+    {
+      "name": "\u25a3r0.1.2-mhl-app01-t005container",
+      "ip": "10.100.5.40",
+      "power": "running",
+      "protocols": [
+        "SSH"
+      ]
+    },
+    {
+      "name": "\u25a3r0.1.2-mhl-bkp01-t005container",
+      "ip": "10.100.5.60",
+      "power": "running",
+      "protocols": [
+        "SSH"
+      ]
+    },
+    {
+      "name": "\u25a3r0.1.2-mhl-ci01-t005container",
+      "ip": "10.100.5.50",
+      "power": "running",
+      "protocols": [
+        "SSH"
+      ]
+    },
+    {
+      "name": "\u25a3r0.1.2-mhl-db01-t005container",
+      "ip": "10.100.5.30",
+      "power": "running",
+      "protocols": [
+        "SSH"
+      ]
+    },
+    {
+      "name": "\u25a3r0.1.2-mhl-dc01-t005vm",
+      "ip": "10.100.5.10",
+      "power": "running",
+      "protocols": [
+        "RDP"
+      ]
+    },
+    {
+      "name": "\u25a3r0.1.2-mhl-file01-t005vm",
+      "ip": "10.100.5.20",
+      "power": "running",
+      "protocols": [
+        "RDP"
+      ]
+    }
+  ],
+  "visible_errors": [],
+  "observation_only": true,
+  "power_state_counts": {
+    "running": 33,
+    "unknown": 1,
+    "Checking\u2026": 2
+  },
+  "failed_management_requests": [
+    {
+      "status": 403,
+      "path": "/api/ext/crange-control/control"
+    }
+  ],
+  "survived_reload": true,
+  "console_not_exercised": true
+}

@@ -1,0 +1,47 @@
+---
+- name: Configure controller WinRM access to declared Windows guests
+  hosts: routers
+  gather_facts: false
+  become: true
+  tasks:
+    - name: Read prior managed Windows targets
+      ansible.builtin.slurp:
+        src: /etc/crange-controller-winrm-targets
+      register: prior_winrm
+      failed_when: false
+
+    - name: Remove obsolete controller WinRM permissions
+      community.general.ufw:
+        rule: allow
+        route: true
+        delete: true
+        interface_in: eth0
+        interface_out: eth1
+        from_ip: "{{ router_controller_ip }}"
+        to_ip: "{{ item }}"
+        to_port: "5985"
+        proto: tcp
+      loop: "{{ (prior_winrm.content | default('') | b64decode).splitlines() }}"
+      when:
+        - item | length > 0
+        - item not in (router_controller_winrm_targets | default([]))
+
+    - name: Allow controller WinRM to declared Windows guests
+      community.general.ufw:
+        rule: allow
+        route: true
+        interface_in: eth0
+        interface_out: eth1
+        from_ip: "{{ router_controller_ip }}"
+        to_ip: "{{ item }}"
+        to_port: "5985"
+        proto: tcp
+      loop: "{{ router_controller_winrm_targets | default([]) }}"
+
+    - name: Record managed Windows targets
+      ansible.builtin.copy:
+        dest: /etc/crange-controller-winrm-targets
+        owner: root
+        group: root
+        mode: "0600"
+        content: "{{ (router_controller_winrm_targets | default([]) | join('\n')) + '\n' }}"

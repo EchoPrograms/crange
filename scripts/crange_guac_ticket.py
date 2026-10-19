@@ -51,6 +51,11 @@ def issue_ticket(session_token: str, project_id: int, *, auth, secret_hex: str,
     if not session['admin'] and project not in session['projects']:
         raise TicketError('Project access denied.')
 
+    from crange_project_lifecycle import require_active
+    try:
+        require_active(repo_root / 'terraform/environments' / f'project-{project_id:03d}')
+    except ValueError as exc:
+        raise TicketError(str(exc)) from exc
     sidecar = repo_root / 'guacamole' / 'access' / f'project-{project_id:03d}.applied.json'
     try:
         applied = json.loads(sidecar.read_text())
@@ -114,7 +119,10 @@ def issue_ticket(session_token: str, project_id: int, *, auth, secret_hex: str,
     token = encrypt_ticket(payload, secret_hex)
     # Override Guacamole's cached token so each dashboard launch consumes the
     # new grant set, including changes made since a previous browser login.
-    url = url + '/?' + urlencode({'data': token, 'token': ''})
+    # Route parameters are read by Guacamole's client and POSTed to /api/tokens.
+    # Keep the encrypted grant set out of the HTTP request line: large projects
+    # exceed proxy/Tomcat header limits if it is sent as a normal URL query.
+    url = url + '/#/?' + urlencode({'data': token, 'token': ''})
     return {'url': url, 'credentials': list(notices.values())} if return_details else url
 
 

@@ -1,0 +1,21 @@
+{
+  "worker_api_endpoint": "https://127.0.0.1:18766/api2/json",
+  "cluster_name": [
+    "proxmoxcluster"
+  ],
+  "cluster_quorate": [
+    1
+  ],
+  "online_nodes": [
+    "proxmox3",
+    "proxmox5",
+    "proxmox2",
+    "proxmox4",
+    "proxmox6"
+  ],
+  "gateway": {
+    "active_upstream": "https://10.0.0.104:8006",
+    "recently_verified": true
+  },
+  "read_only": true
+}

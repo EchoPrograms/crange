@@ -1,7 +1,7 @@
 <!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>MHL — Assessment Engagement Packet</title><style>@page{size:A4;margin:22mm 20mm}body{font:11pt/1.55 Georgia,serif;color:#182b38;max-width:760px;margin:40px auto;padding:0 28px}h1,h2,h3{font-family:Arial,sans-serif}h1{font-size:26pt;border-top:7px solid #204f63;padding-top:20px;margin-bottom:16px;letter-spacing:.035em}h2{font-size:14pt;color:#204f63;margin-top:28px;break-after:avoid}table{border-collapse:collapse;width:100%;font:10pt/1.5 Arial,sans-serif;margin:18px 0}th,td{padding:10px;border-bottom:1px solid #ccd6db;text-align:left;vertical-align:top}th{background:#eaf0f3}li{margin:7px 0}hr{margin-top:28px;border:0;border-top:1px solid #ccd6db}code{font-size:.95em}p,li{orphans:3;widows:3}tr{break-inside:avoid}@media print{body{margin:0;max-width:none;padding:0}}</style></head><body><h1>MERIDIAN HARBOR LOGISTICS</h1>
-<p><strong>Office of Information Technology · Assessment Engagement Packet</strong><br />
-<strong>To:</strong> Northstar Security Assurance, Technical Assessment Team<br />
-<strong>Reference:</strong> MHL-NSA-100 · Revision 0.1 · Draft pending environment acceptance</p>
+<p><strong>Office of Information Technology · Assessment Engagement Packet</strong><br>
+<strong>To:</strong> Northstar Security Assurance<br>
+<strong>Reference:</strong> MHL-NSA-100 · Revision 0.2 · Controlled copy</p>
 <h2>Letter of engagement</h2>
 <p>Meridian Harbor Logistics requests an assessment of the technology supporting
 our dispatch, customer shipment tracking, finance reporting, and recently
@@ -9,7 +9,7 @@ acquired warehouse operation. Our next major customer requires assurance that
 customer records and internal business systems are appropriately protected.</p>
 <p>Please assess the environment as a connected business. We need clear evidence
 of business impact, practical recommendations, and a prioritized remediation
-plan that a small IT team can carry out. A list of scanner findings alone will
+plan that our IT department can carry out. A list of scanner findings alone will
 not meet our objectives.</p>
 <h2>Company context</h2>
 <p>We coordinate regional freight and temperature-controlled deliveries. Dispatch
@@ -44,32 +44,29 @@ Integration was performed under a tight schedule and documentation is uneven.</p
 </tr>
 </tbody>
 </table>
-<p>The organizer-provided engagement channel is the operational channel during
-the assessment. These company contacts are fictional scenario identities.</p>
+<p>Please use the engagement coordination channel supplied by the MHL service desk
+for routine questions, evidence transfer, and incident escalation.</p>
 <h2>Authorized environment</h2>
-<p>Each assessment team receives a separate company environment. Its assigned
-system addresses, custom subnets, credentials and engagement window will be
-provided in the final environment schedule. The Windows domain is <code>mhl.test</code>.
-Only that team's listed company targets are in scope. The overall Project 100
-aggregate is <code>10.100.0.0/16</code>; it is not permission to access another team's
-systems or assessment workstations.</p>
-<p>Expected company systems are MHL-DC01, MHL-FS01, MHL-DB01, MHL-APP01, MHL-CI01 and
-MHL-BKP01. Assessors receive personal Linux and Windows workstations through
-the designated remote-access portal. Access to a workstation does not confer
-authorization over the portal or its underlying infrastructure.</p>
+<p>The scope register supplied with your account handover identifies the approved
+systems, application URLs, credentials, and assessment window. The internal
+Windows domain is <code>mhl.test</code>. Authorization applies only to assets named in that
+register; network connectivity alone does not expand the scope.</p>
+<p>Company systems include MHL-DC01, MHL-FS01, MHL-DB01, MHL-APP01, MHL-CI01 and
+MHL-BKP01. The service desk provides access to assessment workstations through
+our remote-access gateway. The gateway and supporting infrastructure are
+outside scope unless separately authorized in writing.</p>
 <h2>Rules of engagement</h2>
 <ul>
 <li>Assess only the assigned targets and supplied application URLs/accounts.</li>
-<li>Use controlled proofs of concept and synthetic records to demonstrate
+<li>Use controlled proofs of concept and the minimum records necessary to demonstrate
   impact; explain the attack conditions and resulting business risk.</li>
 <li>Preserve service availability and evidence. Coordinate before disruptive
   changes, account lockouts, bulk data changes, or persistence testing.</li>
-<li>Stop and report access to an unexpected environment or another team's data.</li>
+<li>Stop and report access to systems or data outside the approved scope register.</li>
 <li>Exclude denial of service, destructive encryption, uncontrolled malware,
   social engineering of real people, and attacks on public Internet systems.</li>
-<li>Hypervisors, storage infrastructure, the range controller, Guacamole,
-  shared firewall, underlying management networks and other teams are out of
-  scope. Do not attempt to escape a guest or compromise these systems.</li>
+<li>Exclude infrastructure and third-party services not listed in the scope
+  register. Any proposed expansion requires written approval from MHL.</li>
 </ul>
 <h2>Requested deliverables</h2>
 <ol>
@@ -83,10 +80,9 @@ authorization over the portal or its underlying infrastructure.</p>
 </ol>
 <p>Use screenshots and minimal proof-of-concept artifacts where useful. Keep
 credentials out of general report copies and submit sensitive material through
-the organizer's designated channel. Include assumptions, limitations, and
+MHL's designated engagement channel. Include assumptions, limitations, and
 unverified findings explicitly.</p>
 <hr />
-<p><strong>Simulation notice:</strong> Meridian Harbor Logistics and Northstar Security
-Assurance are fictional. All business data is synthetic. This draft does not
-claim that the laboratory has been deployed or accepted; the final target
-schedule and engagement window are issued after technical acceptance.</p></body></html>
+<p><strong>Evelyn Vale</strong><br>
+Director of Technology<br>
+Meridian Harbor Logistics</p></body></html>

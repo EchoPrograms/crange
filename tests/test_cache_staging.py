@@ -87,14 +87,141 @@ class CacheStagingTests(unittest.TestCase):
         self.assertEqual(cat,original)
         self.assertEqual(inv['nodes']['n1']['committed_memory_mb'],4096)
 
+    def cache_preview_with_existing_pool(self, free_gb, with_large_node=False):
+        _,inv,cat,pol=fixtures();pol.update(enabled=True,allowed_nodes=['n1'],allowed_storages=['local','local-hdd'])
+        inv['captured_at']=time.time();node=inv['nodes']['n1']
+        node['storages']['local']['free_gb']=free_gb
+        node['storages']['local-hdd']={**copy.deepcopy(node['storages']['local']),'total_gb':4000,'free_gb':3000,'committed_gb':0}
+        cat['images']['base-v1']['disk_gb']=20
+        if with_large_node:
+            pol['allowed_nodes']=['n1','n2']
+            cat['images']['base-v1']['replicas']=[r for r in cat['images']['base-v1']['replicas'] if r['node']=='n1']
+            node['committed_memory_mb']=8192;node['committed_cpu_cores']=4
+            other=inv['nodes']['n2'];other.update(memory_mb=262144,cpu_cores=64)
+            other['storages']['local'].update(total_gb=4000,free_gb=3000,committed_gb=0)
+        row={'resource_key':'vm:web','image':'base-v1','kind':'vm','box':{'template':'base','node_name':'auto','memory_mb':4096,'cores':2},'reference':{'profile':{'cpu_type':'x86-64-v2-AES'}},'networks':['p003t254']}
+        api=SimpleNamespace(request=lambda *a,**k:{'memory':2048,'cores':2})
+        with tempfile.TemporaryDirectory() as directory:
+            path=Path(directory)/'project-003';path.mkdir()
+            with patch.object(scheduling,'DATA',Path(directory)/'distribution'), \
+                 patch.object(scheduling,'read_settings',return_value=(pol,cat)), \
+                 patch.object(scheduling,'declarations',return_value=[row]), \
+                 patch.object(scheduling,'applied_resources',return_value={}), \
+                 patch.object(scheduling,'discover',return_value=inv):
+                return scheduling.required_preparations(path,{'project_id':3},api=api)
+
+    def test_reuse_verified_cache_before_filling_another_pool_on_same_node(self):
+        self.assertEqual(self.cache_preview_with_existing_pool(80),[])
+
+    def test_cache_reuse_does_not_prevent_balancing_to_a_larger_node(self):
+        fills=self.cache_preview_with_existing_pool(80,with_large_node=True)
+        self.assertEqual(len(fills),1)
+        self.assertEqual(fills[0]['node'],'n2')
+
+    def test_prepare_another_pool_when_verified_pool_cannot_fit_guest(self):
+        fills=self.cache_preview_with_existing_pool(0)
+        self.assertEqual(len(fills),1)
+        self.assertEqual(fills[0]['storage'],'local-hdd')
+
+    def test_serial_cache_preview_releases_probe_resources_before_the_next_image(self):
+        _,inv,cat,pol=fixtures();pol.update(enabled=True,allowed_nodes=['n1'],cpu_reserve_fraction=0)
+        inv['captured_at']=time.time();inv['nodes']['n1']['cpu_cores']=4
+        image=cat['images']['base-v1'];image['disk_gb']=20
+        for replica in image['replicas']:replica['clone_modes_verified']=[]
+        cat['images']['base-v2']=copy.deepcopy(image)
+        for replica in cat['images']['base-v2']['replicas']:replica['template_id']+=100
+        rows=[{'resource_key':'vm:'+name,'image':image_id,'kind':'vm',
+               'box':{'template':'base','node_name':'auto','memory_mb':1024,'cores':1},
+               'reference':{'profile':{'cpu_type':'x86-64-v2-AES'}},'networks':['p003t254']}
+              for name,image_id in [('one','base-v1'),('two','base-v2')]]
+        api=SimpleNamespace(request=lambda *a,**k:{'memory':2048,'cores':2})
+        with tempfile.TemporaryDirectory() as directory:
+            path=Path(directory)/'project-003';path.mkdir()
+            with patch.object(scheduling,'DATA',Path(directory)/'distribution'), \
+                 patch.object(scheduling,'read_settings',return_value=(pol,cat)), \
+                 patch.object(scheduling,'declarations',return_value=rows), \
+                 patch.object(scheduling,'applied_resources',return_value={}), \
+                 patch.object(scheduling,'discover',return_value=inv):
+                fills=scheduling.required_preparations(path,{'project_id':3},api=api)
+        self.assertEqual(len(fills),2)
+        self.assertTrue(all(fill['node']=='n1' for fill in fills))
+        self.assertEqual(inv['nodes']['n1']['committed_cpu_cores'],1)
+
+    def test_preview_matches_ledger_ram_budget_and_rejects_excess_batch(self):
+        from crange_placement import PlacementError, ReservationLedger, capacity_window
+        _,inv,cat,pol=fixtures()
+        pol.update(enabled=True,allowed_nodes=['n1'],cpu_reserve_fraction=0,
+                   memory_reserve_mb=2048,memory_reserve_fraction=.125,memory_overcommit_ratio=2)
+        inv['captured_at']=time.time();node=inv['nodes']['n1']
+        node.update(memory_mb=8192,observed_memory_mb=2048,committed_memory_mb=2048)
+        image=cat['images']['base-v1'];image['disk_gb']=8
+        image['replicas']=[r for r in image['replicas'] if r['node']=='n1']
+        self.assertEqual(capacity_window(node,pol,'n1')['memory_mb'],8192)
+        rows=[{'resource_key':'vm:'+name,'image':'base-v1','kind':'vm',
+               'box':{'template':'base','node_name':'auto','memory_mb':4096,'cores':1},
+               'reference':{'profile':{'cpu_type':'x86-64-v2-AES'}},'networks':['p003t254']}
+              for name in ('one','two','three')]
+        with tempfile.TemporaryDirectory() as directory:
+            path=Path(directory)/'project-003';path.mkdir()
+            ledger=ReservationLedger(Path(directory)/'ledger.sqlite3')
+            for i in range(2):
+                ledger.reserve_preparation(project_id=3,job_id='job'+str(i),owner='test',
+                    image_id='base-v1',catalog=cat,node_name='n1',datastore_id='local',
+                    capacity={'memory_mb':4096,'cpu_cores':1,'disk_gb':8,'clone_mode':'linked'},inventory=inv,policy=pol)
+            with self.assertRaises(PlacementError):
+                ledger.reserve_preparation(project_id=3,job_id='job3',owner='test',
+                    image_id='base-v1',catalog=cat,node_name='n1',datastore_id='local',
+                    capacity={'memory_mb':4096,'cpu_cores':1,'disk_gb':8,'clone_mode':'linked'},inventory=inv,policy=pol)
+            ledger.close()
+            with patch.object(scheduling,'DATA',Path(directory)/'distribution'), \
+                 patch.object(scheduling,'read_settings',return_value=(pol,cat)), \
+                 patch.object(scheduling,'declarations',return_value=rows[:2]), \
+                 patch.object(scheduling,'applied_resources',return_value={}), \
+                 patch.object(scheduling,'discover',return_value=inv):
+                self.assertEqual(scheduling.required_preparations(path,{'project_id':3},api=SimpleNamespace()),[])
+                with patch.object(scheduling,'declarations',return_value=rows),self.assertRaises(PlacementError):
+                    scheduling.required_preparations(path,{'project_id':3},api=SimpleNamespace())
+        self.assertEqual(node['observed_memory_mb'],2048)
+
+    def test_ready_container_archive_ram_failure_identifies_guest_only_budget(self):
+        from crange_placement import PlacementError
+        _,inv,cat,pol=fixtures();pol['enabled']=True;pol['allowed_nodes']=['n1']
+        inv['captured_at']=time.time()
+        node=inv['nodes']['n1'];node['guest_types']=['container'];node['observed_memory_mb']=15000
+        node['storages']['local']['guest_types']=['container']
+        image=cat['images']['base-v1'];image.update(kind='container',disk_gb=8,source_type='stock_archive')
+        image['replicas']=[{'node':'n1','datastore_id':'local','state':'ready','template_file_id':'local:vztmpl/base.tar.zst',
+                            'artifact_sha256':'a'*64,'verified_at':1,'clone_modes_verified':['full']}]
+        row={'resource_key':'container:t254-db','image':'base-v1','kind':'container',
+             'box':{'template':'base','node_name':'auto','memory_mb':1024,'cores':1},
+             'reference':{},'networks':['p003t254']}
+        with tempfile.TemporaryDirectory() as directory:
+            path=Path(directory)/'project-003';path.mkdir()
+            with patch.object(scheduling,'DATA',Path(directory)/'distribution'), \
+                 patch.object(scheduling,'read_settings',return_value=(pol,cat)), \
+                 patch.object(scheduling,'declarations',return_value=[row]), \
+                 patch.object(scheduling,'applied_resources',return_value={}), \
+                 patch.object(scheduling,'discover',return_value=inv), \
+                 patch('crange_distribution.required_capacity',side_effect=AssertionError('Ready archive must not need a cache probe')):
+                with self.assertRaises(PlacementError) as caught:
+                    scheduling.required_preparations(path,{'project_id':3},api=SimpleNamespace(request=lambda *a,**k:None))
+        message=str(caught.exception)
+        self.assertIn('guest preparation needs 1024 MiB RAM; available 0.0',message)
+        self.assertIn('cache=0',message)
+        self.assertIn('observed=15000.0 MiB',message)
+        self.assertNotIn('guest + cache preparation',message)
+
     def test_stage_prepares_approved_caches_before_retaining_plan(self):
         module=ModuleType('crange_cache_jobs')
         from unittest.mock import Mock
         module.prepare_cache=Mock(return_value={"template_id":301})
+        module.reconcile_unstarted_caches=Mock(return_value=[])
+        module.resume_project_snapshot_caches=Mock()
         cfg={'project_id':3}
         fill={'image':'base-v1','node':'proxmox2','storage':'local-lvm','additional_capacity':{'disk_gb':22,'memory_mb':2048,'cpu_cores':2},'resource_keys':['vm:web']}
-        with patch.dict(sys.modules,{'crange_cache_jobs':module}),patch.object(crange,'project_dir',return_value=Path('/tmp/project-003')),patch.object(crange,'json_config',return_value=cfg),patch.object(scheduling,'read_settings',return_value=({'enabled':True},{})),patch.object(scheduling,'required_preparations',return_value=[fill]),patch.object(crange,'cmd_plan') as plan:
+        with patch.dict(sys.modules,{'crange_cache_jobs':module}),patch.object(crange,'project_dir',return_value=Path('/tmp/project-003')),patch.object(crange,'json_config',return_value=cfg),patch.object(scheduling,'read_settings',return_value=({'enabled':True},{})),patch.object(scheduling,'required_preparations',return_value=[fill]),patch.object(scheduling,'purge_expired_guest_reviews',return_value=[]) as purge,patch('crange_placement.ReservationLedger'),patch.object(crange,'ProxmoxAPI'),patch.object(scheduling,'declarations',return_value=[{'image':'base-v1'}]),patch.object(crange,'cmd_plan') as plan:
             crange.cmd_stage_changes(SimpleNamespace(project='3'))
+        purge.assert_called_once()
         self.assertEqual(module.prepare_cache.call_args.kwargs['image_id'],'base-v1')
         self.assertEqual(module.prepare_cache.call_args.kwargs['additional_capacity']['disk_gb'],22)
         self.assertTrue(plan.call_args.args[0].retain)

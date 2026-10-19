@@ -58,6 +58,10 @@ resource "proxmox_virtual_environment_container" "scenario" {
     }
   }
 
+  features {
+    nesting = true
+  }
+
   cpu {
     cores = var.box.cores
   }
@@ -76,6 +80,12 @@ resource "proxmox_virtual_environment_container" "scenario" {
   # Cloned CT templates already have a root filesystem; use cloud-init CT network settings
   # supported by provider 0.104.0.
   initialization {
+    dynamic "user_account" {
+      for_each = var.box.template_file_id == null ? [] : [1]
+      content {
+        keys = [trimspace(var.ssh_public_key)]
+      }
+    }
     hostname = local.name
     dns {
       servers = ["10.60.2.1"]

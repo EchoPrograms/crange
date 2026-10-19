@@ -1,0 +1,11 @@
+{
+  "checks": {
+    "page_size_selector": true,
+    "next_page_changes_jobs": true,
+    "task_name_status_legible": true,
+    "expanded_output_survives_refresh": true,
+    "no_javascript_errors": true
+  },
+  "passed": true,
+  "time": 1792028178
+}

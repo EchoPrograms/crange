@@ -56,13 +56,13 @@ class ScenarioDraftTests(unittest.TestCase):
         self.assertEqual(len(accounts["account_batch_jobs"]), 5)
         self.assertTrue(all(job["status"] == "succeeded" for job in accounts["account_batch_jobs"]))
 
-    def test_windows_image_is_pending_and_debian_containers_are_declared(self):
+    def test_published_windows_bases_and_configured_staging_services_are_recorded(self):
         windows = [box for box in DRAFT["participant_boxes"] if box["os"].startswith("Windows")]
         windows_hosts = [host for host in DRAFT["service_hosts"] if host["os"].startswith("Windows")]
-        self.assertTrue(all(box["image_id"] is None and box["status"] == "pending_image_publication" for box in windows))
-        self.assertTrue(all(host["required_image"] is None for host in windows_hosts))
+        self.assertTrue(all(box["image_id"] == "mhl-windows-server-2025-base-p100-v1" and box["status"] == "approved_base_ready_not_declared" for box in windows))
+        self.assertTrue(all(host["required_image"] == "mhl-windows-server-2025-base-p100-v1" for host in windows_hosts))
         linux_services = [host for host in DRAFT["service_hosts"] if host["os"] == "Debian 12 LXC"]
-        self.assertTrue(all(host["status"] == "declared_not_applied" for host in linux_services))
+        self.assertTrue(all(host["status"] == "staging_deployed_configured" for host in linux_services))
         self.assertTrue(all(host["template_alias"] == "mhl-debian12-stock" for host in linux_services))
         self.assertTrue(all(not ("password" in key.lower()) for key in DRAFT))
 

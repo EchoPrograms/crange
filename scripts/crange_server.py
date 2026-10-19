@@ -87,6 +87,24 @@ def serve(host='127.0.0.1', port=8000):
                 for directory in sorted(ENVS.glob('project-[0-9][0-9][0-9]')):
                     project = str(int(directory.name.split('-')[-1]))
                     if user['admin'] or project in user['projects']:
+                        from crange_project_lifecycle import state as lifecycle_state, pending
+                        try:
+                            lifecycle = lifecycle_state(directory)
+                        except ValueError as exc:
+                            if user['admin']:
+                                projects.append({'project_id':int(project),'display_name':f'Project {project}', 'deleted':True, 'lifecycle':{'state':'record_invalid','error':str(exc)}})
+                            continue
+                        queued = pending(jobs, int(project))
+                        if queued:
+                            lifecycle = {**lifecycle, 'pending_operation': queued['operation'], 'job_id': queued['id']}
+                        inactive = lifecycle['state'] not in ('active','restored') or (queued and queued['operation'] == 'project-delete')
+                        if inactive:
+                            if user['admin']:
+                                from crange_user_management import preferences
+                                projects.append({'project_id': int(project), 'display_name': preferences(auth,int(project))['display_name'] or f'Project {project}',
+                                    'lifecycle': lifecycle, 'deleted': True,
+                                    'release_count': len(list((CRANGE_ROOT / 'releases' / directory.name).glob('*.json')))})
+                            continue
                         if not user['admin'] and project not in user['managed_projects']:
                             from crange_user_management import preferences
                             projects.append({'project_id': int(project), 'participant': True,
@@ -103,6 +121,7 @@ def serve(host='127.0.0.1', port=8000):
                             if not desired_file.is_file():
                                 desired_file = directory / 'terraform.tfvars'
                             record['desired_revision'] = hashlib.sha256(desired_file.read_bytes()).hexdigest()
+                            record['lifecycle'] = lifecycle
                             record['has_state'] = (directory / 'terraform.tfstate').is_file()
                             bootstrap_status = directory / '.crange-bootstrap.json'
                             if bootstrap_status.is_file():
@@ -121,8 +140,11 @@ def serve(host='127.0.0.1', port=8000):
                             for kind, filename in [('vm_templates', 'approved-scenario-templates.json'), ('container_templates', 'approved-container-templates.json')]:
                                 source = directory / filename
                                 approved = json.loads(source.read_text()) if source.is_file() else {}
-                                record[kind] = sorted(approved)
-                                record.setdefault('template_labels', {}).update({key: value.get('display_name') or ('ParrotOS Jump Box' if kind == 'vm_templates' and value.get('template_id') == 112 else 'Debian 13 · CRANGE base container' if kind == 'container_templates' and key == 'approved-ct-base' else 'Debian 13 · Proxmox system template' if kind == 'container_templates' and key == 'debian-13' else key) for key, value in approved.items()})
+                                from crange_template_selection import template_choices
+                                record[kind] = sorted(template_choices(approved))
+                                labels = {key: value.get('display_name') or ('ParrotOS Jump Box' if kind == 'vm_templates' and value.get('template_id') == 112 else 'Debian 13 · CRANGE base container' if kind == 'container_templates' and key == 'approved-ct-base' else 'Debian 13 · Proxmox system template' if kind == 'container_templates' and key == 'debian-13' else key) for key, value in approved.items()}
+                                record.setdefault('template_labels_by_kind', {})[kind] = labels
+                                record.setdefault('template_labels', {}).update(labels)
                             try:
                                 from crange_guac_ticket import request_broker
                                 record['template_readiness'] = request_broker({
@@ -172,7 +194,15 @@ def serve(host='127.0.0.1', port=8000):
                 if not user['admin']:
                     return self.reply(403, {'error': 'Administrator access required.'})
                 from crange_cluster import inventory_snapshot
-                return self.reply(200, inventory_snapshot(admin=True))
+                from crange_live_status import overlay_nodes
+                from crange_guac_ticket import request_broker
+                snapshot = inventory_snapshot(admin=True)
+                try:
+                    observed = request_broker({'operation':'cluster-status','session':self.token()})
+                except (OSError, ValueError, RuntimeError):
+                    import time
+                    observed = {'captured_at':time.time(),'nodes':[],'error':'Live host status unavailable.'}
+                return self.reply(200, overlay_nodes(snapshot, observed))
             if path == '/api/jobs':
                 user = auth.session(self.token())
                 if not user:
@@ -223,7 +253,7 @@ def serve(host='127.0.0.1', port=8000):
                     return self.reply(403, {'error': 'Administrator access required.'})
                 from crange_guac_ticket import request_broker, TicketError
                 try:
-                    return self.reply(200, request_broker({'operation':'template-options','project':1,'session':self.token()}))
+                    return self.reply(200, request_broker({'operation':'template-options','project':1,'session':self.token(),'refresh':parse_qs(urlsplit(self.path).query).get('refresh')==['1']}))
                 except TicketError as exc:
                     return self.reply(503, {'error':str(exc)})
             if path == '/api/connector':
@@ -243,6 +273,14 @@ def serve(host='127.0.0.1', port=8000):
                 user = auth.session(session_token)
                 if not user:
                     return self.reply(401, {'error': 'Sign in required.'})
+                if user['admin']:
+                    # Dashboard and native Guacamole administrators are separate
+                    # identities. Preserve the browser's native login (guacadmin)
+                    # instead of replacing it with a JSON-auth dashboard ticket.
+                    origin = os.environ.get('CRANGE_GUAC_PUBLIC_URL', 'https://crguac.brogano.dev').rstrip('/')
+                    if not origin.startswith(('https://','http://')):
+                        return self.reply(503, {'error':'Guacamole public URL is not configured.'})
+                    return self.reply(200, {'url': origin + '/', 'authentication':'native', 'credentials':[]})
                 query = parse_qs(urlsplit(self.path).query)
                 raw_project = query.get('project', [''])[0]
                 if not raw_project.isdecimal() or not 1 <= int(raw_project) <= 255:
@@ -284,13 +322,13 @@ def serve(host='127.0.0.1', port=8000):
                 if not user['admin']:
                     return self.reply(403, {'error': 'Administrator access required.'})
                 return self.reply(200, {'events': auth.list_audit()})
-            names = {'/': 'index.html', '/app.js': 'app.js', '/styles.css': 'styles.css', '/users.js': 'users.js', '/templates.js':'templates.js', '/favicon.svg':'favicon.svg'}
+            names = {'/': 'index.html', '/app.js': 'app.js', '/lifecycle.js': 'lifecycle.js', '/accounts.js': 'accounts.js', '/styles.css': 'styles.css', '/users.js': 'users.js', '/templates.js':'templates.js', '/favicon.svg':'favicon.svg', **{f'/fonts/IBMPlexMono-{weight}.woff2': f'fonts/IBMPlexMono-{weight}.woff2' for weight in ('Regular',)}, **{f'/fonts/IBMPlexSans-{weight}.woff2': f'fonts/IBMPlexSans-{weight}.woff2' for weight in ('Regular', 'Medium', 'SemiBold', 'Bold')}}
             if path not in names:
                 return self.reply(404, {'error': 'Not found.'})
             file = ROOT / 'gui' / names[path]
             body = file.read_bytes()
             self.send_response(200)
-            self.send_header('Content-Type', {'html': 'text/html', 'js': 'text/javascript', 'css': 'text/css', 'svg': 'image/svg+xml'}[file.suffix[1:]])
+            self.send_header('Content-Type', {'html': 'text/html', 'js': 'text/javascript', 'css': 'text/css', 'svg': 'image/svg+xml', 'woff2': 'font/woff2'}[file.suffix[1:]])
             self.send_header('Content-Length', str(len(body)))
             self.send_header('Cache-Control', 'no-cache')
             self.send_header('Content-Security-Policy', "default-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'")
@@ -354,6 +392,14 @@ def serve(host='127.0.0.1', port=8000):
                     return self.reply(401, {'error': 'Sign in required.'})
                 if not hmac.compare_digest(user['csrf'], self.headers.get('X-CSRF-Token', '')):
                     return self.reply(403, {'error': 'Invalid session request.'})
+                if self.path in ('/api/custom-jumpboxes','/api/box-remote-access','/api/box-users'):
+                    project = data.get('project')
+                    if type(project) is not int or not 1 <= project <= 255:
+                        raise ValueError('Invalid project.')
+                    if not user['admin'] and str(project) not in user['managed_projects']:
+                        return self.reply(403, {'error':'Project manager access required.'})
+                    from crange_project_lifecycle import require_editable
+                    require_editable(jobs, project)
                 if self.path == '/api/template-media':
                     if not user['admin']:return self.reply(403,{'error':'Administrator access required.'})
                     from crange_template_media import begin,finish,cancel
@@ -446,6 +492,8 @@ def serve(host='127.0.0.1', port=8000):
                         return self.reply(403,{'error':'Project manager access required.'})
                     from crange import ENVS,json_config
                     from crange_user_management import manage_users,save_preferences
+                    from crange_project_lifecycle import require_editable
+                    require_editable(jobs, project)
                     cfg=json_config(ENVS/f'project-{project:03d}')
                     try:
                         if self.path=='/api/project-settings':
@@ -471,9 +519,22 @@ def serve(host='127.0.0.1', port=8000):
                     if data.get('action') == 'create':
                         if not user['admin'] or not isinstance(data.get('password'), str):
                             return self.reply(403, {'error': 'Administrator access required.'})
+                        if (not isinstance(projects, list) or not projects or
+                                any(isinstance(p, bool) or not isinstance(p, int) or
+                                    p < 1 or p > 255 or p in (60, 61) for p in projects) or
+                                len(set(projects)) != len(projects)):
+                            raise ValueError('Project access must be a comma-separated list of valid project numbers.')
+                        if data.get('role', 'participant') not in ('manager', 'participant'):
+                            raise ValueError('Choose manager or participant access.')
                         auth.set_password(username, data['password'], admin=bool(data.get('admin', False)),
-                                          projects=projects, role=data.get('role', 'participant'))
+                                          projects=projects, role=data.get('role', 'participant'), create_only=True)
                         auth.audit(user['username'], 'user-create', username, {'projects': projects, 'role': data.get('role', 'participant')})
+                        return self.reply(200, {'users': auth.list_users()})
+                    if data.get('action') == 'delete':
+                        if not user['admin'] or username == user['username']:
+                            return self.reply(403, {'error': 'Administrator access required; you cannot delete your own account.'})
+                        auth.delete_user(username)
+                        auth.audit(user['username'], 'user-delete', username)
                         return self.reply(200, {'users': auth.list_users()})
                     if data.get('action') == 'set-role':
                         if not user['admin']:
@@ -527,7 +588,9 @@ def serve(host='127.0.0.1', port=8000):
                         auth.audit(user['username'], 'team-access-update', username, {'project': project, 'teams': team_ids})
                         sync_jobs = [jobs.submit(user['username'], project, 'guac-sync', {})]
                         return self.reply(200, {'users': auth.list_users(project=str(project)), 'sync_jobs': sync_jobs})
-                    if not isinstance(projects, list) or not isinstance(teams, dict):
+                    if (not isinstance(projects, list) or not isinstance(teams, dict) or
+                            any(isinstance(p, bool) or not isinstance(p, int) or p < 1 or p > 255 or p in (60, 61)
+                                for p in projects) or len(set(projects)) != len(projects)):
                         raise ValueError('Invalid user assignment.')
                     previous = next((record for record in auth.list_users() if record['username'] == username), None)
                     previous_projects = previous['projects'] if previous else []
@@ -544,18 +607,58 @@ def serve(host='127.0.0.1', port=8000):
                         if not cancelled:
                             return self.reply(409, {'error': 'This job is no longer running or could not be stopped.'})
                         return self.reply(200, {'cancelled': True})
+                    if data.get('action') == 'reconcile-network':
+                        if not user['admin']:
+                            return self.reply(403, {'error': 'Administrator access required.'})
+                        source_job_id = data.get('source_job_id')
+                        if not isinstance(source_job_id, str) or not re.fullmatch(r'[a-f0-9]{32}', source_job_id):
+                            raise ValueError('Invalid source network job.')
+                        source = jobs.get(source_job_id, [], admin=True) if isinstance(source_job_id, str) else None
+                        if not source or source.get('operation') != 'network-verify' or source.get('status') != 'reconcile-required':
+                            return self.reply(409, {'error': 'Choose a network verification that needs reconciliation.'})
+                        job = jobs.submit(user['username'], source['project'], 'network-reconcile',
+                                          {'source_job_id': source_job_id})
+                        auth.audit(user['username'], 'network-verification-reconcile', source_job_id,
+                                   {'project': source['project'], 'job_id': job})
+                        return self.reply(202, {'job_id': job})
+                    if data.get('action')=='publish-network':
+                        if not user['admin']:
+                            return self.reply(403,{'error':'Administrator access required.'})
+                        source_job_id=data.get('source_job_id')
+                        if not isinstance(source_job_id,str) or not re.fullmatch(r'[a-f0-9]{32}',source_job_id):
+                            raise ValueError('Invalid source network job.')
+                        source=jobs.get(source_job_id,[],admin=True)
+                        if not source or source.get('operation')!='network-verify' or source.get('status') not in ('succeeded','failed'):
+                            return self.reply(409,{'error':'Choose a completed accepted network verification.'})
+                        job=jobs.submit(user['username'],source['project'],'network-publish',{'source_job_id':source_job_id})
+                        auth.audit(user['username'],'network-verification-publish',source_job_id,{'project':source['project'],'job_id':job})
+                        return self.reply(202,{'job_id':job})
                     project = data.get('project')
                     if isinstance(project, bool) or not isinstance(project, int):
                         raise ValueError('Invalid project.')
-                    if (data.get('operation') in ('project-init', 'plan-sdn-repair') or str(data.get('operation','')).startswith('template-')) and not user['admin']:
+                    if (data.get('operation') in ('project-init', 'plan-sdn-repair','network-publish','project-restore','project-purge') or str(data.get('operation','')).startswith('template-')) and not user['admin']:
                         return self.reply(403, {'error': 'Administrator access required.'})
                     if data.get('operation') != 'project-init' and not user['admin'] and str(project) not in user['managed_projects']:
                         return self.reply(403, {'error': 'Project manager access required.'})
+                    if data.get('operation') == 'network-verify':
+                        from crange import ENVS, json_config
+                        from crange_network_worker import declared_vnets
+                        cfg = json_config(ENVS / f'project-{project:03d}')
+                        network = data.get('options', {}).get('network') if isinstance(data.get('options'), dict) else None
+                        allowed = declared_vnets(project, cfg)
+                        if network not in allowed:
+                            raise ValueError('Choose a declared LAN in this project.')
                     job = jobs.submit(user['username'], project, data.get('operation'), data.get('options', {}))
+                    if data.get('operation') in ('project-delete', 'project-restore', 'project-purge'):
+                        auth.audit(user['username'], data['operation'] + '-submitted', str(project), {'job_id': job})
+                    if data.get('operation') == 'network-verify':
+                        options = data.get('options', {})
+                        auth.audit(user['username'], 'network-verification-submit', str(project),
+                                   {'node': options.get('node'), 'network': options.get('network'), 'job_id': job})
                     return self.reply(202, {'job_id': job})
                 return self.reply(404, {'error': 'Not found.'})
-            except (ValueError, TypeError):
-                self.reply(400, {'error': 'Invalid request.'})
+            except (ValueError, TypeError) as exc:
+                self.reply(400, {'error': str(exc) if self.path in ('/api/users','/api/jobs','/api/project-settings','/api/guac-users') else 'Invalid request.'})
 
     server = ThreadingHTTPServer((host, port), Handler)
     server.daemon_threads = True

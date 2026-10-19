@@ -1,0 +1,320 @@
+{
+  "plan_id": "80cc7d6e19a2dc5e6a57e2d9d56bba71",
+  "verified_six_creates_only": true,
+  "resources": [
+    {
+      "address": "module.scenario_box[\"test0.1.2-mhl-dc01-t254\"].proxmox_virtual_environment_vm.scenario",
+      "actions": [
+        "create"
+      ],
+      "node": "proxmox5",
+      "name": "p100c100-t83c116b4-mhl-dc01",
+      "clone": [
+        {
+          "datastore_id": null,
+          "full": false,
+          "node_name": "proxmox5",
+          "retries": 1,
+          "vm_id": 181
+        }
+      ],
+      "memory": [
+        {
+          "dedicated": 4096,
+          "floating": 0,
+          "hugepages": null,
+          "keep_hugepages": false,
+          "shared": 0
+        }
+      ],
+      "cpu": [
+        {
+          "affinity": null,
+          "architecture": null,
+          "cores": 2,
+          "flags": null,
+          "hotplugged": 0,
+          "limit": 0,
+          "numa": false,
+          "sockets": 1,
+          "type": "x86-64-v2-AES"
+        }
+      ]
+    },
+    {
+      "address": "module.scenario_box[\"test0.1.2-mhl-file01-t254\"].proxmox_virtual_environment_vm.scenario",
+      "actions": [
+        "create"
+      ],
+      "node": "proxmox5",
+      "name": "p100c100-t02cdeeb6-mhl-file01",
+      "clone": [
+        {
+          "datastore_id": null,
+          "full": false,
+          "node_name": "proxmox5",
+          "retries": 1,
+          "vm_id": 180
+        }
+      ],
+      "memory": [
+        {
+          "dedicated": 4096,
+          "floating": 0,
+          "hugepages": null,
+          "keep_hugepages": false,
+          "shared": 0
+        }
+      ],
+      "cpu": [
+        {
+          "affinity": null,
+          "architecture": null,
+          "cores": 2,
+          "flags": null,
+          "hotplugged": 0,
+          "limit": 0,
+          "numa": false,
+          "sockets": 1,
+          "type": "x86-64-v2-AES"
+        }
+      ]
+    },
+    {
+      "address": "module.scenario_container[\"test0.1.2-mhl-app01-t254\"].proxmox_virtual_environment_container.scenario",
+      "actions": [
+        "create"
+      ],
+      "node": "proxmox3",
+      "name": null,
+      "clone": [
+        {
+          "datastore_id": null,
+          "full": false,
+          "node_name": "proxmox3",
+          "vm_id": 182
+        }
+      ],
+      "memory": [
+        {
+          "dedicated": 1024,
+          "swap": 0
+        }
+      ],
+      "cpu": [
+        {
+          "architecture": "amd64",
+          "cores": 1,
+          "limit": 0
+        }
+      ]
+    },
+    {
+      "address": "module.scenario_container[\"test0.1.2-mhl-bkp01-t254\"].proxmox_virtual_environment_container.scenario",
+      "actions": [
+        "create"
+      ],
+      "node": "proxmox1",
+      "name": null,
+      "clone": [
+        {
+          "datastore_id": null,
+          "full": false,
+          "node_name": "proxmox1",
+          "vm_id": 183
+        }
+      ],
+      "memory": [
+        {
+          "dedicated": 512,
+          "swap": 0
+        }
+      ],
+      "cpu": [
+        {
+          "architecture": "amd64",
+          "cores": 1,
+          "limit": 0
+        }
+      ]
+    },
+    {
+      "address": "module.scenario_container[\"test0.1.2-mhl-ci01-t254\"].proxmox_virtual_environment_container.scenario",
+      "actions": [
+        "create"
+      ],
+      "node": "proxmox5",
+      "name": null,
+      "clone": [
+        {
+          "datastore_id": null,
+          "full": false,
+          "node_name": "proxmox5",
+          "vm_id": 179
+        }
+      ],
+      "memory": [
+        {
+          "dedicated": 512,
+          "swap": 0
+        }
+      ],
+      "cpu": [
+        {
+          "architecture": "amd64",
+          "cores": 1,
+          "limit": 0
+        }
+      ]
+    },
+    {
+      "address": "module.scenario_container[\"test0.1.2-mhl-db01-t254\"].proxmox_virtual_environment_container.scenario",
+      "actions": [
+        "create"
+      ],
+      "node": "proxmox5",
+      "name": null,
+      "clone": [
+        {
+          "datastore_id": null,
+          "full": false,
+          "node_name": "proxmox5",
+          "vm_id": 178
+        }
+      ],
+      "memory": [
+        {
+          "dedicated": 1024,
+          "swap": 0
+        }
+      ],
+      "cpu": [
+        {
+          "architecture": "amd64",
+          "cores": 1,
+          "limit": 0
+        }
+      ]
+    }
+  ],
+  "stage_review_job": "627bb7431aac4962aa9c0d75cf9f6425",
+  "apply_job": "9ef82c396c894cf4b35b4b08d46bd59a",
+  "apply_status": "succeeded: infrastructure, router/guest configuration, authenticated Windows baseline and Guacamole synchronization",
+  "infrastructure_applied": true,
+  "provider_guests": [
+    {
+      "vmid": 124,
+      "type": "lxc",
+      "node": "proxmox2",
+      "name": "p100t254-mhl-ci01",
+      "status": "running"
+    },
+    {
+      "vmid": 125,
+      "type": "lxc",
+      "node": "proxmox2",
+      "name": "p100t254-mhl-app01",
+      "status": "running"
+    },
+    {
+      "vmid": 126,
+      "type": "lxc",
+      "node": "proxmox2",
+      "name": "p100t254-mhl-bkp01",
+      "status": "running"
+    },
+    {
+      "vmid": 127,
+      "type": "lxc",
+      "node": "proxmox1",
+      "name": "p100t254-mhl-db01",
+      "status": "running"
+    },
+    {
+      "vmid": 128,
+      "type": "qemu",
+      "node": "proxmox1",
+      "name": "p100t254-mhl-dc01",
+      "status": "running"
+    },
+    {
+      "vmid": 129,
+      "type": "qemu",
+      "node": "proxmox1",
+      "name": "p100t254-mhl-file01",
+      "status": "running"
+    },
+    {
+      "vmid": 184,
+      "type": "lxc",
+      "node": "proxmox1",
+      "name": "p100c100-r5abcdac8-mhl-bkp01",
+      "status": "running"
+    },
+    {
+      "vmid": 185,
+      "type": "lxc",
+      "node": "proxmox3",
+      "name": "p100c100-r54a0115f-mhl-app01",
+      "status": "running"
+    },
+    {
+      "vmid": 186,
+      "type": "lxc",
+      "node": "proxmox5",
+      "name": "p100c100-ra174d627-mhl-db01",
+      "status": "running"
+    },
+    {
+      "vmid": 187,
+      "type": "lxc",
+      "node": "proxmox5",
+      "name": "p100c100-r21684993-mhl-ci01",
+      "status": "running"
+    },
+    {
+      "vmid": 188,
+      "type": "qemu",
+      "node": "proxmox5",
+      "name": "p100c100-t02cdeeb6-mhl-file01",
+      "status": "running"
+    },
+    {
+      "vmid": 189,
+      "type": "qemu",
+      "node": "proxmox5",
+      "name": "p100c100-t83c116b4-mhl-dc01",
+      "status": "running"
+    }
+  ],
+  "managed_guacamole_connections": 12,
+  "release_test_job": "23d112ca76ae4908acb24c0b4aedf9c7",
+  "release_test_status": "succeeded: 45 health checks, both boot orders and final matrix",
+  "previous_test": {
+    "job": "6d2f8aaf4f6f4f258828963089e738ef",
+    "status": "interrupted through Jobs API after first-order health failures",
+    "archived_service_recipes_passed": 6,
+    "first_boot_order_checks_passed": 13,
+    "first_boot_order_checks_total": 15,
+    "failed_checks": [
+      "DC ping",
+      "file-server ping"
+    ]
+  },
+  "full_release_acceptance": true,
+  "cleanup_declaration_job": "fcf1e61321e548898f2aa47a8c4050a4",
+  "cleanup_review_job": "9c5dcdc1fb7f4748835c33eb1b19963f",
+  "cleanup_applied": true,
+  "cleanup_plan_id": "a3d8017843d83cfd3f40d256222003e5",
+  "cleanup_apply_job": "2373c915e564463888c0938251e3aa2c",
+  "cleanup_review_exact_guest_ids": [
+    184,
+    185,
+    186,
+    187,
+    188,
+    189
+  ],
+  "cleanup_review_router_id": 177,
+  "cleanup_provider_verified": true
+}

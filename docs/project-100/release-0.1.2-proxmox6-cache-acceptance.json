@@ -1,0 +1,65 @@
+{
+  "release_id": "p100-0.1.2",
+  "caches": [
+    {
+      "image_id": "p100-image-18a9ebf121e5",
+      "node": "proxmox6",
+      "template_id": 177,
+      "storage": "local-hdd",
+      "job_id": "cache-3fa02cb812454d469fb12a50bfdc1857",
+      "verification_passed": true,
+      "reservation_state": "released",
+      "archive_pin_present": false
+    },
+    {
+      "image_id": "p100-image-2c2746c5613c",
+      "node": "proxmox6",
+      "template_id": 184,
+      "storage": "local-hdd",
+      "job_id": "cache-808a5f0d63a84aaa98976f6935429b7d",
+      "verification_passed": true,
+      "reservation_state": "released",
+      "archive_pin_present": false
+    },
+    {
+      "image_id": "p100-image-37860ad5ae16",
+      "node": "proxmox6",
+      "template_id": 185,
+      "storage": "local-hdd",
+      "job_id": "cache-35457367952349e28ab18beff15b7065",
+      "verification_passed": true,
+      "reservation_state": "released",
+      "archive_pin_present": false
+    },
+    {
+      "image_id": "p100-image-44891a7a6389",
+      "node": "proxmox6",
+      "template_id": 186,
+      "storage": "local-lvm",
+      "job_id": "cache-49ee10b585fd427caf5dbe136ca0ad69",
+      "verification_passed": true,
+      "reservation_state": "released",
+      "archive_pin_present": false
+    },
+    {
+      "image_id": "p100-image-a7e08b9b44ac",
+      "node": "proxmox6",
+      "template_id": 187,
+      "storage": "local-hdd",
+      "job_id": "cache-c4bc1274637e4f36b21dc9587d55e996",
+      "verification_passed": true,
+      "reservation_state": "released",
+      "archive_pin_present": false
+    },
+    {
+      "image_id": "p100-image-d1d3883a4571",
+      "node": "proxmox6",
+      "template_id": 188,
+      "storage": "local-hdd",
+      "job_id": "cache-c46b9afaad5445d088ae43521e821059",
+      "verification_passed": true,
+      "reservation_state": "released",
+      "archive_pin_present": false
+    }
+  ]
+}

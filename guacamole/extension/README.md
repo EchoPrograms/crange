@@ -36,3 +36,66 @@ always require current, applied box grants.
 The range deployment role needs `VM.Snapshot` and `VM.Snapshot.Rollback` on the
 range pool for snapshot management. Preserve the existing ACL scope; do not
 grant these permissions across unrelated infrastructure.
+
+`auth-launch.js` consumes `data`/`token` URL parameters only after successful
+authentication. The empty token in a dashboard launch intentionally replaces a
+cached session initially, but must not override the new token on later route
+authentication. Keep this cleanup when changing launch or login flows. Regression
+check: `node tests/test_guac_auth_launch.cjs`.
+
+Ticket authentication uses tab-scoped session storage for `GUAC_AUTH_TOKEN`.
+A console launch must neither read/revoke the normal browser login token nor
+replace it for other tabs. Fresh launches also discard tokens inherited through
+an opener's session-storage snapshot; console reloads retain their own token.
+Ordinary native login and shared preferences keep Guacamole's normal storage.
+Test: `node tests/test_guac_ticket_storage.cjs`.
+
+Ticket-authenticated sessions use their authenticated JSON connection trees and
+do not request native database inventory, even when Guacamole advertises database
+contexts. A dashboard identity need not be a separate database account. Native
+password sessions still verify native inventory through the authenticated bridge;
+server-side grant validation is unchanged.
+Keyboard and clipboard capture textareas remain focusable but invisible; never
+apply minimum field dimensions to these internal input sinks.
+
+Admin console access supports both QEMU VMs and LXC containers. The broker
+resolves the applied resource, rechecks current admin access and live ownership,
+then selects `/qemu/{id}` or `/lxc/{id}` VNC proxy endpoints. LXC renders the
+Proxmox terminal console; a VM renders its virtual monitor. Neither opens a guest
+network listener. Provider tickets stay in the controller relay, which accepts
+only the Guacamole server and expires unused launches after 45 seconds.
+
+## Project workspace and session controls (October 19, 2026)
+
+`workspace.js` and `workspace.css` extend the existing theme with project cards,
+Grid/List server views, grouped preferences and a floating session toolbar.
+The native client template is enhanced rather than replaced: the tiled clients,
+keyboard/IME handling, clipboard, file transfer and advanced protocol controls
+continue to use Guacamole's controllers. Password changes retain Guacamole's
+self-update permission checks. Presentation preferences use `preferenceService`.
+
+Session power requests use the same authenticated bridge and server-side
+resource authorization as the home page. The network map includes only the
+current managed project's team and copies declared addresses. Unknown or
+unmatched native sessions keep their native controls without invented ownership.
+The toolbar may be hidden; Ctrl+Alt+Shift opens it again.
+
+Square corner tokens and typography/spacing direction are recorded in
+[interface-design.md](../../docs/interface-design.md). Run
+`node tests/test_guac_workspace.cjs` with the existing Guacamole UI/auth checks
+before rebuilding the JAR.
+
+
+Management menus use manual native popovers to escape transformed or clipped
+application ancestors. Position them while hidden, then reveal; remeasure after
+power status arrives. Mouse leave has a short grace period, and opening a menu
+prioritizes its server status over the three-request background limit. Preserve
+outside-click/Escape dismissal and keyboard focus return. Administrator dashboard
+launches use the ordinary native Guacamole session/login; project launches and
+hypervisor console tickets continue to use isolated session storage.
+
+The session toolbar has a dedicated drag grip (arrow keys also move it; Home resets), a hide control and a small reopen control. Position/visibility are local to the browser/account. Network map lists authorized hosts for the focused connection’s team, refreshed from controller inventory. Click a host to save a local alias or notes; managed IPs remain read-only. Add host accepts a manual IPv4/IPv6 address, name and notes; only custom hosts can be deleted. Local records do not grant connections, modify the lab or reach the controller. Browser storage failure is reported explicitly.
+
+The session title is a multiselect dropdown backed by Guacamole 1.6’s native connection-list context and client route updates, retaining its permission-filtered tree and tile manager. Checkboxes add/remove connections from the current view; the selector does not mint extra permissions. Native source: https://github.com/apache/guacamole-client/blob/1.6.0/guacamole/src/main/frontend/src/app/client/templates/connection.html
+
+Preferences includes a Back link to the prior project view. Leaving a known CRANGE session returns to that session’s project, including when it was launched from All projects. The project return marker is scoped to the browser tab. Access branding uses a two-letter CR mark with an inverse square background for small-size readability.

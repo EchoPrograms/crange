@@ -1,0 +1,51 @@
+{
+  "consoles": [
+    {
+      "box": "t254-mhl-app01",
+      "protocol": "vnc",
+      "states": [
+        "CONNECTED"
+      ]
+    },
+    {
+      "box": "t254-mhl-bkp01",
+      "protocol": "vnc",
+      "states": [
+        "CONNECTED"
+      ]
+    },
+    {
+      "box": "t254-mhl-ci01",
+      "protocol": "vnc",
+      "states": [
+        "CONNECTED"
+      ]
+    },
+    {
+      "box": "t254-mhl-db01",
+      "protocol": "vnc",
+      "states": [
+        "CONNECTED"
+      ]
+    },
+    {
+      "box": "t254-mhl-dc01",
+      "protocol": "vnc",
+      "states": [
+        "CONNECTED"
+      ]
+    },
+    {
+      "box": "t254-mhl-file01",
+      "protocol": "vnc",
+      "states": [
+        "CONNECTED"
+      ]
+    }
+  ],
+  "native_controls_after": 12,
+  "visible_errors_after": 0,
+  "verified_at": "2026-10-16T22:44:11.958872+00:00",
+  "extension_sha256": "816eaee784f6dcb0935f2ea576e06919ce01c047b6f080721c2c0815ddd4fdae",
+  "network_path": "Browser SSH-forwarded to Guacamole; Guacamole authenticates controller requests; console public URL redirected to the same test origin only."
+}

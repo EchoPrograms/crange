@@ -1,0 +1,44 @@
+{
+  "project": 100,
+  "release_id": "p100-0.1.2",
+  "job_id": "23d112ca76ae4908acb24c0b4aedf9c7",
+  "status": "succeeded",
+  "boot_order_pass_counts": {
+    "mhl-dc01,mhl-file01,mhl-db01,mhl-app01,mhl-ci01,mhl-bkp01": 15,
+    "mhl-bkp01,mhl-ci01,mhl-app01,mhl-db01,mhl-file01,mhl-dc01": 15
+  },
+  "final_guest_check_counts": {
+    "test0.1.2-mhl-dc01-t254": {
+      "ping": 1,
+      "tcp:53": 1,
+      "tcp:389": 1,
+      "tcp:445": 1
+    },
+    "test0.1.2-mhl-file01-t254": {
+      "ping": 1,
+      "tcp:445": 1,
+      "http:80": 1
+    },
+    "test0.1.2-mhl-app01-t254": {
+      "ping": 1,
+      "http:8080": 1
+    },
+    "test0.1.2-mhl-bkp01-t254": {
+      "ping": 1
+    },
+    "test0.1.2-mhl-ci01-t254": {
+      "ping": 1,
+      "http:80": 2
+    },
+    "test0.1.2-mhl-db01-t254": {
+      "ping": 1,
+      "tcp:5432": 1
+    }
+  },
+  "total_passes": 45,
+  "failures": [],
+  "recorded_result": "releases/project-100/test-results/0.1.2-20261018T024238Z.json",
+  "recorded_result_sha256": "7a4581d5c4ecb6fe6ef1ee8ef9deb6253cf8af14d59b7fb20cd052e69073650b",
+  "release_file_sha256": "740c7cf039908a5e9b428de5cefc72705f742ef73a3f4ac68aa3be7bb32f6a88",
+  "participant_rollout_accepted": false
+}

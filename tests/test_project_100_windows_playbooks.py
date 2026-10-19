@@ -31,7 +31,20 @@ class Project100WindowsPlaybookTests(unittest.TestCase):
         self.assertIn('New-GPLink -Name $name -Target $root', domain)
         self.assertNotIn('Domain Admins', domain)
         self.assertNotIn('SMB signing', domain + members)
-        self.assertIn('MHL\\\\MHL-Employees', members)
+        self.assertIn(r'MHL\MHL-Employees', members)
+
+    def test_rdp_and_winrm_firewall_sources_are_split(self):
+        members = (ROOT / 'ansible/windows/project-100-members.yml').read_text()
+        baseline = (ROOT / 'ansible/windows/crange-guests.yml').read_text()
+        for source in (members, baseline):
+            self.assertIn('10.60.0.10', source)
+            self.assertIn('10.60.0.20', source)
+        self.assertIn("Name = 'RemoteDesktop*'", baseline)
+        self.assertIn("Name = 'WINRM*'", baseline)
+        self.assertNotIn('DisplayGroup', baseline)
+        self.assertNotIn('mhl_admin_sources', members)
+        self.assertLess(members.index('Enable-PSRemoting -Force'),
+                        members.index('Set-NetFirewallAddressFilter -RemoteAddress'))
 
 
 if __name__ == '__main__':

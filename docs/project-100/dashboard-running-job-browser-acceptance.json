@@ -1,0 +1,10 @@
+{
+  "job_id": "f3a5c66716154d95b30c5503ca10b380",
+  "checks": {
+    "running_task_visible_with_spinner": true,
+    "default_project_selected": true,
+    "running_task_restored_after_reload": true
+  },
+  "passed": true,
+  "time": 1792028343
+}

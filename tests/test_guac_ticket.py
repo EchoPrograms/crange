@@ -135,7 +135,7 @@ class GuacamoleTicketTests(unittest.TestCase):
         self.status.write_text(json.dumps({'configured': True, 'url': 'https://guac.example'}))
 
     def decode(self, url):
-        token = parse_qs(urlsplit(url).query)['data'][0]
+        token = parse_qs(urlsplit(url).fragment.split('?', 1)[1])['data'][0]
         raw = base64.b64decode(token)
         from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
         decryptor = Cipher(algorithms.AES(bytes.fromhex(self.secret)), modes.CBC(bytes(16))).decryptor()
@@ -150,7 +150,8 @@ class GuacamoleTicketTests(unittest.TestCase):
         url = issue_ticket(token, 3, auth=self.auth, secret_hex=self.secret,
                            repo_root=self.root, status_file=self.status)
         payload = self.decode(url)
-        self.assertEqual(parse_qs(urlsplit(url).query, keep_blank_values=True)['token'], [''])
+        self.assertEqual(urlsplit(url).query, '')
+        self.assertEqual(parse_qs(urlsplit(url).fragment.split('?', 1)[1], keep_blank_values=True)['token'], [''])
         self.assertEqual(payload['username'], 'manager')
         self.assertEqual(set(payload['connections']), {'Team 1 jump', 'Team 1 web'})
         self.assertEqual(payload['connections']['Team 1 jump']['parameters']['hostname'], '10.3.1.11')
@@ -178,6 +179,21 @@ class GuacamoleTicketTests(unittest.TestCase):
         url = issue_ticket(token, 3, auth=self.auth, secret_hex=self.secret,
                            repo_root=self.root, status_file=self.status)
         self.assertEqual(set(self.decode(url)['connections']), {'Team 1 web'})
+
+    def test_large_grant_set_does_not_enter_http_request_target(self):
+        connections = [{**self.connections[0], 'resource_key': f'jumpbox:box-{n}',
+                        'name': f'Company workstation {n}'} for n in range(100)]
+        self.sidecar.write_text(json.dumps({'connections': connections,
+            'permissions': [{'username': 'manager', 'resource_key': row['resource_key']}
+                            for row in connections]}))
+        token, _ = self.auth.login('manager', 'long manager test password')
+        url = issue_ticket(token, 3, auth=self.auth, secret_hex=self.secret,
+                           repo_root=self.root, status_file=self.status)
+        parsed = urlsplit(url)
+        self.assertGreater(len(parsed.fragment), 8192)
+        self.assertEqual(parsed.query, '')
+        self.assertEqual(parsed.path, '/')
+        self.assertEqual(set(self.decode(url)['connections']), {row['name'] for row in connections})
 
     def test_project_scope_and_disabled_sessions_are_enforced(self):
         token, _ = self.auth.login('manager', 'long manager test password')

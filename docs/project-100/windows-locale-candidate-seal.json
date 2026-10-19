@@ -1,0 +1,61 @@
+{
+  "state": "sealed-candidate-locale-prepared",
+  "vmid": 8912,
+  "never_booted": true,
+  "source115_stopped_unchanged": true,
+  "locale_only_semantic_diff_verified": true,
+  "registry": {
+    "GeneralizationState": 4,
+    "CleanupState": 2
+  },
+  "image_state": "IMAGE_STATE_GENERALIZE_RESEAL_TO_OOBE",
+  "hive_sha256_unchanged": {
+    "SYSTEM": "fb2f3526a7af150d153080eb608aef50650d2abd837efc3b76cec194334aef8e",
+    "SOFTWARE": "08e9281118a0bad1d28560483648c0607da1656b3ef50bd703b950687a81f7c9",
+    "SAM": "b9f3b16431b4cfba63812c74967cb07a609eac695152fc56029bcab622ab6c62"
+  },
+  "files": [
+    {
+      "path": "ProgramData/CRANGE/clone-unattend.xml",
+      "original_sha256": "ad5ea4fd0de1c5806740726910f2d216768bc6e6e81b6ae7253672a3835228da",
+      "prepared_sha256": "11dc5811c48ec41ffc97c9980171f345abd750a90acd89e3cf0da17da808e2dc",
+      "locale_only_semantic_diff_verified": true,
+      "locale": "en-US",
+      "component_created": true
+    },
+    {
+      "path": "Windows/Panther/unattend.xml",
+      "original_sha256": "b40965c46304ca9ce8573a81ec866423aa7f73fa18431a0f7f68c5bb577a4554",
+      "prepared_sha256": "11dc5811c48ec41ffc97c9980171f345abd750a90acd89e3cf0da17da808e2dc",
+      "locale_only_semantic_diff_verified": true,
+      "locale": "en-US",
+      "component_created": true
+    }
+  ],
+  "prepared_epoch": 1791487899.4246345,
+  "frozen_candidate_config": {
+    "agent": "1",
+    "bios": "ovmf",
+    "boot": "order=sata0",
+    "cores": 4,
+    "cpu": "x86-64-v2-AES",
+    "description": "Never-booted locale-only candidate; frozen source115; owned Windows image preparation",
+    "digest": "2e3b18efeb5ab28e6d4a7c866bfad8f400834609",
+    "efidisk0": "crange-library:8912/vm-8912-disk-0.raw,efitype=4m,pre-enrolled-keys=0,size=528K",
+    "machine": "pc-q35-10.1",
+    "memory": "4096",
+    "meta": "creation-qemu=10.1.2,ctime=1791436670",
+    "name": "crange-win-sealed-locale-candidate",
+    "net0": "e1000=BC:24:11:A0:8C:66,bridge=crprobe1450,firewall=1,link_down=1",
+    "onboot": 0,
+    "ostype": "win11",
+    "sata0": "crange-library:8912/vm-8912-disk-1.raw,size=64G",
+    "scsihw": "virtio-scsi-single",
+    "smbios1": "uuid=85f5bce7-5120-4487-ab05-a4cbbe021a99",
+    "tags": "crange-capture-windows-server2025-locale-20261008;crange-image;mhl-windows-sealed-locale",
+    "vmgenid": "3460f83a-8f9e-43f3-9798-2190c5ac6c33"
+  },
+  "frozen_candidate_config_sha256": "5e9fdb9337ec631b74100dc1c1f47ffdfb02f8873b32ee6119b49bc7cef27e9d",
+  "private_leaf_whitespace_preservation_revalidated": true,
+  "preparer_code_sha256": "212c5aba4a18aa3f1bc32ad3830177a55ebe296ff81f8c54c5fe754e20d129e2"
+}

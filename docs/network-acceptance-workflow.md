@@ -3,8 +3,15 @@
 `python scripts/crange_network_acceptance.py /protected/path/to/bundle`
 validates an offline administrator evidence bundle. It executes no commands,
 creates no guests, edits no firewall or policy, and prints only the validated
-project/node/VNet/probe identity. This is a source-only foundation for a future
-fixed worker, not a deployed automated network test or an admission grant.
+project/node/VNet/probe identity. The authenticated GUI also has a fixed queued
+network-verification workflow. Managers choose only a declared standard team
+LAN or Team 0 staging LAN and an enrolled node. The privileged worker derives
+the probe address, VMID, approved image, bounded size, and single-resource
+Terraform plan. The browser cannot supply paths, commands, image IDs, arbitrary
+endpoints, or raw Terraform. A completed check applies only to that exact
+project/node/VNet tuple. After all six checks and cleanup pass, the root job lane
+publishes that exact VNet membership for placement; global enrollment, capacity
+and storage policy remain unchanged.
 
 Existing scheduler policy has node-wide `passed_checks` plus an exact
 `verified_networks` list. A proof for `proxmox2/p003t254` cannot justify another
@@ -121,7 +128,7 @@ receipts for one tuple at a time, preserve existing grants, and leave capacity,
 quota, image, provider and storage gates intact. This CLI deliberately does not
 synthesize `network_attestations` or widen `allowed_nodes`.
 
-## Fixed lifecycle foundation and blocked queue integration
+## Fixed queued lifecycle
 
 `scripts/crange_network_runner.py` now implements a source-only lifecycle with a
 `ProbeBackend` interface. It claims a protected durable journal exclusively,
@@ -131,42 +138,30 @@ rule specification, dispatches six fixed check names with a 60-second deadline,
 and attempts independent rule/probe cleanup even after partial create or test
 failure. Destroy also requires an exact saved-plan digest after the fixed worker validates that it deletes only the owned probe. Only
 confirmed guest/state/rule absence permits reservation release; only complete
-valid evidence after cleanup permits a receipt. Provider exception text is not
-persisted. All retries with an existing journal are rejected.
+valid evidence after cleanup permits a receipt. Public job output and journal causes contain fixed categories. Precise exceptions
+are retained only in the root-owned, mode-0600 `workflow-error.txt` inside the
+protected nonce bundle, before classification; subsequent wrappers append rather
+than replace the original cause. All retries with an existing journal are rejected.
 
-There is deliberately no production backend or queue operation yet. The
-`ProbeBackend` is a typed contract, not a guest-command execution adapter.
-Tests exercise the lifecycle with a fake backend; they do not claim live
-Terraform/SSH/firewall acceptance. Adapters still need to enforce approved
-immutable image/resource constraints, atomic project/address/VMID reservations,
-actual saved-plan file hashes, provider task completion, exact live ownership,
-fixed guest/management tests with subprocess/API deadlines, and retained
-artifacts. Calling this module with an untrusted backend would defeat its trust
-boundary; it belongs exclusively in the privileged reviewed worker.
+The fixed `network-verify` operation is submitted through authenticated
+`/api/jobs`. An ordinary worker cannot claim it. A separate root
+`crange-network-worker` lane claims only network verification and fixed
+administrator reconciliation jobs. It rechecks the actor before starting and
+derives every probe input from protected project, catalog, and live cluster
+state. During the Guac check, a narrowly scoped relay verifies the protected
+review and active journal phase, rechecks the tagged probe and approved source,
+confirms Guac VM 110 is running on P4 at `10.60.0.10`, then performs one bounded
+TCP/22 SSH-banner diagnostic inside Guacamole VM110 through one fixed host-root
+QGA command. The worker receives no general guest-execution grant. The command
+binds `10.60.0.10`, connects only the derived owned probe address on TCP/22, and
+retains its claim, raw submission, PID and same-PID polling result before parsing.
 
-Queue integration is blocked by the current `JobStore.cancel` process-group
-termination and the worker's interrupted-job recovery: process termination can
-skip Python cleanup. Do not expose this runner through a GUI or add an operation
-that assumes `finally` is cancellation-safe. The safe integration requires:
-
-1. An administrator-only typed operation containing a reviewed manifest ID and
-   scope, never commands, template code, arbitrary endpoint sets or file paths.
-2. Cooperative cancellation: set a durable cancellation request, stop starting
-   tests, and enter owned cleanup. Keep the queue job and reservation nonterminal
-   while cleanup is uncertain. The cancellation handler must not kill this
-   operation as it currently kills ordinary worker processes.
-3. Startup recovery and manual reconcile: load the exact journal scope, stored
-   rule specification and saved-plan identities; independently query cluster
-   guest ownership and provider tasks. Remove only the recorded rule; review a
-   fresh single-probe destroy plan when an owned probe remains. Never destroy an
-   untagged or mismatched VMID. Mark uncertain outcomes for administrator action.
-   Verify all absence conditions before releasing reservations or retrying.
-4. Keep each lifecycle transition durable by syncing files and parent
-   directories, as this runner does. Production adapters must also persist
-   reservation and provider-task journals durably before acknowledging mutations.
-5. A receipt publisher that retains logs and plan/provider artifacts and validates
-   the complete bundle before any separate exact-tuple policy review. It must
-   never infer zone-wide trust or change `allowed_nodes` from test success.
+Running jobs use a durable cooperative cancellation request. The runner stops
+before another check and enters its owned cleanup path; the queue does not kill
+its process group. Jobs stay active as `reconcile-required` while cleanup is
+uncertain. Administrators can request the fixed reconciliation action from that
+job card. Startup recovery inspects the same protected journal before retrying
+or releasing a reservation; missing or ambiguous ownership stays nonterminal.
 
 Journal states cover reservation, create pending/created, rule pending/testing,
 rule cleanup/destroy pending, cleanup uncertainty, confirmed cleanup with pending
@@ -338,5 +333,64 @@ retiring an image or editing desired state must not prevent owned cleanup. It
 uses the saved router identity, exact live probe ownership, inspected one-delete
 plan, actual absence checks and shared reservation scope. Reservations remain
 held if node provider tasks are still active. No acceptance receipt is generated
-by recovery. Queue integration remains blocked on cooperative cancellation and
-startup reconciliation; a killed process must never trigger blind reallocation.
+by recovery. Fixture tests cover typed scope, relay ownership checks, durable
+cancellation, and startup handling; they do not attest a live run. Deployment
+and an authenticated GUI button request in the target session are still
+required before reporting Project 100 acceptance as passed. Neither the worker
+nor the receipt publisher changes `allowed_nodes`, `verified_networks`, firewall
+policy, or OPNsense rules.
+
+A capacity rejection before reservation commit is not proof of an allocated
+probe. The fixed administrator GUI reconciliation action can terminalize such a
+`reserving`/`reservation_uncertain` journal only after binding its exact manifest
+and rule nonce, locking the ledger and finding no job row, confirming live VMID
+absence, empty standalone state, absent temporary rules, no active node tasks
+and unchanged project inputs. It retains `unadmitted-cleanup.json`; it releases
+no reservation and deletes no guest. Any uncertain identity or committed lease
+uses the normal owned reconciliation path instead.
+
+The P4 Guacamole relay reads the protected job bundle through the fixed running
+controller CT114 `/proc/<pid>/root` path, with its expected mapped root UID
+100000. It reads regular JSON files using `O_NOFOLLOW`, checks exact manifest
+and journal scope, and rejects a changed CT PID/root identity after the check.
+PVE initialization fields are compared as exact parsed IP/gateway fields so
+provider ordering does not change ownership. Generated saved delete plans are
+verified as owned regular files and set to mode0600 before protected decoding;
+the service umask must not make them group-writable.
+
+New GUI receipts use schema version 2. `source_binding` version 1 records SHA-256 hashes
+for all seven fixed controller network files, the administrator-installed trusted
+relay code SHA256, and an explicit `git_dirty` boolean. The Git revision remains
+a label; a dirty worktree is identified and its exact code bytes are bound by
+hashes. The root-private relay trust file is
+`/etc/crange/network-relay-source.sha256`. The relay reports its module-load code
+hash and rejects changed on-disk code; the client checks that hash against the
+protected manifest. Cleanup checks source and project-input stability before
+issuing the receipt. Guac receipt evidence includes source `.10`, the exact
+probe target, TCP/22 and the same reviewed relay hash. Legacy offline schema 1
+receipts remain readable and cannot claim source-binding fields.
+
+A failed fixed guest check retains a root-private `<check>.failed.log` with its
+bounded commands, exit status and stdout/stderr. MTU acceptance requires NIC MTU 1450,
+a successful 1422-byte DF positive control, and local rejection of the 1423-byte
+(1451 total) DF packet. The observed musl/iputils `sendmsg: Message too large`
+variant is accepted only with the exact 1451-byte packet output and nonzero exit;
+generic packet loss is rejected.
+
+Successful queued network verification now publishes its accepted schema 2
+receipt automatically before reporting job success. Previously completed
+receipts have an administrator recovery button, **Use verified network**, which
+queues `network-publish` using only the source job ID. The privileged publisher
+validates the protected accepted journal, receipt/artifact hashes, exact queue
+scope, source binding, current project inputs, live probe absence and released
+reservation. It serializes policy writes with capacity controls and preserves
+policy ownership, permissions and every unrelated setting. Only the exact
+node/VNet is added, alongside receipt scope and hashes; existing valid grants
+remain intact. No other node or team is inferred.
+
+`publication.json` records a durable prepared/published transaction with the
+original receipt hash, reviewed source-binding digest, consumer code hash and
+policy hashes before/after. Replays are idempotent. Once a protected publication
+record has established a reviewed historical producer, later relay code updates
+do not rewrite or falsely relabel that old evidence as current source. Placement
+still requires independent image-cache, provider, capacity and quota admission.

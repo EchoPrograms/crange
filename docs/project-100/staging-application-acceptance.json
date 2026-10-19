@@ -1,0 +1,25 @@
+{
+  "scope": "staging/application-read-only",
+  "host": "MHL-APP01",
+  "health": true,
+  "cross_customer_record_read": {
+    "supplied_customer": 4101,
+    "returned_customer": 4102,
+    "shipment_id": 61002,
+    "passed": true
+  },
+  "report_query_read_only_proof": {
+    "normal_rows": 1,
+    "broadened_rows": 3,
+    "passed": true
+  },
+  "build_artifact_publicly_readable": {
+    "status": 200,
+    "has_deploy_identity": true,
+    "has_synthetic_token": true,
+    "sha256": "1ad272d323cdb448129d01a35bd78a23c0b4d857af9aac640e984db709df824e",
+    "token_recorded": false
+  },
+  "no_write_requests_or_database_mutations": true,
+  "passed": true
+}

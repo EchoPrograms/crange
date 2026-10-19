@@ -57,6 +57,54 @@ class FixedNetworkChecksTests(unittest.TestCase):
         self.assertTrue(any('1422' in command and '-M' in command for command in self.transport.calls))
         self.assertTrue(any('1423' in command and '-M' in command for command in self.transport.calls))
 
+    def test_local_gateway_uses_verified_remote_project_transit(self):
+        self.checker.router_node = self.target['node']
+        self.checker.project_router_node = 'proxmox1'
+        original = self.router.observe
+        def observe(name, timeout):
+            if name == 'upstream_route':
+                return '1.1.1.1 via 10.240.0.1 dev eth0 src 10.240.0.4'
+            return original(name, timeout)
+        self.router.observe = observe
+        result = self.checker.run(self.target, 'vxlan_mtu')
+        self.assertTrue(result['passed'])
+        self.assertEqual(result['logs'][0]['cross_node_segment']['vnet'], 'p240tr')
+
+    def test_local_gateway_wrong_upstream_cannot_claim_cross_node_mtu(self):
+        self.checker.router_node = self.target['node']
+        self.checker.project_router_node = 'proxmox1'
+        self.router.observe = lambda name, timeout: '1.1.1.1 via 10.240.0.9 dev eth1'
+        with self.assertRaises(ValueError):
+            self.checker.run(self.target, 'vxlan_mtu')
+
+    def test_musl_iputils_emsgsize_variant_is_bound_to_exact_1451_packet(self):
+        original=self.transport.request
+        def request(method,path,fields,deadline):
+            result=original(method,path,fields,deadline)
+            if path.endswith('/agent/exec-status') and '1423' in self.transport.command:
+                result.update(exitcode=1,**{'err-data':'ping: sendmsg: Message too large\n',
+                    'out-data':'PING 1.1.1.1 (1.1.1.1) 1423(1451) bytes of data.\n'})
+            return result
+        self.transport.request=request
+        self.assertTrue(self.checker.run(self.target,'vxlan_mtu')['passed'])
+        def loss(method,path,fields,deadline):
+            result=request(method,path,fields,deadline)
+            if path.endswith('/agent/exec-status') and '1423' in self.transport.command:
+                result['err-data']=''
+                result['out-data']='1423(1451) bytes of data. 100% packet loss'
+            return result
+        self.transport.request=loss
+        with self.assertRaises(ValueError):self.checker.run(self.target,'vxlan_mtu')
+
+    def test_failed_fixed_check_retains_bounded_command_context(self):
+        self.transport.iputils=False
+        with self.assertRaises(ValueError) as caught:
+            self.checker.run(self.target,'vxlan_mtu')
+        logs=caught.exception.network_check_log
+        self.assertEqual(logs['check'],'vxlan_mtu')
+        self.assertEqual(logs['commands'][-1]['command'],['/usr/bin/env','ping','-V'])
+        self.assertIn('BusyBox',logs['commands'][-1]['stdout'])
+
     def test_same_node_or_missing_iputils_cannot_claim_cross_node_mtu(self):
         self.checker.router_node='proxmox2'
         with self.assertRaises(ValueError):self.checker.run(self.target,'vxlan_mtu')

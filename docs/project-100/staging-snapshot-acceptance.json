@@ -1,0 +1,120 @@
+{
+  "observed_at": "2026-10-19T14:01:10.190615+00:00",
+  "project": 100,
+  "resource_key": "container:t254-mhl-ci01",
+  "guest_id": 124,
+  "node": "proxmox2",
+  "network_id": 254,
+  "original_running": true,
+  "snapshot": "accept-p100-f46230ba",
+  "fixture_account": "snap100_9030ac",
+  "native_management_actor": "crange-sync",
+  "snapshot_endpoint": "/api/ext/crange-control/control",
+  "exact_guacamole_gui_payload": {
+    "operation": "submit",
+    "project": 100,
+    "resource_key": "container:t254-mhl-ci01",
+    "action": "snapshot-create",
+    "snapshot": "accept-p100-f46230ba"
+  },
+  "jobs": [
+    {
+      "phase": "snapshot-create",
+      "id": "4a3b07b6de594e5288b4010bd2e6c232",
+      "actor": "crange-sync",
+      "status": "succeeded"
+    },
+    {
+      "phase": "marker-create",
+      "id": "5019488fa42b420ebc4f80cbf5e3e628",
+      "actor": "admin",
+      "status": "succeeded"
+    },
+    {
+      "phase": "marker-list",
+      "id": "b185c8b1eccf45ff9661a6e9434797bc",
+      "actor": "admin",
+      "status": "succeeded"
+    },
+    {
+      "phase": "snapshot-restore",
+      "id": "b506db7ee89b40ce830aac39142a8cf2",
+      "actor": "crange-sync",
+      "status": "succeeded"
+    },
+    {
+      "phase": "start",
+      "id": "cace1ae74dce4812aefabb347a20e9bc",
+      "actor": "crange-sync",
+      "status": "succeeded"
+    },
+    {
+      "phase": "marker-list",
+      "id": "c7aca7c3ceff429cb135f401b8a3374c",
+      "actor": "admin",
+      "status": "succeeded"
+    },
+    {
+      "phase": "stop",
+      "id": "83ab99faaed444029acc443743c200ca",
+      "actor": "crange-sync",
+      "status": "succeeded"
+    },
+    {
+      "phase": "start",
+      "id": "11df53c592904a4295c38ed5c44b2c0e",
+      "actor": "crange-sync",
+      "status": "succeeded"
+    },
+    {
+      "phase": "snapshot-delete",
+      "id": "93f7b32ebc964960b727272558aefb0c",
+      "actor": "crange-sync",
+      "status": "succeeded"
+    },
+    {
+      "phase": "health",
+      "id": "ef7d36cdf1384fb49b3086583c721c72",
+      "actor": "admin",
+      "status": "succeeded"
+    }
+  ],
+  "restore_acceptance_pending": false,
+  "cleanup_pending": false,
+  "full_lab_acceptance": false,
+  "credential_values_recorded": false,
+  "marker_present_before_restore": true,
+  "marker_list_before_restore_job": "b185c8b1eccf45ff9661a6e9434797bc",
+  "restore_job": {
+    "id": "b506db7ee89b40ce830aac39142a8cf2",
+    "status": "succeeded",
+    "post_restore_power": "stopped"
+  },
+  "marker_absent_after_restore": true,
+  "baseline_warehouse_bot_retained": true,
+  "post_restore_user_list_job": "c7aca7c3ceff429cb135f401b8a3374c",
+  "force_stop": {
+    "job_id": "83ab99faaed444029acc443743c200ca",
+    "status": "succeeded",
+    "power_after": "stopped",
+    "guacamole_status_matches_provider": true
+  },
+  "pending_shutdown_override_acceptance": true,
+  "qemu_snapshot_acceptance_pending": true,
+  "final_power": "running",
+  "test_snapshot_deleted": true,
+  "final_snapshots": [
+    "current"
+  ],
+  "fixture_removed_by_restore": true,
+  "controller_root_key_access_verified_by_post_restore_user_list": true,
+  "health": {
+    "job_id": "ef7d36cdf1384fb49b3086583c721c72",
+    "status": "succeeded",
+    "checks": [
+      "ping",
+      "http:80",
+      "http:80"
+    ]
+  }
+}

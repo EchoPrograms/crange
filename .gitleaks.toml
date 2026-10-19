@@ -1,0 +1,18 @@
+# Retain all default secret detectors. These exact matches are SQL column
+# assignments and scenario resource names, not credentials.
+[extend]
+useDefault = true
+
+[[allowlists]]
+description = "SQL upsert column assignment"
+condition = "AND"
+paths = ['''(?:^|/)scripts/crange_user_management\.py$''']
+regexTarget = "match"
+regexes = ['''excluded\.sealed_password_template,jumpboxes=excluded\.jumpboxes'''']
+
+[[allowlists]]
+description = "Published scenario resource identifiers in acceptance evidence"
+condition = "AND"
+paths = ['''(?:^|/)docs/project-100/release-0\.1\.2-five-team-(?:infrastructure|health)-acceptance\.json$''']
+regexTarget = "secret"
+regexes = ['''^r0\.1\.2-mhl-[a-z0-9-]+$''']

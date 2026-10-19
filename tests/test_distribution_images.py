@@ -16,11 +16,12 @@ from unittest.mock import Mock, patch
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'scripts'))
 from crange_catalog import CatalogError, validate_catalog, publish_replica
 from crange_distribution import (ReplicaWorker, DistributionError, publish_artifact,
-    ProbeVerifier, SSHContainerExec, normalize_projects, publish_stock_archive,
+    ProbeVerifier, SSHContainerExec, _JournaledProbeAPI, normalize_projects, publish_stock_archive,
     publish_exported_image, required_capacity, _add_project_approval_arguments,
     _project_approval_scope, shared_reservation_validator, SourceProbeWorker,
     _qemu_capacity, _source_config_identity, catalog_transaction,
     main as distribution_main)
+from crange_distribution import automatic_probe_candidate, validate_probe_candidate
 
 
 class ReplicaTests(unittest.TestCase):
@@ -73,6 +74,18 @@ class ReplicaTests(unittest.TestCase):
         self.assertEqual(self.journal.call_args.args[0]['state'], 'ready')
         self.assertEqual(self.journal.call_args.args[0]['probe_pool'], 'crange-probes')
 
+    def test_new_thin_destination_requires_explicit_linked_proof(self):
+        self.worker.approved_storage={('proxmox2','crange-thin')}
+        args=dict(source_node='proxmox2',source_id=100,node='proxmox2',
+                  datastore_id='crange-thin',job_id='test')
+        with self.assertRaisesRegex(DistributionError,'Local linked clone capability'):
+            self.worker.prepare(self.catalog,'base-v1',**args)
+        self.journal.assert_not_called()
+        self.assertTrue(all(call.args[0]=='GET' for call in self.api.request.call_args_list))
+        self.worker.linked_storages={('proxmox2','crange-thin')}
+        result=self.worker.prepare(self.catalog,'base-v1',**args)
+        self.assertEqual(result['images']['base-v1']['replicas'][-1]['datastore_id'],'crange-thin')
+
     def test_missing_cache_reservation_has_no_provider_mutations(self):
         self.worker.reservation_validator = None
         with self.assertRaisesRegex(DistributionError, 'reservation'): self.prepare()
@@ -97,6 +110,51 @@ class ReplicaTests(unittest.TestCase):
                          {'memory': 512, 'cores': 1, 'sockets': 1})
         self.assertEqual(updates[0]['tags'], 'crange-cache-201;crange-image')
         self.assertEqual(updates[0]['description'], 'CRANGE verification test')
+
+    def test_candidate_profile_is_published_only_after_fresh_clone_acceptance(self):
+        image = self.catalog['images']['base-v1']
+        image.update(cpu_cores=4, memory_mb=6000, init_system='systemd')
+        candidate = automatic_probe_candidate(image)
+        self.assertEqual(candidate, {'memory_mb': 2048, 'cpu_cores': 2})
+        self.assertNotIn('probe_resources', image)
+        self.worker.probe_candidate = candidate
+        self.worker.reservation_validator = Mock(return_value=True)
+        result = self.prepare()
+        self.assertNotIn('probe_resources', image, 'Input catalog must not be changed speculatively.')
+        profile = result['images']['base-v1']['probe_resources']
+        self.assertTrue(profile['verified'])
+        self.assertEqual(profile['memory_mb'], 2048)
+        self.assertIn('Fresh isolated clone boot', profile['evidence'])
+        required = self.worker.reservation_validator.call_args.args[3]
+        self.assertEqual(required['memory_mb'], 2048)
+        updates = [c.args[2] for c in self.api.request.call_args_list
+                   if c.args[:2] == ('PUT', '/nodes/proxmox2/qemu/201/config')]
+        self.assertEqual(updates[0]['memory'], 2048)
+        self.assertEqual(updates[0]['cores'], 2)
+        self.assertEqual(updates[0]['balloon'], 0)
+
+    def test_failed_candidate_boot_does_not_approve_smaller_resources(self):
+        image = self.catalog['images']['base-v1']
+        image.update(cpu_cores=4, memory_mb=6000, init_system='systemd')
+        self.worker.probe_candidate = automatic_probe_candidate(image)
+        self.verify.return_value = {'passed': False, 'identity_unique': False}
+        with self.assertRaisesRegex(DistributionError, 'verification failed'):
+            self.prepare()
+        self.assertNotIn('probe_resources', image)
+        self.assertEqual(image['memory_mb'], 6000)
+        self.assertFalse(any(c.args[0].get('state') == 'ready' for c in self.journal.call_args_list))
+
+    def test_candidate_cannot_override_windows_or_inject_a_resource_profile(self):
+        image = {**self.catalog['images']['base-v1'], 'memory_mb': 6000, 'init_system': 'systemd'}
+        for other in [{**image, 'os_family': 'windows'}, {**image, 'kind': 'container'},
+                      {**image, 'init_system': 'openrc'}]:
+            self.assertIsNone(automatic_probe_candidate(other))
+            with self.assertRaises(DistributionError):
+                validate_probe_candidate(other, {'memory_mb': 2048, 'cpu_cores': 1})
+        for profile in [{'memory_mb': 128, 'cpu_cores': 1},
+                        {'memory_mb': 2048, 'cpu_cores': 1, 'verified': True}]:
+            with self.assertRaises(DistributionError):
+                validate_probe_candidate(image, profile)
 
     def test_unverified_reduced_probe_profile_fails_before_allocation(self):
         self.catalog['images']['base-v1']['probe_resources'] = {
@@ -146,6 +204,21 @@ class ReplicaTests(unittest.TestCase):
                              for call in self.api.request.call_args_list))
         self.assertFalse(any('/nodes/proxmox1/' in c.args[1] for c in self.api.request.call_args_list))
 
+    def test_restored_container_template_skips_reconversion(self):
+        self.catalog['images']['base-v1']['kind'] = 'container'
+        self.worker.tested_paths = {'local-linked-container', 'container-archive-restore'}
+        self.worker.backing_verifier = Mock(return_value={'verified': True})
+        self.worker.hash_volume = Mock(return_value='a'*64)
+        archive = {'source_id':100, 'node':'proxmox1',
+                   'volume_id':'crange-library:backup/vzdump-lxc-100.tar.zst',
+                   'artifact_sha256':'a'*64, 'state':'exported', 'complete_capture':True}
+        self.catalog['images']['base-v1']['artifact'] = dict(archive)
+        self.worker.prepare(self.catalog, 'base-v1', source_node='proxmox1', source_id=100,
+            node='proxmox2', datastore_id='local-lvm', job_id='archive', archive=archive)
+        self.assertFalse(any(c.args[:2] == ('POST','/nodes/proxmox2/lxc/200/template')
+                             for c in self.api.request.call_args_list))
+        self.assertEqual(self.journal.call_args.args[0]['state'], 'ready')
+
     def test_restored_stopped_template_resumes_without_reconversion(self):
         self.ids = iter([201])
         record = {'job_id': 'test', 'image_id': 'base-v1', 'node': 'proxmox2',
@@ -157,6 +230,21 @@ class ReplicaTests(unittest.TestCase):
         self.assertFalse(any(call.args[:2] == ('POST', '/nodes/proxmox2/qemu/200/template')
                              for call in self.api.request.call_args_list))
         self.api.request.assert_any_call('DELETE', '/nodes/proxmox2/qemu/201', {'purge': 1})
+
+    def test_container_resume_reuses_existing_owned_probe(self):
+        self.catalog['images']['base-v1']['kind']='container'
+        self.worker.tested_paths={'local-linked-container'}
+        self.worker.backing_verifier=Mock(return_value={'verified':True})
+        self.configs['/nodes/proxmox2/lxc/201/config']={
+            'tags':'crange-image;crange-cache-201','description':'CRANGE verification test','template':0}
+        record={'job_id':'test','image_id':'base-v1','node':'proxmox2',
+                'allocation_node':'proxmox2','datastore_id':'local-lvm','kind':'lxc',
+                'state':'verifying','template_id':200,'probe_id':201,
+                'artifact_sha256':'a'*64,'provider_tasks':[]}
+        result=self.worker.resume_template(self.catalog,'base-v1',record=record)
+        self.assertEqual(result['images']['base-v1']['replicas'][-1]['template_id'],200)
+        self.assertFalse(any(c.args[0]=='POST' for c in self.api.request.call_args_list))
+        self.api.request.assert_any_call('DELETE','/nodes/proxmox2/lxc/201',{'purge':1})
 
     def test_resume_rejects_wrong_state_or_artifact_before_probe(self):
         record = {'job_id': 'test', 'image_id': 'base-v1', 'node': 'proxmox2',
@@ -386,7 +474,7 @@ class ReplicaTests(unittest.TestCase):
                       'cores': 1, 'scsi0': 'local-lvm:base-8830-disk-0,size=20G'}
             probe = {'tags': 'crange-image;crange-job-capture', 'template': 0,
                      'name': 'crange-source-probe-20000',
-                     'description': 'CRANGE source verification resume-1',
+                     'description': 'CRANGE source verification resume-1\n',
                      'net0': 'virtio=aa:bb:cc:dd:ee:ff,bridge=crprobe1450,link_down=1'}
             tasks = iter([
                 'UPID:proxmox1:00000001:00000001:00000001:qmstart:20000:root@pam:',
@@ -510,7 +598,7 @@ class ReplicaTests(unittest.TestCase):
             'project_id': 3, 'allocations': [reservation]}
         present = []; tasks = []
         def request(method, path, fields=None):
-            if path == '/nodes': return [{'node': 'proxmox'+str(i), 'status': 'online'} for i in range(1,6)]
+            if path == '/nodes': return [{'node': 'proxmox'+str(i), 'status': 'online'} for i in range(1,7)]
             if path == '/cluster/resources': return present
             if path == '/pools/crange-probes': return {'members': [{'type': 'lxc', 'node': 'proxmox2', 'vmid': 8840}]}
             if path.endswith('/config'): return source
@@ -693,7 +781,7 @@ class CacheRecoveryTests(unittest.TestCase):
                 self.resources, self.active, self.history = resources, active, history
             def request(self, method, path, fields=None):
                 if path == '/nodes':
-                    return [{'node': f'proxmox{i}', 'status': 'online'} for i in range(1, 6)]
+                    return [{'node': f'proxmox{i}', 'status': 'online'} for i in range(1, 7)]
                 if path == '/cluster/resources': return list(self.resources)
                 if path.endswith('/tasks') and fields.get('source') == 'active': return list(self.active)
                 if path.endswith('/tasks') and fields.get('source') == 'all': return list(self.history)
@@ -741,7 +829,7 @@ class CacheRecoveryTests(unittest.TestCase):
             def __init__(self, resources=(), active=(), history=()):
                 self.resources, self.active, self.history = resources, active, history
             def request(self, method, path, fields=None):
-                if path == '/nodes': return [{'node': f'proxmox{i}', 'status': 'online'} for i in range(1, 6)]
+                if path == '/nodes': return [{'node': f'proxmox{i}', 'status': 'online'} for i in range(1, 7)]
                 if path == '/cluster/resources': return list(self.resources)
                 if path.endswith('/tasks') and fields.get('source') == 'active': return list(self.active)
                 if path.endswith('/tasks') and fields.get('source') == 'all': return list(self.history)
@@ -884,6 +972,24 @@ class PublicationTests(unittest.TestCase):
             publish_exported_image({'schema_version': 1, 'images': {}}, 'vm-v2', record, **arguments)
 
 class ProbeTests(unittest.TestCase):
+    def test_qga_submission_response_is_journaled_before_pid_parsing(self):
+        api = Mock()
+        api.request.return_value = {'pid': 'not-a-number', 'debug': 'provider response'}
+        record = {'job_id': 'cache-123', 'state': 'verifying', 'provider_tasks': []}
+        journal = Mock()
+        wrapped = _JournaledProbeAPI(api, record, journal)
+        verifier = ProbeVerifier.__new__(ProbeVerifier)
+        verifier.init_system = 'windows'
+        verifier.timeout = 0.01
+        verifier.sealed_windows = False
+        verifier.source = {}
+        with self.assertRaisesRegex(DistributionError, 'did not become ready'):
+            verifier._check_guest(wrapped, 'proxmox1', 'qemu', 123)
+        event = record['verification_evidence'][0]
+        self.assertEqual(event['type'], 'qga-exec')
+        self.assertEqual(event['response'], {'pid': 'not-a-number', 'debug': 'provider response'})
+        journal.assert_called()
+
     def test_probe_attempts_stop_even_when_start_task_times_out(self):
         api = Mock()
         api.request.side_effect = lambda method, path, fields=None: (
@@ -897,6 +1003,28 @@ class ProbeTests(unittest.TestCase):
         with self.assertRaises(TimeoutError):
             verifier(api, 'proxmox1', 'qemu', 990)
         api.request.assert_any_call('POST', '/nodes/proxmox1/qemu/990/status/stop', {})
+
+    def test_newer_qemu_machine_normalizes_only_disposable_probe_before_boot(self):
+        api = Mock()
+        def request(method, path, fields=None):
+            if path == '/pools/crange-probes':
+                return {'members': [{'type': 'qemu', 'node': 'proxmox6', 'vmid': 220}]}
+            if path.endswith('/capabilities/qemu/machines'):
+                return [{'id': 'pc-q35-9.2+pve1', 'type': 'q35'}]
+            if method == 'GET':
+                return {'tags': 'crange-image', 'machine': 'pc-q35-10.1',
+                        'net0': 'e1000=AA:BB,bridge=crprobe1450,link_down=1'}
+            return 'UPID:probe'
+        api.request.side_effect = request
+        verifier = ProbeVerifier('crprobe1450', ['crprobe1450'],
+            {'machine_id': 'a'*32, 'ssh_host_key': 'ssh-ed25519 old source'})
+        with patch.object(verifier, '_check_guest', return_value={'passed': True}):
+            self.assertTrue(verifier(api, 'proxmox6', 'qemu', 220)['passed'])
+        writes = [c for c in api.request.call_args_list if c.args[0] == 'PUT']
+        self.assertEqual(len(writes), 1)
+        self.assertEqual(writes[0].args[1], '/nodes/proxmox6/qemu/220/config')
+        self.assertEqual(writes[0].args[2]['machine'], 'pc-q35-9.2+pve1')
+        self.assertIn('link_down=1', writes[0].args[2]['net0'])
 
     def test_ct_probe_uses_disconnected_approved_network_and_real_identities(self):
         api = Mock()
@@ -950,3 +1078,21 @@ class ArtifactTests(unittest.TestCase):
             self.assertEqual(artifact.read_bytes(), b'corrupted')
 
 if __name__ == '__main__': unittest.main()
+
+class CompactSnapshotProbeTests(unittest.TestCase):
+    def test_compact_snapshot_proof_uses_exact_journal_binding_before_carrier(self):
+        from crange_distribution import ProbeVerifier
+        verifier=ProbeVerifier.__new__(ProbeVerifier);verifier.bridge='crprobe1450';verifier.timeout=30
+        verifier.source={'identity_mode':'windows-scenario-snapshot-v1'}
+        verifier._check_guest=Mock(return_value={'passed':True,'identity_unique':True})
+        api=Mock();job='cache-'+'a'*32;api.record={'node':'proxmox5','probe_id':140,'job_id':job}
+        config={'tags':'crange-image;crange-cache-140','description':'CRANGE verification '+job,
+                'net0':'virtio=AA:BB:CC:DD:EE:FF,bridge=crprobe1450,link_down=1'}
+        api.request.side_effect=lambda method,path,fields=None:config if method=='GET' else 'UPID:test'
+        with patch('crange_distribution._require_probe_pool'),patch('crange_capture.private_bridge_request') as proof:
+            self.assertTrue(verifier(api,'proxmox5','qemu',140)['passed'])
+            proof.assert_called_once_with('proxmox5',vmid=140,marker='crange-cache-140',cache_job_id=job)
+        api.reset_mock();api.record['probe_id']=141
+        with patch('crange_distribution._require_probe_pool'),patch('crange_capture.private_bridge_request') as proof,self.assertRaises(DistributionError):
+            verifier(api,'proxmox5','qemu',140)
+        proof.assert_not_called();self.assertTrue(all(c.args[0]=='GET' for c in api.request.call_args_list))

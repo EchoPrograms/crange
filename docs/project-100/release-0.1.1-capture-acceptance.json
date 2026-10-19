@@ -1,0 +1,66 @@
+{
+  "release_id": "p100-0.1.1",
+  "integrity_sha256": "71c52f41e49e7ccdde49e43ffad300295511209f7cfe1d3a2b152bf8d184f1ea",
+  "boxes": 2,
+  "containers": 4,
+  "recipes": [
+    {
+      "kind": "business",
+      "source_sha256": "5fe9b5a80fd7f5ba8d6158ac4f4706ab5a89945a932207838973de3247f375a2",
+      "files": 13,
+      "archive_verified": true
+    },
+    {
+      "kind": "windows",
+      "source_sha256": "9f46306369781157ae4cc8e3f3e58fa36a1c1232eb6bc29e7fd55536849ede72",
+      "files": 2,
+      "archive_verified": true
+    }
+  ],
+  "staging_originals": [
+    {
+      "vmid": 124,
+      "node": "proxmox2",
+      "type": "lxc",
+      "status": "running",
+      "name": "p100t254-mhl-ci01"
+    },
+    {
+      "vmid": 125,
+      "node": "proxmox2",
+      "type": "lxc",
+      "status": "running",
+      "name": "p100t254-mhl-app01"
+    },
+    {
+      "vmid": 126,
+      "node": "proxmox2",
+      "type": "lxc",
+      "status": "running",
+      "name": "p100t254-mhl-bkp01"
+    },
+    {
+      "vmid": 127,
+      "node": "proxmox1",
+      "type": "lxc",
+      "status": "running",
+      "name": "p100t254-mhl-db01"
+    },
+    {
+      "vmid": 128,
+      "node": "proxmox1",
+      "type": "qemu",
+      "status": "running",
+      "name": "p100t254-mhl-dc01"
+    },
+    {
+      "vmid": 129,
+      "node": "proxmox1",
+      "type": "qemu",
+      "status": "running",
+      "name": "p100t254-mhl-file01"
+    }
+  ],
+  "capture_job": "d716569816bd4fb5a02772dcfcf43a17",
+  "test_prepare_job": "a3372f8b809248e49f2a5f456bd103be"
+}

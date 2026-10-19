@@ -99,7 +99,7 @@ variable "custom_networks" {
         net.network_id == floor(net.network_id) && net.network_id >= 1 && net.network_id <= 253 &&
         !contains([for team in var.team_ids : tonumber(team)], net.network_id) &&
         net.uplink_last_octet == floor(net.uplink_last_octet) && net.uplink_last_octet >= 2 && net.uplink_last_octet <= 100 &&
-        contains(["proxmox1", "proxmox2", "proxmox3", "proxmox4", "proxmox5", "proxmox6"], net.node_name)
+        contains(["auto", "proxmox1", "proxmox2", "proxmox3", "proxmox4", "proxmox5", "proxmox6"], net.node_name)
       ]) &&
       length(distinct([for net in values(var.custom_networks) : net.network_id])) == length(var.custom_networks) &&
       length(distinct([for net in values(var.custom_networks) : "${net.owner_team_id}.${net.uplink_last_octet}"])) == length(var.custom_networks)
@@ -190,7 +190,7 @@ variable "scenario_containers" {
       can(regex("^[a-z][a-z0-9-]{0,23}$", box.name)) &&
       box.cores >= 1 && box.cores <= 16 && box.memory_mb >= 512 && box.memory_mb <= 65536 &&
       contains(["ssh", "rdp"], box.guac_protocol) &&
-      contains(["proxmox1", "proxmox2", "proxmox3", "proxmox4", "proxmox5", "proxmox6"], box.node_name) &&
+      contains(["auto", "proxmox1", "proxmox2", "proxmox3", "proxmox4", "proxmox5", "proxmox6"], box.node_name) &&
       (box.network_key == "" || contains(keys(var.custom_networks), box.network_key))
     ])
     error_message = "Scenario CTs need a declared team or staging network, static IP .2-.100, safe name, approved node, 1-16 cores and 512-65536 MB."
@@ -487,6 +487,7 @@ module "scenario_box" {
 }
 
 module "scenario_container" {
+  ssh_public_key = local.ssh_public_key
   for_each = var.scenario_containers
   source   = "../../modules/scenario-container"
 

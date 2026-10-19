@@ -7,6 +7,18 @@ sys.path.insert(0,str(Path(__file__).resolve().parents[1]/'scripts'))
 import crange
 
 class CaptureApiTests(unittest.TestCase):
+    def test_windows_shutdown_uses_clean_api_without_linux_ssh_delay(self):
+        api=object.__new__(crange.ProxmoxAPI)
+        api.vm=Mock(return_value={'ostype':'win11'})
+        api.request=Mock(return_value='UPID:fixture')
+        api.task=Mock()
+        api.status=Mock(return_value='stopped')
+        with patch.object(crange.subprocess,'run') as ssh, patch.object(crange.time,'sleep') as sleep:
+            api.shutdown('proxmox1',128,'10.100.254.10')
+        ssh.assert_not_called();sleep.assert_not_called()
+        api.request.assert_called_once_with('POST','/nodes/proxmox1/qemu/128/status/shutdown',
+                                             {'timeout':90,'forceStop':0})
+
     def test_null_ct_template_response_waits_for_actual_conversion(self):
         api=object.__new__(crange.ProxmoxAPI)
         api.request=Mock(return_value=None)

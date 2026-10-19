@@ -1,0 +1,173 @@
+{
+  "project": 100,
+  "service_scope_change": {
+    "ordinary_network_100_rejected": true,
+    "verified_test_scope_allowed": true,
+    "changed_applied_identity_rejected": true,
+    "unit_tests": 21,
+    "broader_regression_tests": 52
+  },
+  "business_configure_job": "eb9c8e4c10914277abf9a2f202b6d465",
+  "business_configure_status": "succeeded",
+  "ci_edit_job": "8e54c52a7fcc4214ab2bdd9a2de4486c",
+  "ci_edit_status": "succeeded",
+  "ci_health_added": {
+    "type": "http",
+    "port": 80,
+    "path": "/artifacts/warehouse-release.env",
+    "status": 200,
+    "timeout": 10
+  },
+  "obsolete_test_cleanup_job": "94646b7675774acbb434fdf87f578ee0",
+  "obsolete_test_cleanup_status": "succeeded",
+  "review_job": "635377e3a4954e3e8de9a9e3f994e0d1",
+  "review_plan": "784d3a9dc93ed0f0fef807f390252f60",
+  "reviewed_changes": [
+    {
+      "address": "proxmox_sdn_applier.apply",
+      "actions": [
+        "delete",
+        "create"
+      ]
+    },
+    {
+      "address": "proxmox_sdn_vnet.custom[\"t7b3b22060c-test-primary\"]",
+      "actions": [
+        "delete"
+      ]
+    },
+    {
+      "address": "terraform_data.sdn_revision",
+      "actions": [
+        "update"
+      ]
+    },
+    {
+      "address": "module.custom_router[\"t7b3b22060c-test-primary\"].proxmox_virtual_environment_container.router",
+      "actions": [
+        "delete"
+      ]
+    }
+  ],
+  "existing_guest_placements_retained": true,
+  "cleanup_apply_job": "ed8f52ccf40e4613bbcfe7775908a7a3",
+  "cleanup_apply_status": "succeeded",
+  "capture_0_1_2_status": "succeeded",
+  "cache_restore": {
+    "job": "cache-92286976fec94a8da363baebe8b5adaf",
+    "node": "proxmox5",
+    "vmid": 162,
+    "provider_restore_status": "stopped",
+    "provider_restore_exitstatus": "OK",
+    "cache_state": "ready",
+    "reservation_retained": false,
+    "duplicate_restore_submitted": false,
+    "recovery_job": "609d1dcbced24ccbb72ec633535ef1a3"
+  },
+  "cleanup_observation": {
+    "obsolete_router_160_absent": true,
+    "test_cohort_record_absent": true,
+    "test_network_declaration_absent": true,
+    "staging_originals": [
+      {
+        "vmid": 124,
+        "node": "proxmox2",
+        "status": "running",
+        "name": "p100t254-mhl-ci01"
+      },
+      {
+        "vmid": 125,
+        "node": "proxmox2",
+        "status": "running",
+        "name": "p100t254-mhl-app01"
+      },
+      {
+        "vmid": 126,
+        "node": "proxmox2",
+        "status": "running",
+        "name": "p100t254-mhl-bkp01"
+      },
+      {
+        "vmid": 127,
+        "node": "proxmox1",
+        "status": "running",
+        "name": "p100t254-mhl-db01"
+      },
+      {
+        "vmid": 128,
+        "node": "proxmox1",
+        "status": "running",
+        "name": "p100t254-mhl-dc01"
+      },
+      {
+        "vmid": 129,
+        "node": "proxmox1",
+        "status": "running",
+        "name": "p100t254-mhl-file01"
+      }
+    ],
+    "all_staging_originals_running": true,
+    "ci_health_checks": [
+      {
+        "timeout": 5,
+        "type": "ping"
+      },
+      {
+        "path": "/",
+        "port": 80,
+        "status": 200,
+        "timeout": 10,
+        "type": "http"
+      },
+      {
+        "path": "/artifacts/warehouse-release.env",
+        "port": 80,
+        "status": 200,
+        "timeout": 10,
+        "type": "http"
+      }
+    ]
+  },
+  "capture_0_1_2_job": "a096e2912cca4949bd13b794c8852f07",
+  "capture_failure": {
+    "cause": "central archive physical headroom",
+    "available_gib": 97.6,
+    "required_capture_gib": 70.4,
+    "required_reserve_gib": 39.3,
+    "source_restarted": true
+  },
+  "capture_retry_job": "552a9bd379524bf183fd4d1130b01c65",
+  "capture_retry_status": "failed",
+  "archive_growth": {
+    "dashboard_job": "7215e99442154084af7cc0ec95985ba4",
+    "before_gib": 400,
+    "after_gib": 464,
+    "status": "succeeded",
+    "guests_rebooted": false,
+    "nfs_restarted": false
+  },
+  "capture_retry_failure": {
+    "provider_node": "proxmox6",
+    "owned_template_vmid": 160,
+    "cause": "template export failed: readonly thin-LVM IDE/SATA backup regression in qemu-server 9.0.16",
+    "staging_source_restart_reported": true,
+    "next_action": "prepare reviewed node backup support, then reconcile and resume the existing capture checkpoints"
+  },
+  "template_backup_preparation": {
+    "dashboard_job": "fdd72f01edde47ad81af6879a011e19a",
+    "status": "succeeded",
+    "node": "proxmox6",
+    "before_version": "9.0.16",
+    "version": "9.0.18",
+    "changed_packages": [
+      "qemu-server"
+    ],
+    "guests_rebooted": false,
+    "network_relay_unchanged": true
+  },
+  "recovery_capture_job": "a096e2912cca4949bd13b794c8852f07",
+  "recovery_capture_status": "running",
+  "capture_integrity_sha256": "c6ed914f71ead90a6bfa63419edb8cef8710d9bd519fa1cd5cef5fab53dadfcd",
+  "fresh_test_prepare_status": "succeeded",
+  "fresh_test_acceptance": "pending reviewed apply and checks"
+}

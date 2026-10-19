@@ -27,6 +27,8 @@ class ClusterTests(unittest.TestCase):
             'guests': {'200': {'node_name': 'proxmox4', 'kind': 'qemu', 'name': 'base', 'status': 'stopped',
                 'template': True, 'memory_mb': 512, 'cpu_cores': 1, 'disks': {'local-lvm': 8},
                 'token': 'never-publish-this', 'tags': 'private'}}}
+        for vmid,status in [('201','stopped'),('202','running'),('203','unknown'),('204','paused')]:
+            raw['guests'][vmid]={**raw['guests']['200'],'name':'workload-'+vmid,'template':False,'status':status}
         policy = {'revision': 'v1', 'enabled': True, 'allowed_storages': ['local-lvm']}
         catalog = {'images': {'base-v1': {'kind': 'vm', 'disk_gb': 8,
             'approved_projects': [3], 'artifact': {'complete_capture': True},
@@ -49,6 +51,12 @@ class ClusterTests(unittest.TestCase):
             self.assertEqual(node['guests'][0]['memory_mb'], 0)
             self.assertEqual(node['guests'][0]['cpu_cores'], 0)
             self.assertEqual(node['guests'][0]['configured_memory_mb'], 512)
+            rows={row['vmid']:row for row in node['guests']}
+            self.assertEqual((rows[201]['memory_mb'],rows[201]['cpu_cores']),(0,0))
+            self.assertEqual(rows[201]['configured_memory_mb'],512)
+            self.assertEqual(rows[201]['datastores'],{'local-lvm':8})
+            for vmid in (202,203,204):
+                self.assertEqual((rows[vmid]['memory_mb'],rows[vmid]['cpu_cores']),(512,1))
             self.assertEqual(result['images'][0]['locations'][0]['replicas'][0]['template_id'], 200)
             self.assertTrue(result['images'][0]['locations'][0]['replicas'][0]['observed'])
             self.assertEqual(result['images'][0]['approved_projects'], [3])
@@ -73,7 +81,7 @@ class ClusterTests(unittest.TestCase):
             'artifact_sha256': digest, 'approved_projects': ['*'], 'replicas': [{
                 'node': 'proxmox1', 'datastore_id': 'crange-library', 'template_file_id': archive,
                 'state': 'ready', 'artifact_sha256': digest}]}
-        status = {'updated_at': '2026-10-08T00:00:00Z', 'files': [{
+        status = {'updated_at': cluster.datetime.now(cluster.timezone.utc).isoformat(), 'files': [{
             'content': 'vztmpl', 'name': 'debian-test.tar.zst', 'size': 123,
             'sha256': digest, 'copies': [{'storage': 'crange-library', 'size': 123, 'sha256': digest}]}]}
         api = Mock()

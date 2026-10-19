@@ -1,0 +1,185 @@
+{
+  "actual_linked_roots_verified": 30,
+  "roots": [
+    {
+      "guest_id": 190,
+      "vg": "pve",
+      "volume": "vm-190-disk-1",
+      "origin": "base-186-disk-1"
+    },
+    {
+      "guest_id": 191,
+      "vg": "local-hdd",
+      "volume": "vm-191-disk-1",
+      "origin": "base-185-disk-1"
+    },
+    {
+      "guest_id": 200,
+      "vg": "local-hdd",
+      "volume": "vm-200-disk-0",
+      "origin": "base-187-disk-0"
+    },
+    {
+      "guest_id": 216,
+      "vg": "local-hdd",
+      "volume": "vm-216-disk-0",
+      "origin": "base-188-disk-0"
+    },
+    {
+      "guest_id": 206,
+      "vg": "local-hdd",
+      "volume": "vm-206-disk-0",
+      "origin": "base-184-disk-0"
+    },
+    {
+      "guest_id": 208,
+      "vg": "local-hdd",
+      "volume": "vm-208-disk-0",
+      "origin": "base-177-disk-0"
+    },
+    {
+      "guest_id": 198,
+      "vg": "pve",
+      "volume": "vm-198-disk-1",
+      "origin": "base-186-disk-1"
+    },
+    {
+      "guest_id": 196,
+      "vg": "local-hdd",
+      "volume": "vm-196-disk-1",
+      "origin": "base-185-disk-1"
+    },
+    {
+      "guest_id": 204,
+      "vg": "local-hdd",
+      "volume": "vm-204-disk-0",
+      "origin": "base-187-disk-0"
+    },
+    {
+      "guest_id": 212,
+      "vg": "local-hdd",
+      "volume": "vm-212-disk-0",
+      "origin": "base-188-disk-0"
+    },
+    {
+      "guest_id": 210,
+      "vg": "local-hdd",
+      "volume": "vm-210-disk-0",
+      "origin": "base-184-disk-0"
+    },
+    {
+      "guest_id": 213,
+      "vg": "local-hdd",
+      "volume": "vm-213-disk-0",
+      "origin": "base-177-disk-0"
+    },
+    {
+      "guest_id": 197,
+      "vg": "pve",
+      "volume": "vm-197-disk-1",
+      "origin": "base-186-disk-1"
+    },
+    {
+      "guest_id": 192,
+      "vg": "local-hdd",
+      "volume": "vm-192-disk-1",
+      "origin": "base-185-disk-1"
+    },
+    {
+      "guest_id": 207,
+      "vg": "local-hdd",
+      "volume": "vm-207-disk-0",
+      "origin": "base-187-disk-0"
+    },
+    {
+      "guest_id": 215,
+      "vg": "local-hdd",
+      "volume": "vm-215-disk-0",
+      "origin": "base-188-disk-0"
+    },
+    {
+      "guest_id": 203,
+      "vg": "local-hdd",
+      "volume": "vm-203-disk-0",
+      "origin": "base-184-disk-0"
+    },
+    {
+      "guest_id": 205,
+      "vg": "local-hdd",
+      "volume": "vm-205-disk-0",
+      "origin": "base-177-disk-0"
+    },
+    {
+      "guest_id": 189,
+      "vg": "pve",
+      "volume": "vm-189-disk-1",
+      "origin": "base-186-disk-1"
+    },
+    {
+      "guest_id": 194,
+      "vg": "local-hdd",
+      "volume": "vm-194-disk-1",
+      "origin": "base-185-disk-1"
+    },
+    {
+      "guest_id": 214,
+      "vg": "local-hdd",
+      "volume": "vm-214-disk-0",
+      "origin": "base-187-disk-0"
+    },
+    {
+      "guest_id": 201,
+      "vg": "local-hdd",
+      "volume": "vm-201-disk-0",
+      "origin": "base-188-disk-0"
+    },
+    {
+      "guest_id": 199,
+      "vg": "local-hdd",
+      "volume": "vm-199-disk-0",
+      "origin": "base-184-disk-0"
+    },
+    {
+      "guest_id": 209,
+      "vg": "local-hdd",
+      "volume": "vm-209-disk-0",
+      "origin": "base-177-disk-0"
+    },
+    {
+      "guest_id": 195,
+      "vg": "pve",
+      "volume": "vm-195-disk-1",
+      "origin": "base-186-disk-1"
+    },
+    {
+      "guest_id": 193,
+      "vg": "local-hdd",
+      "volume": "vm-193-disk-1",
+      "origin": "base-185-disk-1"
+    },
+    {
+      "guest_id": 218,
+      "vg": "local-hdd",
+      "volume": "vm-218-disk-0",
+      "origin": "base-187-disk-0"
+    },
+    {
+      "guest_id": 211,
+      "vg": "local-hdd",
+      "volume": "vm-211-disk-0",
+      "origin": "base-188-disk-0"
+    },
+    {
+      "guest_id": 217,
+      "vg": "local-hdd",
+      "volume": "vm-217-disk-0",
+      "origin": "base-184-disk-0"
+    },
+    {
+      "guest_id": 202,
+      "vg": "local-hdd",
+      "volume": "vm-202-disk-0",
+      "origin": "base-177-disk-0"
+    }
+  ]
+}

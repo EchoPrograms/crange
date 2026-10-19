@@ -1,0 +1,64 @@
+{
+  "project": 100,
+  "team": 1,
+  "targets": [
+    {
+      "resource": "module.scenario_box[\"r0.1.2-mhl-dc01-t001\"].proxmox_virtual_environment_vm.scenario",
+      "id": 190,
+      "node": "proxmox6",
+      "kind": "qemu",
+      "name": "p100t001-r83c116b4-mhl-dc01",
+      "bridge": "p100t001",
+      "project": 100
+    },
+    {
+      "resource": "module.scenario_box[\"r0.1.2-mhl-file01-t001\"].proxmox_virtual_environment_vm.scenario",
+      "id": 191,
+      "node": "proxmox6",
+      "kind": "qemu",
+      "name": "p100t001-r02cdeeb6-mhl-file01",
+      "bridge": "p100t001",
+      "project": 100
+    },
+    {
+      "resource": "module.scenario_container[\"r0.1.2-mhl-app01-t001\"].proxmox_virtual_environment_container.scenario",
+      "id": 200,
+      "node": "proxmox6",
+      "kind": "lxc",
+      "name": "p100t001-r54a0115f-mhl-app01",
+      "bridge": "p100t001",
+      "project": 100
+    },
+    {
+      "resource": "module.scenario_container[\"r0.1.2-mhl-ci01-t001\"].proxmox_virtual_environment_container.scenario",
+      "id": 206,
+      "node": "proxmox6",
+      "kind": "lxc",
+      "name": "p100t001-r21684993-mhl-ci01",
+      "bridge": "p100t001",
+      "project": 100
+    },
+    {
+      "resource": "module.scenario_container[\"r0.1.2-mhl-db01-t001\"].proxmox_virtual_environment_container.scenario",
+      "id": 208,
+      "node": "proxmox6",
+      "kind": "lxc",
+      "name": "p100t001-ra174d627-mhl-db01",
+      "bridge": "p100t001",
+      "project": 100
+    },
+    {
+      "resource": "module.scenario_container[\"r0.1.2-mhl-bkp01-t001\"].proxmox_virtual_environment_container.scenario",
+      "id": 216,
+      "node": "proxmox6",
+      "kind": "lxc",
+      "name": "p100t001-r5abcdac8-mhl-bkp01",
+      "bridge": "p100t001",
+      "project": 100
+    }
+  ],
+  "current_provider_identity_preflight_passed": true,
+  "plan_basis": "simulated deletion entries from actual applied Terraform resources",
+  "provider_mutations_submitted": false,
+  "live_upgrade_not_yet_accepted": true
+}

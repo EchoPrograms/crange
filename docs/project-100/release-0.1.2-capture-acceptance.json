@@ -1,0 +1,238 @@
+{
+  "observed_at": 1792241991.2266386,
+  "release_id": "p100-0.1.2",
+  "integrity_sha256": "c6ed914f71ead90a6bfa63419edb8cef8710d9bd519fa1cd5cef5fab53dadfcd",
+  "boxes": 2,
+  "containers": 4,
+  "test_cohort": {
+    "version": "0.1.2",
+    "release_id": "p100-0.1.2",
+    "networks": {
+      "t549d312455-test-primary": {
+        "owner_team_id": "254",
+        "network_id": 100,
+        "uplink_last_octet": 2,
+        "node_name": "auto",
+        "cores": 1,
+        "memory_mb": 512,
+        "release_id": "p100-0.1.2",
+        "release_scope": "test",
+        "release_source_key": "test-primary"
+      }
+    },
+    "boxes": {
+      "test0.1.2-mhl-dc01-t254": {
+        "address": "10.100.100.10",
+        "health_checks": [
+          {
+            "timeout": 5,
+            "type": "ping"
+          },
+          {
+            "port": 53,
+            "timeout": 10,
+            "type": "tcp"
+          },
+          {
+            "port": 389,
+            "timeout": 10,
+            "type": "tcp"
+          },
+          {
+            "port": 445,
+            "timeout": 10,
+            "type": "tcp"
+          }
+        ]
+      },
+      "test0.1.2-mhl-file01-t254": {
+        "address": "10.100.100.20",
+        "health_checks": [
+          {
+            "timeout": 5,
+            "type": "ping"
+          },
+          {
+            "port": 445,
+            "timeout": 10,
+            "type": "tcp"
+          },
+          {
+            "path": "/",
+            "port": 80,
+            "status": 200,
+            "timeout": 10,
+            "type": "http"
+          }
+        ]
+      }
+    },
+    "containers": {
+      "test0.1.2-mhl-app01-t254": {
+        "address": "10.100.100.40",
+        "health_checks": [
+          {
+            "timeout": 5,
+            "type": "ping"
+          },
+          {
+            "path": "/healthz",
+            "port": 8080,
+            "status": 200,
+            "timeout": 10,
+            "type": "http"
+          }
+        ]
+      },
+      "test0.1.2-mhl-bkp01-t254": {
+        "address": "10.100.100.60",
+        "health_checks": [
+          {
+            "timeout": 5,
+            "type": "ping"
+          }
+        ]
+      },
+      "test0.1.2-mhl-ci01-t254": {
+        "address": "10.100.100.50",
+        "health_checks": [
+          {
+            "timeout": 5,
+            "type": "ping"
+          },
+          {
+            "path": "/",
+            "port": 80,
+            "status": 200,
+            "timeout": 10,
+            "type": "http"
+          },
+          {
+            "path": "/artifacts/warehouse-release.env",
+            "port": 80,
+            "status": 200,
+            "timeout": 10,
+            "type": "http"
+          }
+        ]
+      },
+      "test0.1.2-mhl-db01-t254": {
+        "address": "10.100.100.30",
+        "health_checks": [
+          {
+            "timeout": 5,
+            "type": "ping"
+          },
+          {
+            "port": 5432,
+            "timeout": 10,
+            "type": "tcp"
+          }
+        ]
+      }
+    }
+  },
+  "staging_originals": [
+    {
+      "vmid": 124,
+      "node": "proxmox2",
+      "type": "lxc",
+      "status": "running",
+      "name": "p100t254-mhl-ci01"
+    },
+    {
+      "vmid": 125,
+      "node": "proxmox2",
+      "type": "lxc",
+      "status": "running",
+      "name": "p100t254-mhl-app01"
+    },
+    {
+      "vmid": 126,
+      "node": "proxmox2",
+      "type": "lxc",
+      "status": "running",
+      "name": "p100t254-mhl-bkp01"
+    },
+    {
+      "vmid": 127,
+      "node": "proxmox1",
+      "type": "lxc",
+      "status": "running",
+      "name": "p100t254-mhl-db01"
+    },
+    {
+      "vmid": 128,
+      "node": "proxmox1",
+      "type": "qemu",
+      "status": "running",
+      "name": "p100t254-mhl-dc01"
+    },
+    {
+      "vmid": 129,
+      "node": "proxmox1",
+      "type": "qemu",
+      "status": "running",
+      "name": "p100t254-mhl-file01"
+    }
+  ],
+  "capture_job": "a096e2912cca4949bd13b794c8852f07",
+  "test_prepare_job": "7b77d103fc0248f3b4644e8619b0b1fb",
+  "staging_review_job": "4c93e63692124615b1dcf92c2795080e",
+  "fresh_test_acceptance": "pending; third acceptance attempt running",
+  "foundation_review_job": "8dc016424e1449b3b88b10ff84f4b934",
+  "foundation_plan": "07aae37d33a4cf6f8abcef3721e9ca69",
+  "foundation_apply_job": "fda540c4122b4eceb54a5376ad9b8203",
+  "foundation_status": "succeeded",
+  "network_check_job": "a39605a9e41d4480a83a8067cc9b3783",
+  "network_check_status": "succeeded; accepted_cleaned and exact P1 scope published",
+  "guest_staging_job": "627bb7431aac4962aa9c0d75cf9f6425",
+  "guest_staging_status": "succeeded: exactly six creates; zero cache fills",
+  "boot_order_permutations": [
+    [
+      "mhl-dc01",
+      "mhl-file01",
+      "mhl-db01",
+      "mhl-app01",
+      "mhl-ci01",
+      "mhl-bkp01"
+    ],
+    [
+      "mhl-bkp01",
+      "mhl-ci01",
+      "mhl-app01",
+      "mhl-db01",
+      "mhl-file01",
+      "mhl-dc01"
+    ]
+  ],
+  "worker_timeout_seconds": 43200,
+  "worker_refreshed_while_idle": true,
+  "cache_probe_recovery_job": "daacb1072e464bb497ba543a369c9c94",
+  "cache_probe_recovery_status": "succeeded: DC identity/generation accepted; probe182 deleted; reservation released and archive pin removed",
+  "all_six_local_caches_verified": true,
+  "expired_guest_review_retired": "59a603af91b3efa2c7a12ff7f5b98550",
+  "guest_plan_id": "80cc7d6e19a2dc5e6a57e2d9d56bba71",
+  "guest_apply_job": "9ef82c396c894cf4b35b4b08d46bd59a",
+  "guest_apply_status": "succeeded",
+  "release_test_job": "6d2f8aaf4f6f4f258828963089e738ef",
+  "release_test_attempts": [
+    {
+      "job": "bda8b4b9830e4db18db18b76517ad46d",
+      "status": "failed",
+      "reason": "qualified DC principal supplied to archived local-account task"
+    },
+    {
+      "job": "05ab81b98cf0400f869b86ab1c07d7ab",
+      "status": "failed",
+      "fix": "worker supplies per-host bare local account names; qualified WinRM principals preserved",
+      "reason": "restored PostgreSQL service still bound to its source LAN IP"
+    },
+    {
+      "job": "6d2f8aaf4f6f4f258828963089e738ef",
+      "status": "running",
+      "fix": "fixed applied-DB service rebind before unchanged archived Linux recipe"
+    }
+  ],
+  "release_test_status": "running after fixed PostgreSQL rebind preflight; Windows recipe replay accepted on prior attempt, full boot tests still pending"
+}

@@ -51,6 +51,16 @@ class CompatTests(unittest.TestCase):
                 with patch.object(compat.os, 'geteuid', return_value=5678):
                     with self.assertRaises(compat.CompatError): compat.load_config(path, owner_uid=1234)
 
+    def test_sixth_node_requires_measured_schema_before_rewriting(self):
+        config = self.config()
+        body = b'net0=name%3Deth0%2Chost-managed%3D0'
+        path = '/api2/json/nodes/proxmox6/lxc'
+        self.assertEqual(compat.rewrite('POST', path, 'application/x-www-form-urlencoded', body, config), (body, None))
+        config['nodes']['proxmox6'] = dict(config['nodes']['proxmox2'])
+        rewritten, node = compat.rewrite('POST', path, 'application/x-www-form-urlencoded', body, config)
+        self.assertEqual(node, 'proxmox6')
+        self.assertNotIn('host-managed', parse_qs(rewritten.decode())['net0'][0])
+
     def test_only_exact_false_on_measured_old_ct_config_is_omitted(self):
         body = urlencode({'net0': 'name=eth0,bridge=p003t254,host-managed=0,firewall=1,mtu=1450',
                           'description': 'host-managed=0'}).encode()
@@ -64,6 +74,26 @@ class CompatTests(unittest.TestCase):
                      '/api2/json/nodes/proxmox2/qemu/8804/config',
                      '/api2/json/nodes/proxmox2/lxc/8804/clone'):
             self.assertEqual(compat.rewrite('PUT', path, 'application/x-www-form-urlencoded', body, self.config()), (body, None))
+
+    def test_measured_p3_p5_false_property_is_stripped_only_on_ct_writes(self):
+        config = self.config()
+        for node in ('proxmox3', 'proxmox5'):
+            config['nodes'][node] = {'version': '9.0.3', 'host_managed_supported': False,
+                                     'schema_sha256': 'b' * 64, 'job_id': f'acceptance-{node}'}
+            body = urlencode({'net0': 'name=eth0,bridge=p100t254,host-managed=false,firewall=1,mtu=1450',
+                              'description': 'host-managed=false'}).encode()
+            rewritten, target = compat.rewrite('POST', f'/api2/json/nodes/{node}/lxc',
+                                                'application/x-www-form-urlencoded', body, config)
+            self.assertEqual(target, node)
+            parsed = parse_qs(rewritten.decode())
+            self.assertEqual(parsed['net0'], ['name=eth0,bridge=p100t254,firewall=1,mtu=1450'])
+            self.assertEqual(parsed['description'], ['host-managed=false'])
+            for method, path in (
+                ('GET', f'/api2/json/nodes/{node}/lxc/3153/config'),
+                ('POST', f'/api2/json/nodes/{node}/qemu'),
+            ):
+                self.assertEqual(compat.rewrite(method, path, 'application/x-www-form-urlencoded',
+                                                body, config), (body, None))
 
     def test_true_host_managed_is_preserved_and_json_is_refused(self):
         body = urlencode({'net0': 'name=eth0,host-managed=1'}).encode()

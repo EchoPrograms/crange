@@ -16,6 +16,50 @@ _spec.loader.exec_module(builder)
 
 
 class ArchiveFallbackTests(unittest.TestCase):
+    def test_new_vm_uses_capability_checked_portable_machine_in_reviewed_overrides(self):
+        row = {'resource_key': 'vm:new', 'kind': 'vm', 'box': {},
+               'reference': {'profile': {'machine': 'pc-q35-10.1'}}}
+        prepared = {'placements': [{'resource_key': 'vm:new', 'resolved': {
+            'node_name': 'proxmox6', 'datastore_id': 'local-hdd', 'template_id': 219}}]}
+        api = Mock(); api.request.return_value = [{'id': 'pc-q35-9.2+pve1', 'type': 'q35'}]
+        with patch.object(scheduling, 'declarations', return_value=[row]):
+            result = templates.media_tf_overrides(Path('/unused'), {}, prepared, api)
+        self.assertEqual(result['resolved_placements']['vm:new']['machine'], 'pc-q35-9.2+pve1')
+        api.request.assert_called_once_with('GET', '/nodes/proxmox6/capabilities/qemu/machines')
+
+    def test_existing_vm_machine_is_preserved_and_capabilities_are_not_requeried(self):
+        row = {'resource_key': 'vm:live', 'kind': 'vm', 'box': {}, 'reference': {}}
+        live = {'node_name': 'proxmox1', 'machine': 'pc-q35-10.1'}
+        frozen = scheduling.freeze(row, live)
+        prepared = {'placements': [frozen]}; api = Mock()
+        with patch.object(scheduling, 'declarations', return_value=[row]):
+            result = templates.media_tf_overrides(Path('/unused'), {}, prepared, api)
+        self.assertEqual(result['resolved_placements']['vm:live']['machine'], 'pc-q35-10.1')
+        api.request.assert_not_called()
+
+    def test_live_vm_resize_never_normalizes_its_machine(self):
+        row = {'resource_key': 'vm:live', 'kind': 'vm', 'box': {},
+               'reference': {'profile': {'machine': 'pc-q35-10.1'}}}
+        prepared = {'placements': [{'resource_key': 'vm:live', 'resolved': {
+            'node_name': 'proxmox6', 'datastore_id': 'local-hdd', 'template_id': 219}}]}
+        api = Mock()
+        with patch.object(scheduling, 'declarations', return_value=[row]), \
+             patch.object(scheduling, 'applied_resources', return_value={
+                 'vm:live': {'machine': 'pc-q35-10.1', 'node_name': 'proxmox6'}}):
+            result = templates.media_tf_overrides(Path('/unused'), {}, prepared, api)
+        self.assertEqual(result['resolved_placements']['vm:live']['machine'], 'pc-q35-10.1')
+        api.request.assert_not_called()
+
+    def test_missing_portable_capability_refuses_new_vm_plan(self):
+        row = {'resource_key': 'vm:new', 'kind': 'vm', 'box': {},
+               'reference': {'profile': {'machine': 'pc-q35-10.1'}}}
+        prepared = {'placements': [{'resource_key': 'vm:new', 'resolved': {
+            'node_name': 'proxmox6', 'datastore_id': 'local-hdd', 'template_id': 219}}]}
+        api = Mock(); api.request.return_value = []
+        with patch.object(scheduling, 'declarations', return_value=[row]), self.assertRaises(ValueError):
+            templates.media_tf_overrides(Path('/unused'), {}, prepared, api)
+        self.assertTrue(all(c.args[0] == 'GET' for c in api.request.call_args_list))
+
     def test_fresh_router_uses_resolved_default_archive(self):
         router = {'resource_key': 'router:project', 'kind': 'container',
                   'box': {'node_name': 'proxmox4'}, 'reference': {'image_id': 'debian-12-router-v1'}}

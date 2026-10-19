@@ -72,6 +72,18 @@ class ProjectRoleAPITests(unittest.TestCase):
         self.assertEqual(status, 200)
         self.csrf = body['csrf']
 
+    def test_dashboard_login_canonicalizes_mixed_case_created_username(self):
+        password = 'a distinct long test password'
+        self.auth.set_password('CIG-Lead-Test', password, projects=['100'],
+                               role='manager', create_only=True)
+        for typed_name in ('CIG-Lead-Test', 'cig-lead-test'):
+            status, body = self.request('/api/login', {'username': typed_name, 'password': password})
+            self.assertEqual(status, 200)
+            self.csrf = body['csrf']
+            status, session = self.request('/api/session')
+            self.assertEqual(status, 200)
+            self.assertEqual(session['username'], 'cig-lead-test')
+
     def test_admin_cluster_reads_cached_snapshot_and_queues_fixed_refresh(self):
         self.login('platform-admin')
         status, snapshot = self.request('/api/cluster')
@@ -89,7 +101,7 @@ class ProjectRoleAPITests(unittest.TestCase):
                                            {'project_id': 4, 'participant': True, 'display_name': 'Project 4'}])
         for path in ('/api/jobs', '/api/users', '/api/audit', '/api/guac-users?project=3','/api/templates','/api/cluster'):
             self.assertEqual(self.request(path)[0], 403)
-        for operation in ('plan', 'configure-team', 'guac-apply', 'project-init','template-create','template-publish','template-upload'):
+        for operation in ('plan', 'configure-team', 'guac-apply', 'project-init','template-create','template-publish','template-upload','template-memory-reserve-set','network-verify'):
             self.assertEqual(self.request('/api/jobs', {'project': 3, 'operation': operation})[0], 403)
         for action in ('set-role', 'set-connections', 'set-enabled'):
             self.assertEqual(self.request('/api/users', {'action': action, 'username': 'participant',
@@ -124,6 +136,53 @@ class ProjectRoleAPITests(unittest.TestCase):
         self.assertEqual(job['status'], 'failed')
         self.assertIn('access was revoked', job['output'])
 
+    def test_manager_can_queue_only_a_declared_project_network_verification(self):
+        config = {'project_id': 3, 'team_ids': ['1'], 'jump_boxes': {},
+                  'scenario_boxes': {}, 'scenario_containers': {},
+                  'custom_networks': {'test': {'owner_team_id':'254','network_id':100,'uplink_last_octet':2}}}
+        (Path(self.tmp.name) / 'environments/project-003/crange.auto.tfvars.json').write_text(json.dumps(config))
+        self.login('manager')
+        request = {'project': 3, 'operation': 'network-verify',
+                   'options': {'node': 'proxmox2', 'network': 'p003t001'}}
+        status, body = self.request('/api/jobs', request)
+        self.assertEqual(status, 202)
+        self.assertEqual(self.request('/api/jobs', {**request, 'options': {**request['options'], 'network': 'p003t002'}})[0], 400)
+        self.assertEqual(self.request('/api/jobs', {**request, 'options': {**request['options'], 'network': 'p003c100'}})[0], 202)
+        self.assertEqual(self.request('/api/jobs', {**request, 'options': {**request['options'], 'network': 'p003c101'}})[0], 400)
+        self.assertEqual(self.request('/api/jobs', {**request, 'project': 4})[0], 403)
+        self.assertTrue(body['job_id'])
+
+    def test_admin_publication_derives_project_from_only_completed_source_job(self):
+        store=JobStore(Path(self.tmp.name)/'jobs.sqlite3')
+        source=store.submit('manager',3,'network-verify',{'node':'proxmox2','network':'p003t001'})
+        with store.connect() as db:db.execute("UPDATE jobs SET status='succeeded' WHERE id=?",(source,))
+        request={'action':'publish-network','source_job_id':source,'project':240}
+        self.login('manager');self.assertEqual(self.request('/api/jobs',request)[0],403)
+        self.login('platform-admin');status,response=self.request('/api/jobs',request)
+        self.assertEqual(status,202)
+        queued=store.get(response['job_id'],[],admin=True)
+        self.assertEqual(queued['operation'],'network-publish')
+        self.assertEqual(queued['project'],3)
+        with store.connect() as db:
+            options=json.loads(db.execute('SELECT options FROM jobs WHERE id=?',(response['job_id'],)).fetchone()[0])
+        self.assertEqual(options,{'source_job_id':source})
+        self.assertEqual(self.request('/api/jobs',{'action':'publish-network','source_job_id':'../bundle'})[0],400)
+
+    def test_only_admin_can_queue_fixed_network_reconciliation(self):
+        store=JobStore(Path(self.tmp.name)/'jobs.sqlite3')
+        source=store.submit('manager',3,'network-verify',
+                            {'node':'proxmox2','network':'p003t001'})
+        with store.connect() as db:
+            db.execute("UPDATE jobs SET status='reconcile-required' WHERE id=?",(source,))
+        self.login('manager')
+        request={'action':'reconcile-network','source_job_id':source}
+        self.assertEqual(self.request('/api/jobs',request)[0],403)
+        self.login('platform-admin')
+        status,response=self.request('/api/jobs',request)
+        self.assertEqual(status,202)
+        queued=store.get(response['job_id'],[],admin=True)
+        self.assertEqual(queued['operation'],'network-reconcile')
+
     def test_admin_can_promote_but_manager_cannot_promote_itself(self):
         self.login('platform-admin')
         self.assertEqual(self.request('/api/users', {'action': 'set-role', 'username': 'participant',
@@ -132,6 +191,27 @@ class ProjectRoleAPITests(unittest.TestCase):
         self.assertEqual(self.request('/api/users', {'action': 'set-role', 'username': 'manager',
                                                    'project': 4, 'role': 'manager'})[0], 403)
 
+    def test_admin_user_project_access_rejects_invalid_ids_and_can_delete_test_user(self):
+        self.login('platform-admin')
+        for project_value in ([None], [float('nan')], ['3'], [True], [0], [60], [3, 3]):
+            status, body = self.request('/api/users', {'action': 'create', 'username': 'badaccess',
+                'password': 'a long role test password', 'projects': project_value, 'role': 'participant'})
+            self.assertEqual(status, 400, body)
+            self.assertNotIn('badaccess', [item['username'] for item in self.auth.list_users()])
+        status, body = self.request('/api/users', {'action': 'create', 'username': 'CIG-Short',
+            'password': 'short123', 'projects': [100], 'role': 'manager', 'admin': False})
+        self.assertEqual(status, 400)
+        self.assertIn('12–1024 characters', body['error'])
+        status, _ = self.request('/api/users', {'action': 'create', 'username': 'CIG-Lead',
+            'password': 'a long role test password', 'projects': [100], 'role': 'manager', 'admin': False})
+        self.assertEqual(status, 200)
+        record = next(item for item in self.auth.list_users() if item['username'] == 'cig-lead')
+        self.assertEqual(record['projects'], ['100'])
+        self.assertEqual(record['roles']['100'], 'manager')
+        status, _ = self.request('/api/users', {'action': 'delete', 'username': 'cig-lead'})
+        self.assertEqual(status, 200)
+        self.assertNotIn('cig-lead', [item['username'] for item in self.auth.list_users()])
+
     def test_manager_directory_omits_other_project_assignments(self):
         self.login('manager')
         status, data = self.request('/api/users')
@@ -139,3 +219,49 @@ class ProjectRoleAPITests(unittest.TestCase):
         for user in data['users']:
             self.assertNotIn('4', user['projects'])
             self.assertNotIn('4', user['roles'])
+
+    def test_local_font_and_static_allowlist(self):
+        for font in ('IBMPlexSans-Regular', 'IBMPlexSans-Medium', 'IBMPlexSans-SemiBold', 'IBMPlexSans-Bold', 'IBMPlexMono-Regular'):
+            with self.opener.open(self.url + '/fonts/' + font + '.woff2', timeout=3) as response:
+                self.assertEqual(response.headers['Content-Type'], 'font/woff2')
+                self.assertEqual(response.read(4), b'wOF2')
+        for path in ('/fonts/unknown.woff2', '/fonts/../scripts/crange_server.py', '/fonts/OFL-IBM-Plex.txt'):
+            with self.assertRaises(HTTPError) as result:
+                self.opener.open(self.url + path, timeout=3)
+            self.assertEqual(result.exception.code, 404)
+            result.exception.close()
+
+    def test_lifecycle_manager_delete_and_admin_restore_authorization(self):
+        self.login('manager')
+        for op in ('project-restore','project-purge'):
+            self.assertEqual(self.request('/api/jobs',{'project':3,'operation':op,'options':{'confirmation':'p003'}})[0],403)
+        self.assertEqual(self.request('/api/jobs',{'project':4,'operation':'project-delete','options':{'confirmation':'p004'}})[0],403)
+        self.assertEqual(self.request('/api/jobs',{'project':3,'operation':'project-delete','options':{'confirmation':'p003'}})[0],202)
+        code,body=self.request('/api/jobs',{'project':3,'operation':'plan','options':{}})
+        self.assertEqual(code,400);self.assertIn('queued',body['error'])
+        self.assertEqual(self.request('/api/project-settings',{'project':3,'display_name':'Race'})[0],400)
+        self.assertEqual(self.request('/api/projects')[1]['projects'],[{'project_id':4,'participant':True,'display_name':'Project 4'}])
+        self.login('platform-admin')
+        records=self.request('/api/projects')[1]['projects']
+        deleted=next(r for r in records if r['project_id']==3)
+        self.assertTrue(deleted['deleted']);self.assertEqual(deleted['lifecycle']['pending_operation'],'project-delete')
+
+    def test_deleted_project_hidden_from_members_and_restorable_by_admin(self):
+        directory=Path(self.tmp.name)/'environments/project-003'
+        (directory/'.crange-lifecycle.json').write_text(json.dumps({'state':'deleted','deleted_at':123}))
+        self.login('participant')
+        self.assertEqual([r['project_id'] for r in self.request('/api/projects')[1]['projects']],[4])
+        self.login('manager')
+        self.assertEqual(self.request('/api/jobs',{'project':3,'operation':'plan','options':{}})[0],400)
+        self.login('platform-admin')
+        self.assertEqual(self.request('/api/jobs',{'project':3,'operation':'project-restore','options':{'confirmation':'p003'}})[0],202)
+
+    def test_admin_guacamole_launch_preserves_native_identity_without_a_ticket(self):
+        self.login('platform-admin')
+        code, result=self.request('/api/guac-ticket?project=0')
+        self.assertEqual(code,200)
+        self.assertEqual(result['authentication'],'native')
+        self.assertEqual(result['url'],'https://crguac.brogano.dev/')
+        self.assertEqual(result['credentials'],[])
+        self.assertNotIn('data=', result['url'])
+        self.assertNotIn('token=', result['url'])

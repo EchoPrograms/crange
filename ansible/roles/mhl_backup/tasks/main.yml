@@ -2,7 +2,7 @@
 - name: Validate assigned backup host
   ansible.builtin.assert:
     that:
-      - mhl_network_id | int in [1, 2, 3, 4, 5, 254]
+      - (mhl_network_id | int in [1, 2, 3, 4, 5, 254]) or ((mhl_test_scope | default(false) | bool) and (1 <= mhl_network_id | int <= 253))
       - ansible_host == '10.100.' ~ (mhl_network_id | string) ~ '.60'
 
 - name: Install backup/report tools

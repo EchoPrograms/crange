@@ -1,0 +1,13 @@
+{
+  "project": 100,
+  "release": "0.1.3",
+  "parent": "0.1.2",
+  "parent_file_sha256_unchanged": "740c7cf039908a5e9b428de5cefc72705f742ef73a3f4ac68aa3be7bb32f6a88",
+  "integrity_sha256": "4d1fd9f776078ccaabd07d2825bf00188ed40c1e2375b462d803b033538cac56",
+  "reused_image_count": 6,
+  "business_recipe_sha256": "29a113f1762824dade19a32f2cd1856d8f5934647f4b29f846abcb5a9d970fa7",
+  "windows_recipe_unchanged": true,
+  "image_retention_references_verified": true,
+  "staging_disks_captured": false,
+  "new_release_test_and_rollout_pending": true
+}

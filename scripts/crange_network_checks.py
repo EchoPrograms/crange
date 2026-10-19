@@ -24,16 +24,25 @@ def drop_counter(text):
 
 
 class FixedGuestNetworkChecks:
-    def __init__(self, transport, router, *, router_node, other_team_id, sleep=time.sleep):
-        require(router_node in {f'proxmox{i}' for i in range(1,6)},'Router must bind to an enrolled node.')
+    def __init__(self, transport, router, *, router_node, other_team_id, project_router_node=None, sleep=time.sleep):
+        require(router_node in {f'proxmox{i}' for i in range(1,7)},'Router must bind to an enrolled node.')
         require(type(other_team_id) is int and 1 <= other_team_id <= 253,'Bind one other regular team.')
         self.transport=transport
         self.router=router
         self.router_node=router_node
+        self.project_router_node=project_router_node
         self.other_team_id=other_team_id
         self.sleep=sleep
 
     def run(self,target,check,*,timeout=60):
+        logs=[]
+        try:
+            return self._run(target,check,timeout=timeout,logs=logs)
+        except Exception as error:
+            error.network_check_log={'check':check,'commands':logs}
+            raise
+
+    def _run(self,target,check,*,timeout=60,logs):
         target=scope(**target)
         require(check in ('vxlan_mtu','dns','internet_egress','team_isolation')
                 and type(timeout) is int and 1 <= timeout <= 60,'Unsupported or unbounded guest check.')
@@ -42,14 +51,13 @@ class FixedGuestNetworkChecks:
             try:
                 return self.transport.request(method,path,fields,deadline=deadline)
             except Exception as error:
-                if re.fullmatch(r'guest_api_http_(?:[45]\d\d|error)',str(getattr(error,'safe_cause',''))):
+                if re.fullmatch(r'guest_api_(?:http_(?:[45]\d\d|error)|timeout|transport|invalid_json|unknown_failure)',str(getattr(error,'safe_cause',''))):
                     raise
                 require_diagnostic(False,'guest_api_request_failed')
         class DeadlineAPI:
             def request(self,method,path,fields=None):return read(method,path,fields)
         require_diagnostic(cluster_probe(DeadlineAPI(),target) is not None,'probe_missing')
         base=f'/nodes/{target["node"]}/qemu/{target["vmid"]}'
-        logs=[]
         def observe(name):
             remaining=deadline-time.monotonic()
             require_diagnostic(remaining > 0, 'router_observation_deadline')
@@ -60,13 +68,15 @@ class FixedGuestNetworkChecks:
         def execute(command):
             response=read('POST',base+'/agent/exec',{'command':command})
             require_diagnostic(type(response.get('pid')) is int and response['pid']>0,'guest_exec_pid_invalid')
+            entry={'command':command,'pid':response['pid'],'status':'running'}
+            logs.append(entry)
             while time.monotonic()<deadline:
                 result=read('GET',base+'/agent/exec-status',{'pid':response['pid']})
                 if result.get('exited'):
                     out=str(result.get('out-data',''))
                     err=str(result.get('err-data',''))
                     require_diagnostic(len(out.encode())+len(err.encode()) <= 65536,'guest_output_exceeded_bound')
-                    logs.append({'command':command,'exitcode':result.get('exitcode'),'stdout':out,'stderr':err})
+                    entry.update(status='exited',exitcode=result.get('exitcode'),stdout=out,stderr=err)
                     return result.get('exitcode'),out,err
                 self.sleep(min(.25,max(0,deadline-time.monotonic())))
             require_diagnostic(False,'guest_exec_deadline')
@@ -83,7 +93,22 @@ class FixedGuestNetworkChecks:
                     and 'src' in fields and fields[fields.index('src')+1]==ip,'probe_route_source_mismatch')
         https=busy('timeout','12','/bin/busybox','wget','-q','-O','/dev/null','https://example.com/')
         if check=='vxlan_mtu':
-            require_diagnostic(self.router_node != target['node'],'mtu_gateway_same_node')
+            if self.router_node == target['node']:
+                require_diagnostic(self.project_router_node in {f'proxmox{i}' for i in range(1,7)}
+                                   and self.project_router_node != self.router_node, 'mtu_no_cross_node_router_path')
+                upstream_fields = observe('upstream_route').split()
+                upstream = f'10.{target["project_id"]}.0.1'
+                require_diagnostic('via' in upstream_fields and upstream_fields[upstream_fields.index('via')+1] == upstream
+                                   and 'dev' in upstream_fields and upstream_fields[upstream_fields.index('dev')+1] == 'eth0',
+                                   'mtu_upstream_route_mismatch')
+                logs.append({'cross_node_segment': {'vnet': f'p{target["project_id"]:03d}tr',
+                                                    'from_node': self.router_node,
+                                                    'to_node': self.project_router_node},
+                             'gateway_upstream_route': ' '.join(upstream_fields)})
+            else:
+                logs.append({'cross_node_segment': {'vnet': target['vnet'],
+                                                    'from_node': target['node'],
+                                                    'to_node': self.router_node}})
             code,out,_=execute(busy('cat','/sys/class/net/eth0/mtu'))
             require_diagnostic(code==0 and out.strip()=='1450','mtu_nic_mismatch')
             expected_route()
@@ -92,7 +117,11 @@ class FixedGuestNetworkChecks:
             code,_,_=execute(['/usr/bin/env','ping','-M','do','-c','2','-W','3','-s','1422','1.1.1.1'])
             require_diagnostic(code==0,'mtu_df_1450_failed')
             code,out,err=execute(['/usr/bin/env','ping','-M','do','-c','1','-W','3','-s','1423','1.1.1.1'])
-            require_diagnostic(code != 0 and 'message too long' in (out+err).lower(),'mtu_df_1451_not_rejected')
+            local_error=err.lower()
+            rejected_long=bool(re.search(r'(?m)^ping: local error: message too long, mtu=1450\s*$',local_error))
+            rejected_large=(bool(re.search(r'(?m)^ping: sendmsg: message too large\s*$',local_error))
+                            and '1423(1451) bytes of data' in out)
+            require_diagnostic(code != 0 and (rejected_long or rejected_large),'mtu_df_1451_not_rejected')
         elif check=='dns':
             code,out,_=execute(busy('timeout','10','/bin/busybox','nslookup','example.com','10.60.2.1'))
             require_diagnostic(code==0 and 'example.com' in out,'dns_resolution_failed')

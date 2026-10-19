@@ -15,12 +15,12 @@ def unit_text(root, username, home, executable, *, role='web', job_db='/var/lib/
         raise ValueError('Invalid service account.')
     if any(c.isspace() for c in str(root)):
         raise ValueError('Service checkout path cannot contain whitespace.')
-    if role not in ('web', 'worker', 'guac-broker', 'proxmox-compat', 'cluster-refresh'):
+    if role not in ('web', 'worker', 'network-worker', 'guac-broker', 'proxmox-compat', 'cluster-refresh'):
         raise ValueError('Invalid service role.')
     # The service is reachable through the controller's SSH tunnel and its
     # management interface. The standalone CLI server remains loopback-only.
     action = {'web': 'serve --host 0.0.0.0 --port 8000',
-              'worker': 'worker', 'guac-broker': 'guac-ticket-broker',
+              'worker': 'worker', 'network-worker': 'network-worker', 'guac-broker': 'guac-ticket-broker',
               'proxmox-compat': '', 'cluster-refresh': 'cluster-refresh'}[role]
     return '\n'.join([
         '[Unit]', f'Description=CRANGE {role}', 'After=network-online.target',
@@ -109,6 +109,10 @@ def install(username, root):
     # The web user can traverse this directory and read only mode-0640 snapshots;
     # the ledger and cache journals retain owner-only permissions.
     os.chmod(distribution_dir, 0o2710)
+    network_dir = Path('/var/lib/crange-network-probes')
+    network_dir.mkdir(parents=True, exist_ok=True)
+    os.chown(network_dir, 0, 0)
+    os.chmod(network_dir, 0o700)
     snapshot = distribution_dir / "cluster-inventory.json"
     if snapshot.is_file():
         os.chown(snapshot, account.pw_uid, group.gr_gid)
@@ -120,6 +124,7 @@ def install(username, root):
     services = {
         'crange.service': unit_text(root, web.pw_name, web_home, sys.executable, role='web', job_db=str(job_db)),
         'crange-worker.service': unit_text(root, username, account.pw_dir, sys.executable, role='worker', job_db=str(job_db)),
+        'crange-network-worker.service': unit_text(root, 'root', '/root', sys.executable, role='network-worker', job_db=str(job_db)),
         'crange-cluster-refresh.service': unit_text(root, username, account.pw_dir, sys.executable,
                                                    role='cluster-refresh', job_db=str(job_db)),
     }
@@ -133,6 +138,9 @@ def install(username, root):
         # Start the reviewed adapter before workers can resume queued jobs.
         services = {'crange-proxmox-compat.service': compat_unit, **services}
         services['crange-worker.service'] = services['crange-worker.service'].replace(
+            'After=network-online.target',
+            'After=network-online.target crange-proxmox-compat.service\nRequires=crange-proxmox-compat.service')
+        services['crange-network-worker.service'] = services['crange-network-worker.service'].replace(
             'After=network-online.target',
             'After=network-online.target crange-proxmox-compat.service\nRequires=crange-proxmox-compat.service')
     json_key = Path(account.pw_dir) / '.config/crange/guacamole-json.secret'

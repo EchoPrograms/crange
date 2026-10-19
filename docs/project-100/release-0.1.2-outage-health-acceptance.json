@@ -1,0 +1,44 @@
+{
+  "observed_at": "2026-10-19T02:27:48.519320+00:00",
+  "exact_dashboard_api_request": {
+    "project": 100,
+    "operation": "release-check",
+    "options": {
+      "teams": [
+        2,
+        3,
+        4
+      ]
+    }
+  },
+  "job_id": "9fbc017370b148e1b503a6104861ce0f",
+  "status": "succeeded",
+  "release": "0.1.2",
+  "passed_servers": 18,
+  "passed_server_lines": [
+    "PASS team 2 r0.1.2-mhl-dc01-t002",
+    "PASS team 2 r0.1.2-mhl-file01-t002",
+    "PASS team 2 r0.1.2-mhl-app01-t002",
+    "PASS team 2 r0.1.2-mhl-bkp01-t002",
+    "PASS team 2 r0.1.2-mhl-ci01-t002",
+    "PASS team 2 r0.1.2-mhl-db01-t002",
+    "PASS team 3 r0.1.2-mhl-dc01-t003",
+    "PASS team 3 r0.1.2-mhl-file01-t003",
+    "PASS team 3 r0.1.2-mhl-app01-t003",
+    "PASS team 3 r0.1.2-mhl-bkp01-t003",
+    "PASS team 3 r0.1.2-mhl-ci01-t003",
+    "PASS team 3 r0.1.2-mhl-db01-t003",
+    "PASS team 4 r0.1.2-mhl-dc01-t004",
+    "PASS team 4 r0.1.2-mhl-file01-t004",
+    "PASS team 4 r0.1.2-mhl-app01-t004",
+    "PASS team 4 r0.1.2-mhl-bkp01-t004",
+    "PASS team 4 r0.1.2-mhl-ci01-t004",
+    "PASS team 4 r0.1.2-mhl-db01-t004"
+  ],
+  "teams_not_tested": [
+    1,
+    5
+  ],
+  "reason_teams_not_tested": "Their routers are on currently unreachable Proxmox1.",
+  "does_not_establish_workstation_or_all_lab_acceptance": true
+}

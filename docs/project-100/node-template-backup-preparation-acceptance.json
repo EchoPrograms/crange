@@ -1,0 +1,29 @@
+{
+  "node": "proxmox6",
+  "dashboard_job": "fdd72f01edde47ad81af6879a011e19a",
+  "status": "succeeded",
+  "payload": {
+    "project": 0,
+    "operation": "template-node-backup-prepare",
+    "options": {
+      "node": "proxmox6"
+    }
+  },
+  "before_version": "9.0.16",
+  "version": "9.0.18",
+  "changed_packages": [
+    "qemu-server"
+  ],
+  "guests_rebooted": false,
+  "management_service_reloaded": true,
+  "recovery_capture_job": "a096e2912cca4949bd13b794c8852f07",
+  "recovery_capture_status": "running",
+  "export_template_vmid": 160,
+  "export_node": "proxmox6",
+  "export_task": "UPID:proxmox6:00093D30:008DD6CA:6AD2AA41:vzdump:160:crange-iac@pve!terraform:",
+  "export_progress_percent_observed": 15,
+  "previous_export_history": "capture-p100-44891a7a6389-export-failed-7dd5d8153991.json",
+  "repeat_source_backup_submitted": false,
+  "repeat_restore_submitted": false,
+  "network_relay_unchanged": true
+}

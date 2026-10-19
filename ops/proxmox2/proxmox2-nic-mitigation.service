@@ -1,0 +1,9 @@
+[Unit]
+Description=Disable segmentation offloads to mitigate e1000e transmit hangs
+After=networking.service
+[Service]
+Type=oneshot
+ExecStart=/usr/sbin/ethtool -K eno1 tso off gso off
+RemainAfterExit=yes
+[Install]
+WantedBy=multi-user.target

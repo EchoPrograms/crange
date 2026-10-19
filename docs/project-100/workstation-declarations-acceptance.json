@@ -1,0 +1,159 @@
+{
+  "project": 100,
+  "linux_jumpboxes_declared": 10,
+  "windows_workstations": [
+    {
+      "key": "t001-assessor-win-j02",
+      "team": 1,
+      "ip_last_octet": 12,
+      "template": "mhl-windows-server-2025-base-p100-v1",
+      "services": [
+        "rdp"
+      ]
+    },
+    {
+      "key": "t001-assessor-win-j04",
+      "team": 1,
+      "ip_last_octet": 14,
+      "template": "mhl-windows-server-2025-base-p100-v1",
+      "services": [
+        "rdp"
+      ]
+    },
+    {
+      "key": "t002-assessor-win-j02",
+      "team": 2,
+      "ip_last_octet": 12,
+      "template": "mhl-windows-server-2025-base-p100-v1",
+      "services": [
+        "rdp"
+      ]
+    },
+    {
+      "key": "t002-assessor-win-j04",
+      "team": 2,
+      "ip_last_octet": 14,
+      "template": "mhl-windows-server-2025-base-p100-v1",
+      "services": [
+        "rdp"
+      ]
+    },
+    {
+      "key": "t003-assessor-win-j02",
+      "team": 3,
+      "ip_last_octet": 12,
+      "template": "mhl-windows-server-2025-base-p100-v1",
+      "services": [
+        "rdp"
+      ]
+    },
+    {
+      "key": "t003-assessor-win-j04",
+      "team": 3,
+      "ip_last_octet": 14,
+      "template": "mhl-windows-server-2025-base-p100-v1",
+      "services": [
+        "rdp"
+      ]
+    },
+    {
+      "key": "t004-assessor-win-j02",
+      "team": 4,
+      "ip_last_octet": 12,
+      "template": "mhl-windows-server-2025-base-p100-v1",
+      "services": [
+        "rdp"
+      ]
+    },
+    {
+      "key": "t004-assessor-win-j04",
+      "team": 4,
+      "ip_last_octet": 14,
+      "template": "mhl-windows-server-2025-base-p100-v1",
+      "services": [
+        "rdp"
+      ]
+    },
+    {
+      "key": "t005-assessor-win-j02",
+      "team": 5,
+      "ip_last_octet": 12,
+      "template": "mhl-windows-server-2025-base-p100-v1",
+      "services": [
+        "rdp"
+      ]
+    },
+    {
+      "key": "t005-assessor-win-j04",
+      "team": 5,
+      "ip_last_octet": 14,
+      "template": "mhl-windows-server-2025-base-p100-v1",
+      "services": [
+        "rdp"
+      ]
+    }
+  ],
+  "windows_declaration_jobs": [
+    {
+      "key": "t001-assessor-win-j02",
+      "team": 1,
+      "address": "10.100.1.12",
+      "job_id": "b17b414643e4445888752bbf28a785be"
+    },
+    {
+      "key": "t001-assessor-win-j04",
+      "team": 1,
+      "address": "10.100.1.14",
+      "job_id": "f99fc5c15f964a959113f9b32aac1395"
+    },
+    {
+      "key": "t002-assessor-win-j02",
+      "team": 2,
+      "address": "10.100.2.12",
+      "job_id": "faa0b5d36bac469890686960cadee688"
+    },
+    {
+      "key": "t002-assessor-win-j04",
+      "team": 2,
+      "address": "10.100.2.14",
+      "job_id": "002510181941437aabb3d21ab01155e7"
+    },
+    {
+      "key": "t003-assessor-win-j02",
+      "team": 3,
+      "address": "10.100.3.12",
+      "job_id": "29d2b9d30d584e5d9d444a9c57986ef5"
+    },
+    {
+      "key": "t003-assessor-win-j04",
+      "team": 3,
+      "address": "10.100.3.14",
+      "job_id": "cf3567aac07d431192e6852f4ad2b31a"
+    },
+    {
+      "key": "t004-assessor-win-j02",
+      "team": 4,
+      "address": "10.100.4.12",
+      "job_id": "7816bc37d3b24236b08c15880a61cc2f"
+    },
+    {
+      "key": "t004-assessor-win-j04",
+      "team": 4,
+      "address": "10.100.4.14",
+      "job_id": "56fffa95d87a4a95882a6b12aa359d7b"
+    },
+    {
+      "key": "t005-assessor-win-j02",
+      "team": 5,
+      "address": "10.100.5.12",
+      "job_id": "49be63bfb5cc4701bd21c67ddcc1f25c"
+    },
+    {
+      "key": "t005-assessor-win-j04",
+      "team": 5,
+      "address": "10.100.5.14",
+      "job_id": "b73f4685446b4b7889d80853db288e91"
+    }
+  ],
+  "deployed": false
+}

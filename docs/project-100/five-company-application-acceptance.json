@@ -1,0 +1,112 @@
+{
+  "project": 100,
+  "release": "0.1.2",
+  "companies": [
+    {
+      "network": 1,
+      "database_health": true,
+      "cross_customer_read": {
+        "supplied_customer": 4101,
+        "returned_customer": 4102,
+        "shipment": 61002
+      },
+      "bounded_report_query": {
+        "normal_rows": 1,
+        "broadened_rows": 3
+      },
+      "published_artifact": {
+        "has_deployment_identity": true,
+        "has_synthetic_token": true,
+        "sha256": "e4882de9090673a4e9752cfa2833939ef626dd198c5edd51049b32eb8d063252",
+        "token_recorded": false,
+        "authentication_binding_not_yet_proven": true
+      },
+      "read_only": true
+    },
+    {
+      "network": 2,
+      "database_health": true,
+      "cross_customer_read": {
+        "supplied_customer": 4101,
+        "returned_customer": 4102,
+        "shipment": 61002
+      },
+      "bounded_report_query": {
+        "normal_rows": 1,
+        "broadened_rows": 3
+      },
+      "published_artifact": {
+        "has_deployment_identity": true,
+        "has_synthetic_token": true,
+        "sha256": "95f70be2f0c2bb20205d9b19c84c9af0888523ea7b84c494fd37d810d0167bc3",
+        "token_recorded": false,
+        "authentication_binding_not_yet_proven": true
+      },
+      "read_only": true
+    },
+    {
+      "network": 3,
+      "database_health": true,
+      "cross_customer_read": {
+        "supplied_customer": 4101,
+        "returned_customer": 4102,
+        "shipment": 61002
+      },
+      "bounded_report_query": {
+        "normal_rows": 1,
+        "broadened_rows": 3
+      },
+      "published_artifact": {
+        "has_deployment_identity": true,
+        "has_synthetic_token": true,
+        "sha256": "fd20efe768b9d7c43740828f10bf7a3106af9469f94d85c08fce40d1be24da8b",
+        "token_recorded": false,
+        "authentication_binding_not_yet_proven": true
+      },
+      "read_only": true
+    },
+    {
+      "network": 4,
+      "database_health": true,
+      "cross_customer_read": {
+        "supplied_customer": 4101,
+        "returned_customer": 4102,
+        "shipment": 61002
+      },
+      "bounded_report_query": {
+        "normal_rows": 1,
+        "broadened_rows": 3
+      },
+      "published_artifact": {
+        "has_deployment_identity": true,
+        "has_synthetic_token": true,
+        "sha256": "7580d15f4a0f44aed931c80f10ecc4c66c962a4cf626179f2494ba4af8545015",
+        "token_recorded": false,
+        "authentication_binding_not_yet_proven": true
+      },
+      "read_only": true
+    },
+    {
+      "network": 5,
+      "database_health": true,
+      "cross_customer_read": {
+        "supplied_customer": 4101,
+        "returned_customer": 4102,
+        "shipment": 61002
+      },
+      "bounded_report_query": {
+        "normal_rows": 1,
+        "broadened_rows": 3
+      },
+      "published_artifact": {
+        "has_deployment_identity": true,
+        "has_synthetic_token": true,
+        "sha256": "2a04c4bd93f23e1803bdfbe740d7d9fd6b77fa5c255efbb1659a8369ed5ba87e",
+        "token_recorded": false,
+        "authentication_binding_not_yet_proven": true
+      },
+      "read_only": true
+    }
+  ],
+  "no_secret_values_recorded": true
+}

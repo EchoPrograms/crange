@@ -1,0 +1,62 @@
+all:
+  children:
+    mhl_domain_controllers:
+      hosts:
+        MHL-T0-DC01:
+          ansible_host: 10.100.254.10
+          mhl_project_id: 100
+          mhl_network_id: 254
+          mhl_guest_hostname: MHL-DC01
+        MHL-T1-DC01:
+          ansible_host: 10.100.1.10
+          mhl_project_id: 100
+          mhl_network_id: 1
+          mhl_guest_hostname: MHL-DC01
+        MHL-T2-DC01:
+          ansible_host: 10.100.2.10
+          mhl_project_id: 100
+          mhl_network_id: 2
+          mhl_guest_hostname: MHL-DC01
+    mhl_domain_members:
+      children:
+        mhl_file_servers:
+          hosts:
+            MHL-T0-FILE01:
+              ansible_host: 10.100.254.20
+              mhl_project_id: 100
+              mhl_network_id: 254
+              mhl_guest_hostname: MHL-FILE01
+              mhl_dc_dns: 10.100.254.10
+            MHL-T1-FILE01:
+              ansible_host: 10.100.1.20
+              mhl_project_id: 100
+              mhl_network_id: 1
+              mhl_guest_hostname: MHL-FILE01
+              mhl_dc_dns: 10.100.1.10
+            MHL-T2-FILE01:
+              ansible_host: 10.100.2.20
+              mhl_project_id: 100
+              mhl_network_id: 2
+              mhl_guest_hostname: MHL-FILE01
+              mhl_dc_dns: 10.100.2.10
+        mhl_windows_jumpboxes:
+          hosts:
+            MHL-T1-WIN01:
+              ansible_host: 10.100.1.12
+              mhl_project_id: 100
+              mhl_network_id: 1
+              mhl_guest_hostname: MHL-WIN01
+              mhl_dc_dns: 10.100.1.10
+            MHL-T2-WIN01:
+              ansible_host: 10.100.2.12
+              mhl_project_id: 100
+              mhl_network_id: 2
+              mhl_guest_hostname: MHL-WIN01
+              mhl_dc_dns: 10.100.2.10
+  vars:
+    ansible_connection: winrm
+    ansible_port: 5985
+    ansible_winrm_transport: ntlm
+    ansible_winrm_server_cert_validation: ignore
+    ansible_user: "{{ mhl_local_admin_user }}"
+    ansible_password: "{{ mhl_local_admin_password }}"

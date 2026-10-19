@@ -1,0 +1,13 @@
+[Unit]
+Description=CRANGE fixed archive growth relay
+After=crange-ct-read-relay.service
+Requires=crange-ct-read-relay.service
+[Service]
+Type=simple
+User=root
+UMask=0077
+ExecStart=/usr/bin/python3 /usr/local/lib/crange/library_grow_relay.py /etc/crange-ct-read-relay.json be1bd798341d6b394c4520fdbee536f7178f61a1baef52a74d92af3f8083ce9e
+Restart=on-failure
+RestartSec=5
+[Install]
+WantedBy=multi-user.target

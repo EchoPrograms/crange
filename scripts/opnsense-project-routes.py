@@ -262,11 +262,63 @@ def remove_project_route(project_id, allow_unmanaged=False, dry_run=False):
         raise RuntimeError(f"OPNsense still reports a route for {network} after deletion")
     print(f"Removed and reconfigured OPNsense route {network}")
 
-if __name__ == "__main__":
+def retire_project_network(project_id, transit_address, interface, dry_run=False):
+    """Remove only this exact automation-owned static route and gateway.
+
+    API contract: https://docs.opnsense.org/development/api/core/routing.html
+    Firewall policy is never modified by this workflow.
+    """
+    pid = int(project_id)
+    if not 1 <= pid <= 255 or pid in (60, 61):
+        raise RuntimeError('Invalid project ID')
+    gateway_name = f'P{pid:03d}'
+    address = str(ipaddress.ip_interface(transit_address).ip)
+    if ipaddress.ip_address(address) not in ipaddress.ip_network('10.60.2.0/24') or address == '10.60.2.1':
+        raise RuntimeError('Project gateway address is outside the shared transit network')
+    gateways = api('GET', '/api/routing/settings/get').get('gateways', {}).get('gateway_item', {})
+    matches = [(key, item) for key, item in gateways.items() if item.get('name') == gateway_name]
+    if len(matches) > 1:
+        raise RuntimeError('Project gateway ownership is ambiguous')
+    if matches:
+        key, item = matches[0]
+        if (item.get('descr') != f'CRANGE managed project p{pid:03d}' or item.get('gateway') != address or
+                selected_choice(item.get('interface')) != interface or
+                any(str(item.get(flag, '0')) not in ('0','', 'None') for flag in ('upstream','defaultgw'))):
+            routes = api('GET', '/api/routes/routes/get').get('route', {}).get('route', {})
+            values = routes.values() if isinstance(routes, dict) else routes
+            # A reused project number may collide with a historical manually
+            # configured gateway. If this project's route was never installed,
+            # that different-address, unmanaged gateway is outside its lifecycle.
+            if (item.get('descr') != f'CRANGE managed project p{pid:03d}' and
+                    item.get('gateway') != address and
+                    not any(r.get('network') == f'10.{pid}.0.0/16' for r in values)):
+                print(f'No current project route/gateway exists for p{pid:03d}; preserving unrelated legacy gateway {gateway_name}')
+                return
+            raise RuntimeError(f'Gateway {gateway_name} does not match this project’s managed address/interface; refusing to delete an unrelated gateway')
+        # OPNsense 26.7 del_gateway validates interface, gateway-group and
+        # static-route references atomically. Do not require broader group
+        # administration privileges for the narrowly scoped route worker.
+    remove_project_route(pid, dry_run=dry_run)
+    if dry_run:
+        print(f"Reviewed managed route/gateway cleanup for p{pid:03d}; no changes made")
+        return
+    if matches:
+        key, _ = matches[0]
+        api('POST', f'/api/routing/settings/del_gateway/{key}')
+        api('POST', '/api/routing/settings/reconfigure', {})
+        after = api('GET', '/api/routing/settings/get').get('gateways', {}).get('gateway_item', {})
+        if any(row.get('name') == gateway_name for row in after.values()):
+            raise RuntimeError('Project gateway remains after deletion')
+        print(f'Removed managed OPNsense gateway {gateway_name}')
+
+
+def main():
     if len(sys.argv) == 2 and sys.argv[1] == "occupied-transit":
         print(json.dumps(occupied_transit_addresses()))
     elif len(sys.argv) >= 2 and sys.argv[1] == "ensure" and len(sys.argv) == 2:
         ensure(json.load(sys.stdin))
+    elif len(sys.argv) in (5,6) and sys.argv[1] == "retire":
+        retire_project_network(sys.argv[2], sys.argv[3], sys.argv[4], dry_run="--dry-run" in sys.argv[5:])
     elif len(sys.argv) >= 3 and sys.argv[1] == "remove":
         pid = int(sys.argv[2])
         allow = "--allow-unmanaged" in sys.argv[3:]
@@ -274,3 +326,11 @@ if __name__ == "__main__":
         remove_project_route(pid, allow_unmanaged=allow, dry_run=dry)
     else:
         raise SystemExit("Usage: opnsense-project-routes.py occupied-transit | terraform output -json opnsense_route | opnsense-project-routes.py ensure | opnsense-project-routes.py remove PROJECT_ID [--allow-unmanaged] [--dry-run]")
+
+
+if __name__ == "__main__":
+    try:
+        main()
+    except (RuntimeError, ValueError, KeyError) as exc:
+        print(f"crange: OPNsense routing: {exc}", file=sys.stderr)
+        raise SystemExit(2)

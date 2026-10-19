@@ -1,0 +1,14 @@
+{
+  "native_guac_admin": true,
+  "verified_api_gateway": "proxmox4",
+  "proxmox1_offline": true,
+  "company_console_address": "10.100.2.40",
+  "hypervisor_console_connected": true,
+  "guest_services_not_opened": true,
+  "native_session_survived_console_and_reload": true,
+  "visible_errors_after": 0,
+  "server_rows": 36,
+  "native_login_identity_recorded_by_original_harness": false,
+  "current_configured_management_login": "crange-sync",
+  "literal_guacadmin_login_not_established_by_this_evidence": true
+}

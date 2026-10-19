@@ -1,0 +1,206 @@
+{
+  "passed": true,
+  "network": "p100c100",
+  "networks": [
+    {
+      "scope": {
+        "address": "10.100.100.2/24",
+        "job_id": "network-00412548038c4dd39057a85ac89d606d",
+        "node": "proxmox1",
+        "project_id": 100,
+        "vmid": 900000,
+        "vnet": "p100c100"
+      },
+      "tested_at": "2026-10-16T13:16:30Z",
+      "receipt_sha256": "b97ac6c00b78805e088632d057373a7cea0a37dbf66208a58b8db79f4d1d0a08",
+      "checks": {
+        "controller": {
+          "artifact_sha256": "051a86321121696babe03fe48e263b055d0015e9417759e64a36df325acca1e7",
+          "duration_seconds": 0.40755652729421854,
+          "passed": true
+        },
+        "dns": {
+          "artifact_sha256": "b80db21d1c5c1349f46d6f28cc026437cc7971abd313898f71d9f44de4bdb028",
+          "duration_seconds": 5.602842336520553,
+          "passed": true
+        },
+        "guacamole": {
+          "artifact_sha256": "2e2688c694183b33280cfc8a2e6c41f2c7af229656b2d825437df16ee6a0fea5",
+          "duration_seconds": 17.495023675262928,
+          "passed": true,
+          "relay_sha256": "ab20e0da5496642ba27adf90aa113ca3869f32b24add046686181887aa9e5a8b",
+          "source_address": "10.60.0.10",
+          "target_address": "10.100.100.2",
+          "target_port": 22
+        },
+        "internet_egress": {
+          "artifact_sha256": "0887fa2a15c5f73f79e9778143f2b57668ce069b82d460e9d0eb89eacac83b4a",
+          "duration_seconds": 1.212941219098866,
+          "passed": true
+        },
+        "team_isolation": {
+          "artifact_sha256": "b94c5ec1ae18d2553acb017b613405139ff17910028b76a0856440838ea7b652",
+          "duration_seconds": 18.843525620177388,
+          "passed": true
+        },
+        "vxlan_mtu": {
+          "artifact_sha256": "6f29857ebd67d6c20dc56a4f0daa9fec8059a08ce5dc56e961808aa8f413733f",
+          "duration_seconds": 4.659256756305695,
+          "passed": true
+        }
+      },
+      "cleanup": "accepted_cleaned",
+      "published": true
+    },
+    {
+      "scope": {
+        "address": "10.100.100.2/24",
+        "job_id": "network-66374ee4655d45579cf53e30f418f11e",
+        "node": "proxmox2",
+        "project_id": 100,
+        "vmid": 900000,
+        "vnet": "p100c100"
+      },
+      "tested_at": "2026-10-16T13:19:45Z",
+      "receipt_sha256": "59c090aff3c4f194520cb7cf032631eb4a8265c1a7b598e5f78fcd2008e05ab7",
+      "checks": {
+        "controller": {
+          "artifact_sha256": "051a86321121696babe03fe48e263b055d0015e9417759e64a36df325acca1e7",
+          "duration_seconds": 0.09737954661250114,
+          "passed": true
+        },
+        "dns": {
+          "artifact_sha256": "2b5a112ae0c0d6ca3a4518b057894695599d765cc6903ca52e737dbaeed6e5f7",
+          "duration_seconds": 5.549926847219467,
+          "passed": true
+        },
+        "guacamole": {
+          "artifact_sha256": "2e2688c694183b33280cfc8a2e6c41f2c7af229656b2d825437df16ee6a0fea5",
+          "duration_seconds": 17.502549786120653,
+          "passed": true,
+          "relay_sha256": "ab20e0da5496642ba27adf90aa113ca3869f32b24add046686181887aa9e5a8b",
+          "source_address": "10.60.0.10",
+          "target_address": "10.100.100.2",
+          "target_port": 22
+        },
+        "internet_egress": {
+          "artifact_sha256": "0887fa2a15c5f73f79e9778143f2b57668ce069b82d460e9d0eb89eacac83b4a",
+          "duration_seconds": 1.1768743069842458,
+          "passed": true
+        },
+        "team_isolation": {
+          "artifact_sha256": "a50d8523e7f77c00904a445dd01f1f598c83d35dd7103b1a8fbb0c550bc9150b",
+          "duration_seconds": 18.91749867796898,
+          "passed": true
+        },
+        "vxlan_mtu": {
+          "artifact_sha256": "eeb48f9f9da19b3d906c583cbbf9012c2231cf65f9caff1a42a594c71ee5db0a",
+          "duration_seconds": 4.714915337972343,
+          "passed": true
+        }
+      },
+      "cleanup": "accepted_cleaned",
+      "published": true
+    },
+    {
+      "scope": {
+        "address": "10.100.100.2/24",
+        "job_id": "network-7bd3e050898d416aaf0a44c328b166fd",
+        "node": "proxmox3",
+        "project_id": 100,
+        "vmid": 900000,
+        "vnet": "p100c100"
+      },
+      "tested_at": "2026-10-16T13:22:41Z",
+      "receipt_sha256": "31924344f79d270e0ff6ccdd6595ec21b76f653fb99d81d2c6e54e299b6448d8",
+      "checks": {
+        "controller": {
+          "artifact_sha256": "051a86321121696babe03fe48e263b055d0015e9417759e64a36df325acca1e7",
+          "duration_seconds": 0.09637906402349472,
+          "passed": true
+        },
+        "dns": {
+          "artifact_sha256": "e27d36b83dd0cdb2b069199ed9ae066ea3d75b08fc21544aaa061b39a2c18a15",
+          "duration_seconds": 5.4887686325237155,
+          "passed": true
+        },
+        "guacamole": {
+          "artifact_sha256": "2e2688c694183b33280cfc8a2e6c41f2c7af229656b2d825437df16ee6a0fea5",
+          "duration_seconds": 16.85591101832688,
+          "passed": true,
+          "relay_sha256": "ab20e0da5496642ba27adf90aa113ca3869f32b24add046686181887aa9e5a8b",
+          "source_address": "10.60.0.10",
+          "target_address": "10.100.100.2",
+          "target_port": 22
+        },
+        "internet_egress": {
+          "artifact_sha256": "92c32b36e265427f224707983347d306fe9070d62dddd7b54547337e0424d460",
+          "duration_seconds": 1.2566697532311082,
+          "passed": true
+        },
+        "team_isolation": {
+          "artifact_sha256": "eb8408f7f656fdfc824904d51c175513d70ec8a2268cc50a1785f7625c4daf79",
+          "duration_seconds": 18.978684412315488,
+          "passed": true
+        },
+        "vxlan_mtu": {
+          "artifact_sha256": "0b6b97c4e85705cdea8a4d93c16e2444bb7e4388ba071fe4702149585bb2bd3f",
+          "duration_seconds": 4.653867397457361,
+          "passed": true
+        }
+      },
+      "cleanup": "accepted_cleaned",
+      "published": true
+    },
+    {
+      "scope": {
+        "address": "10.100.100.2/24",
+        "job_id": "network-d5c0c88c5a9946a28ffdd9f22937ffea",
+        "node": "proxmox5",
+        "project_id": 100,
+        "vmid": 900000,
+        "vnet": "p100c100"
+      },
+      "tested_at": "2026-10-16T13:25:43Z",
+      "receipt_sha256": "d5db2e231472a5c20f91e9639a9ea641a9c879626df849435fc8077393113195",
+      "checks": {
+        "controller": {
+          "artifact_sha256": "051a86321121696babe03fe48e263b055d0015e9417759e64a36df325acca1e7",
+          "duration_seconds": 0.09488503448665142,
+          "passed": true
+        },
+        "dns": {
+          "artifact_sha256": "e3f3030a78afce17289a10072778746f53d0edd55dabf0ebef9c2a5afb40b8e2",
+          "duration_seconds": 5.6801939476281404,
+          "passed": true
+        },
+        "guacamole": {
+          "artifact_sha256": "2e2688c694183b33280cfc8a2e6c41f2c7af229656b2d825437df16ee6a0fea5",
+          "duration_seconds": 15.427847675047815,
+          "passed": true,
+          "relay_sha256": "ab20e0da5496642ba27adf90aa113ca3869f32b24add046686181887aa9e5a8b",
+          "source_address": "10.60.0.10",
+          "target_address": "10.100.100.2",
+          "target_port": 22
+        },
+        "internet_egress": {
+          "artifact_sha256": "7f1d42336f89f62a55297ff6d52ea70600c9e3dbd8a528941e312dac16a4d3e0",
+          "duration_seconds": 1.1972540821880102,
+          "passed": true
+        },
+        "team_isolation": {
+          "artifact_sha256": "092fd8ee5ef991f92b0b1d50975d3f1879741ab06dedfe87874dae8398bdd177",
+          "duration_seconds": 18.819074821658432,
+          "passed": true
+        },
+        "vxlan_mtu": {
+          "artifact_sha256": "6a37a8e8ea0f0406b77f13ca73736b2522e7b11a1f236344bef6f371797eaa5b",
+          "duration_seconds": 4.717428575269878,
+          "passed": true
+        }
+      },
+      "cleanup": "accepted_cleaned",
+      "published": true
+    }
+  ]
+}

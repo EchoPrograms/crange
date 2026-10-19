@@ -161,7 +161,7 @@ def preset_settings(value):
 def save_preset(project,value):
     import json
     from crange import project_dir,templates_for,container_templates_for,template_identity
-    value=preset_settings(value);path=project_dir(str(project));approved=(templates_for if value['kind']=='vm' else container_templates_for)(path)
+    value=preset_settings(value);path=project_dir(str(project));approved=(templates_for if value['kind']=='vm' else container_templates_for)(path,creation=True)
     if value['template'] not in approved:raise ValueError('Choose a template approved for this project.')
     data=presets(project)
     if value['key'] not in data and len(data)>=20:raise ValueError('This project has reached its 20 jump-box template limit.')

@@ -7,7 +7,7 @@ if NODE not in PATHS: raise SystemExit('media-library: this is not a designated 
 base=PATHS[NODE]
 if NODE=='proxmox1' and not pathlib.Path('/mnt/pve/ssd-dir').is_mount(): raise SystemExit('media-library: SSD directory is not mounted')
 for folder in ['template/iso','template/cache']: pathlib.Path(base,folder).mkdir(parents=True,exist_ok=True)
-clients=' '.join(f'10.0.0.{n}(ro,sync,no_subtree_check,root_squash)' for n in range(101,106))
+clients=' '.join(f'10.0.0.{n}(ro,sync,no_subtree_check,root_squash)' for n in range(101,107))
 exports=pathlib.Path('/etc/exports.d/crange-media.exports'); exports.parent.mkdir(parents=True,exist_ok=True)
 exports.write_text(base+' '+clients+'\n')
 # NFSv4 exclusively avoids exposing rpcbind/mountd ports to library clients.

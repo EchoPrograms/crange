@@ -20,10 +20,10 @@ CONFIG = Path(os.environ.get('CRANGE_DISTRIBUTION_CONFIG', Path.home() / '.confi
 DATA = Path(os.environ.get('CRANGE_DISTRIBUTION_DATA', '/var/lib/crange-distribution'))
 KNOWN_NODES = {f'proxmox{i}' for i in range(1, 7)}
 DEFAULT_POLICY = {'revision': 'conservative-v1', 'enabled': False,
-                  # Proxmox6 is intentionally not enrolled until it joins the
-                  # cluster and passes the same storage/network acceptance.
-                  'allowed_nodes': [f'proxmox{i}' for i in range(1, 6)],
-                  'allowed_storages': ['local-lvm', 'ssd-lvm', 'hdd-lvm'],
+                  # Cluster membership alone does not admit placements: each node
+                  # still requires storage/provider/network acceptance.
+                  'allowed_nodes': [f'proxmox{i}' for i in range(1, 7)],
+                  'allowed_storages': ['local-lvm', 'ssd-lvm', 'hdd-lvm', 'crange-thin', 'local-hdd'],
                   'max_inventory_age_seconds': 120, 'review_ttl_seconds': 3600,
                   'max_reviewed_plans': 2, 'max_load': 1.0,
                   'clone_mode': 'linked', 'copy_overhead_fraction': .1, 'nodes': {}, 'network_attestations': {}}
@@ -283,12 +283,36 @@ def _bootstrap_planned_networks(inventory, policy, requests, node_name=None, rou
     return inventory
 
 
+def _custom_foundation_networks(inventory, policy, requests, cfg, keys):
+    """Grant transient router-only eligibility behind an accepted parent LAN."""
+    allowed = {'router:custom:' + key for key in keys}
+    if not allowed or {row['resource_key'] for row in requests} != allowed:
+        raise PlacementError('Custom network foundation must contain only its exact new router requests.')
+    candidates = set(bootstrap_node_candidates(policy))
+    project = int(cfg['project_id'])
+    for request in requests:
+        key = request['resource_key'].removeprefix('router:custom:')
+        net = cfg['custom_networks'][key]
+        parent = f'p{project:03d}t{int(net["owner_team_id"]):03d}'
+        downstream = f'p{project:03d}c{int(net["network_id"]):03d}'
+        if (request.get('kind') != 'container' or request.get('project_id') != project
+                or set(request.get('networks', [])) != {parent, downstream}):
+            raise PlacementError('Custom network foundation request differs from its declaration.')
+        for name, node in inventory.get('nodes', {}).items():
+            if (name in candidates and node.get('online') and not node.get('draining')
+                    and node.get('management_verified') and parent in node.get('verified_networks', [])
+                    and parent in node.get('networks', [])):
+                node.setdefault('bootstrap_planned_networks', []).extend([parent, downstream])
+    return inventory
+
+
 def discover(api, policy, planned_networks=()):
-    """Account every visible guest, including stopped guests and non-range guests.
+    """Account visible guest disks and active or unknown-status guest CPU/RAM.
 
     VM.Audit on all guests is required. Host memory.used is deliberately treated
     as a conservative upper bound on non-reclaimable use; it is NOT added to
-    configured guest RAM. Template disks count, template CPU/RAM do not.
+    configured guest RAM. Stopped guests and templates retain disk commitments
+    but contribute no CPU/RAM. Unknown guest state is counted conservatively.
     """
     nodes = {n['node']: n for n in api.request('GET', '/nodes')}
     guests = api.request('GET', '/cluster/resources', {'type': 'vm'})
@@ -360,14 +384,15 @@ def discover(api, policy, planned_networks=()):
                         (not template and (not math.isfinite(memory) or not math.isfinite(cores) or
                                            memory <= 0 or cores <= 0))):
                     raise PlacementError(f'Cannot account workloads on offline node {name}; configured CPU/RAM/disk maxima are invalid (guest {guest["vmid"]}).')
-                if not template:
+                counts_compute = not template and guest.get('status') != 'stopped'
+                if counts_compute:
                     result['nodes'][name]['committed_memory_mb'] += memory
                     result['nodes'][name]['committed_cpu_cores'] += cores
                 for scope in ['global', *re.findall(r'(?:^|;)p(\d{3})(?:;|$)', str(guest.get('tags', '')))]:
                     scope = str(int(scope)) if scope != 'global' else scope
                     usage = result['quota_usage'].setdefault(scope, {})
-                    for key, amount in (('memory_mb', 0 if template else memory),
-                                        ('cpu_cores', 0 if template else cores), ('disk_gb', disk)):
+                    for key, amount in (('memory_mb', memory if counts_compute else 0),
+                                        ('cpu_cores', cores if counts_compute else 0), ('disk_gb', disk)):
                         usage[key] = usage.get(key, 0) + amount
                 result['guests'][str(guest['vmid'])] = {'node_name': name, 'kind': guest['type'],
                     'template': template, 'name': guest.get('name'), 'status': 'offline',
@@ -453,7 +478,8 @@ def discover(api, policy, planned_networks=()):
         node = result['nodes'][name]; template = bool(int(config.get('template', 0)))
         memory = float(config.get('memory', 0)); cores = float(config.get('cores', 1))*float(config.get('sockets', 1))
         disks = disk_allocations(config)
-        if not template:
+        counts_compute = not template and guest.get('status') != 'stopped'
+        if counts_compute:
             node['committed_memory_mb'] += memory; node['committed_cpu_cores'] += cores
         for sid, amount in disks.items():
             if sid in node['storages']: node['storages'][sid]['committed_gb'] += amount
@@ -464,8 +490,8 @@ def discover(api, policy, planned_networks=()):
             for scope in ['global', *re.findall(r'(?:^|;)p(\d{3})(?:;|$)', str(config.get('tags', '')))]:
                 scope = str(int(scope)) if scope != 'global' else scope
                 usage = result['quota_usage'].setdefault(scope, {})
-                usage['memory_mb'] = usage.get('memory_mb', 0) + memory
-                usage['cpu_cores'] = usage.get('cpu_cores', 0) + cores
+                usage['memory_mb'] = usage.get('memory_mb', 0) + (memory if counts_compute else 0)
+                usage['cpu_cores'] = usage.get('cpu_cores', 0) + (cores if counts_compute else 0)
                 usage['disk_gb'] = usage.get('disk_gb', 0) + sum(disks.values())
     return result
 
@@ -496,6 +522,8 @@ def declarations(path, cfg):
     vm_templates = templates_for(path); ct_templates = container_templates_for(path)
     rows = []
     def append(key, kind, box, reference, networks):
+        if key.startswith('router:'):
+            box = {**box, 'disk_gb': box.get('disk_gb', 4)}
         image = box.get('image') or reference.get('image_id')
         rows.append({'resource_key': key, 'kind': kind, 'box': box, 'reference': reference,
                      'image': image, 'networks': networks,
@@ -545,18 +573,35 @@ def freeze(row, live, previous=None):
     source = (previous or {}).get('resolved') or previous or {}
     values = {key:copy.deepcopy(source[key]) for key in ('node_name','datastore_id','template_id','template_node','template_file_id','clone_mode','verified_local_cache') if key in source}
     values['node_name'] = live['node_name']
+    if live.get('machine'):
+        values['machine'] = live['machine']
     clone = live.get('clone') or []
     if clone:
         values.update(template_id=clone[0].get('vm_id'), template_node=clone[0].get('node_name') or live['node_name'],
                       clone_mode='full' if clone[0].get('full') else 'linked')
     disks = live.get('disk') or live.get('disk_device') or []
     if disks: values['datastore_id'] = disks[0]['datastore_id']
+    if row['resource_key'].startswith('router:'):
+        size = disks[0].get('size') if disks else None
+        if isinstance(size,bool) or not isinstance(size,(int,float)) or not math.isfinite(size) or size <= 0:
+            raise PlacementError('Cannot preserve the existing router disk size from Terraform state.')
+        values['disk_gb'] = size
     initialization = live.get('operating_system') or []
     if initialization and initialization[0].get('template_file_id'):
         values['template_file_id'] = initialization[0]['template_file_id']
         values['clone_mode'] = 'archive'
     values.setdefault('datastore_id','local-lvm')
     return {'resource_key': row['resource_key'], 'resolved': values, 'reason':'Existing guest placement retained', 'existing':True, 'image': row.get('image') or ''}
+
+
+def requested_disk_gb(row, image):
+    size = image['disk_gb']
+    if row['resource_key'].startswith('router:'):
+        # Stock tar archives have no fixed disk layout. Captured filesystems
+        # retain their source allocation; existing disks are always pinned.
+        default = row.get('retained', {}).get('disk_gb', row['box'].get('disk_gb', 4))
+        return default if image.get('source_type') == 'stock_archive' else max(size, default)
+    return max(size, 8 if row['kind'] == 'container' else size)
 
 
 def reviewed_bootstrap_replacements(path, project_id, owner, bootstrap_node, requests, policy, ledger, router_nodes=None):
@@ -608,6 +653,65 @@ def reviewed_bootstrap_replacements(path, project_id, owner, bootstrap_node, req
         if exact:
             replacements.append(plan_id)
     return replacements
+
+
+def purge_expired_guest_reviews(path, cfg, owner, api, ledger, *, now=None, review_directory=None):
+    """Retire expired unapplied guest reviews only after negative provider evidence.
+
+    Cache preparations and running applies are never expired by this sweep.
+    Changed declarations, existing guests and active provider tasks retain capacity.
+    """
+    now=time.time() if now is None else now
+    path=Path(path);project=int(cfg['project_id']);released=[]
+    config=path/'crange.auto.tfvars.json'
+    if not config.exists():return released
+    digest=hashlib.sha256(config.read_bytes()).hexdigest()
+    declared={row['resource_key']:row for row in declarations(path,cfg)}
+    applied=applied_resources(path)
+    directory=review_directory or Path.home()/'.local/share/crange/plans'/f'project-{project:03d}'
+    for manifest in Path(directory).glob('*.json'):
+        try:
+            record=json.loads(manifest.read_text());plan_id=record.get('plan_id')
+            if (not re.fullmatch(r'[a-f0-9]{32}',str(plan_id)) or manifest.stem!=plan_id or
+                    record.get('project')!=project or record.get('applied_at') or
+                    record.get('inputs_sha256')!=digest or now-float(record['created'])<=3600):continue
+            saved=ledger.get_job(plan_id);allocations=saved['allocations']
+            if (saved['state']!='reviewed' or saved['project_id']!=project or saved['owner']!=owner or
+                    saved['expires']>=now or not allocations):continue
+            names=set();nodes=set();placements={r['resource_key']:r for r in record.get('placements',[])}
+            for item in allocations:
+                key=item.get('resource_key');row=declared.get(key)
+                if (not row or key in applied or not key.startswith(('vm:','container:','jumpbox:')) or
+                        key not in placements or placements[key].get('existing') or
+                        item.get('image')!=row['image']):raise ValueError('Not an unused guest review.')
+                resolved=item['resolved'];node=resolved['node_name']
+                if any(placements[key]['resolved'].get(k)!=resolved.get(k) for k in ('node_name','datastore_id')):
+                    raise ValueError('Reservation differs from retained review.')
+                box=row['box'];network=int(box.get('network_id',box['team_id']))
+                suffix=(f"jump-{int(box['jump_number']):02d}" if key.startswith('jumpbox:') else box['name'])
+                names.add(f"p{project:03d}{'c' if box.get('network_key') else 't'}{network:03d}-{suffix}")
+                nodes.add(node)
+            with node_locks(sorted(nodes),library=True):
+                # A running apply changes ledger state before any provider create.
+                if ledger.get_job(plan_id)['state']!='reviewed' or hashlib.sha256(config.read_bytes()).hexdigest()!=digest:continue
+                guests=api.request('GET','/cluster/resources',{'type':'vm'})
+                if not isinstance(guests,list) or any(g.get('name') in names for g in guests):continue
+                tasks=[api.request('GET',f'/nodes/{node}/tasks',{'source':'active','limit':1000}) for node in sorted(nodes)]
+                if any(not isinstance(rows,list) or rows for rows in tasks):continue
+                ledger.purge_reviewed(plan_id,operation_terminal=True,no_allocations_confirmed=True,
+                                      provider_tasks_running=False,now=now)
+                record.update(reservation_state='released',reservation_released_at=now,
+                              reservation_release_reason='expired_guest_review_no_guests_or_provider_tasks')
+                atomic_json(manifest,record,0o600)
+                summary=path/'.crange-plans'/manifest.name
+                if summary.exists():
+                    public=json.loads(summary.read_text());public.update({k:record[k] for k in
+                        ('reservation_state','reservation_released_at','reservation_release_reason')})
+                    atomic_json(summary,public,0o640)
+                released.append(plan_id)
+        except (OSError,ValueError,TypeError,KeyError,PlacementError):
+            continue
+    return released
 
 
 def purge_expired_bootstrap_reviews(path, project_id, owner, api, ledger, now=None):
@@ -675,7 +779,7 @@ def purge_expired_bootstrap_reviews(path, project_id, owner, api, ledger, now=No
     return released
 
 
-def prepare(path, cfg, plan_id, owner, api=None, *, bootstrap_node=None, bootstrap_nodes=None):
+def prepare(path, cfg, plan_id, owner, api=None, *, bootstrap_node=None, bootstrap_nodes=None, network_foundation=None):
     from crange import ProxmoxAPI, validate_project_quota
     validate_project_quota(path,cfg)
     policy,catalog = read_settings()
@@ -687,12 +791,25 @@ def prepare(path, cfg, plan_id, owner, api=None, *, bootstrap_node=None, bootstr
     rows = declarations(path,cfg)
     DATA.mkdir(parents=True,exist_ok=True,mode=0o700)
     existing=applied_resources(path); placements=[];requests=[]
+    if network_foundation:
+        keys = {'router:custom:' + key for key in network_foundation}
+        if (keys & set(existing) or cfg.get('jump_boxes') or cfg.get('scenario_boxes')
+                or cfg.get('scenario_containers')):
+            raise PlacementError('Network foundation must create only undeployed custom routers, without scenario guests.')
+        rows = [row for row in rows if row['resource_key'] in existing or row['resource_key'] in keys]
+        if not {'router:project', 'router:staging'} <= set(existing):
+            raise PlacementError('Create the base project foundation before adding custom networks.')
     record_file = path / 'crange-applied-placements.json'
     applied_record = json.loads(record_file.read_text()) if record_file.exists() else {}
     for row in rows:
         key=row['resource_key']
         if key in existing:
             live = existing[key]
+            if network_foundation:
+                frozen = freeze(row, live, applied_record.get(key, {}))
+                frozen['declared_template'] = row['box'].get('template')
+                placements.append(frozen)
+                continue
             current_cpu = int(live.get('cpu', [{}])[0].get('cores', live.get('cores', 1)))
             current_memory = int(live.get('memory', [{}])[0].get('dedicated', live.get('memory_mb', 512)))
             desired = row['box']
@@ -728,7 +845,7 @@ def prepare(path, cfg, plan_id, owner, api=None, *, bootstrap_node=None, bootstr
             'cpu_cores':int(box.get('cores',1 if row['kind']=='container' else 2)),
             'cpu_type':requested_cpu_type(row['kind'], profile),
             'required_features':list(profile.get('required_features',[])),
-            'disk_gb':max(size,8 if row['kind']=='container' else size)})
+            'disk_gb':requested_disk_gb(row,image)})
         if row.get('retained'):
             for field in ('datastore_id','template_id','template_file_id','clone_mode'):
                 if row['retained'].get(field) is not None:requests[-1]['resolved_'+field]=row['retained'][field]
@@ -739,6 +856,8 @@ def prepare(path, cfg, plan_id, owner, api=None, *, bootstrap_node=None, bootstr
                 cfg.get('scenario_containers')):
             raise PlacementError('Router bootstrap is restricted to an empty project with no scenario guests.')
         inventory=_bootstrap_planned_networks(inventory,policy,requests,bootstrap_node,bootstrap_nodes)
+    if network_foundation:
+        inventory=_custom_foundation_networks(inventory,policy,requests,cfg,network_foundation)
     from crange_proxmox_compat import reviewed_identity
     provider_compat = reviewed_identity()
     ledger=ReservationLedger(DATA/'reservations.sqlite3')
@@ -750,7 +869,7 @@ def prepare(path, cfg, plan_id, owner, api=None, *, bootstrap_node=None, bootstr
             if bootstrap_node:
                 replacements=reviewed_bootstrap_replacements(path,int(cfg['project_id']),owner,bootstrap_node,requests,policy,ledger,bootstrap_nodes)
             placements+=ledger.reserve_batch(requests,inventory,catalog,policy,int(cfg['project_id']),plan_id,owner,
-                bootstrap=bool(bootstrap_node),replace_reviewed_job_ids=replacements)
+                bootstrap=bool(bootstrap_node or network_foundation),replace_reviewed_job_ids=replacements)
     finally:
         ledger.close()
     for placement in placements:
@@ -763,6 +882,7 @@ def prepare(path, cfg, plan_id, owner, api=None, *, bootstrap_node=None, bootstr
             'catalog_sha256':catalog_identity(catalog),'reservation_ids':[p['reservation_id'] for p in placements if p.get('reservation_id')],
             **({'bootstrap_node':bootstrap_node} if bootstrap_node else {}),
             **({'bootstrap_nodes':bootstrap_nodes,'bootstrap_router_nodes':bootstrap_router_nodes} if bootstrap_node else {}),
+            **({'network_foundation':list(network_foundation)} if network_foundation else {}),
             **({'replaced_reviewed_plan_ids':replacements} if replacements else {}),
             **({'purged_expired_bootstrap_plan_ids':expired_bootstrap_reviews} if expired_bootstrap_reviews else {})}
 
@@ -789,6 +909,12 @@ def begin_apply(path, prepared, api=None):
     inventory=discover(api,policy,networks)
     if prepared.get('bootstrap_node'):
         inventory=_bootstrap_planned_networks(inventory,policy,prepared['requests'],prepared['bootstrap_node'],prepared.get('bootstrap_nodes'))
+    if prepared.get('network_foundation'):
+        from crange import json_config
+        cfg = json_config(path)
+        if any('router:custom:' + key in applied_resources(path) for key in prepared['network_foundation']):
+            raise PlacementError('A reviewed custom router already exists; restage instead of applying an old foundation plan.')
+        inventory=_custom_foundation_networks(inventory,policy,prepared['requests'],cfg,prepared['network_foundation'])
     for placement in prepared['placements']:
         resolved = placement['resolved']
         node = inventory['nodes'].get(resolved['node_name'], {})
@@ -811,8 +937,24 @@ def begin_apply(path, prepared, api=None):
         ledger=ReservationLedger(DATA/'reservations.sqlite3')
         try:
             ledger.mark_running(prepared['plan_id'],requests=prepared['requests'],inventory=inventory,catalog=catalog,policy=policy,
-                                bootstrap=bool(prepared.get('bootstrap_node')))
+                                bootstrap=bool(prepared.get('bootstrap_node') or prepared.get('network_foundation')))
         finally:ledger.close()
+
+
+def _wait_for_applied_tasks(api, node, ids, *, timeout=90, sleep=None, clock=None):
+    """Wait only for this reviewed allocation; unrelated guests cannot block it."""
+    clock = clock or time.monotonic
+    sleep = sleep or time.sleep
+    deadline = clock() + timeout
+    while True:
+        tasks = api.request('GET', f'/nodes/{node}/tasks', {'source': 'active', 'limit': 1000})
+        if not isinstance(tasks, list):
+            raise PlacementError('Could not verify whether applied project guests still have provider tasks.')
+        if not any(int(task.get('id') or 0) in ids for task in tasks if str(task.get('id') or '').isdigit()):
+            return
+        if clock() >= deadline:
+            raise PlacementError('Provider tasks still running; reservations retained for reconciliation.')
+        sleep(2)
 
 
 def finish_apply(path, prepared, *, succeeded, api=None):
@@ -821,7 +963,12 @@ def finish_apply(path, prepared, *, succeeded, api=None):
     from crange import ProxmoxAPI
     api=api or ProxmoxAPI()
     if not succeeded:return
-    actual=applied_resources(path);record={}
+    actual=applied_resources(path)
+    record_file=path/'crange-applied-placements.json'
+    previous=json.loads(record_file.read_text()) if record_file.exists() else {}
+    record={key:value for key,value in previous.items() if key in actual
+            and value.get('guest_id') == int(actual[key]['vm_id'])
+            and value.get('node_name') == actual[key]['node_name']}
     for placement in prepared['placements']:
         key=placement['resource_key']
         if key not in actual:raise PlacementError('Provider allocation missing after apply; reservations retained.')
@@ -834,13 +981,11 @@ def finish_apply(path, prepared, *, succeeded, api=None):
             raise PlacementError('Applied guest ownership mismatch; reservations retained.')
     atomic_json(path/'crange-applied-placements.json',record,0o640)
     if prepared['requests']:
-        for node in {p['resolved']['node_name'] for p in prepared['placements']}:
-            ids = {int(v['guest_id']) for v in record.values() if v['node_name'] == node}
-            active_tasks = api.request('GET', f'/nodes/{node}/tasks', {'source': 'active', 'limit': 1000})
-            if not isinstance(active_tasks, list):
-                raise PlacementError('Could not verify whether applied project guests still have provider tasks.')
-            if any(int(task.get('id') or 0) in ids for task in active_tasks if str(task.get('id') or '').isdigit()):
-                raise PlacementError('Provider tasks still running; reservations retained for reconciliation.')
+        affected = {request['resource_key'] for request in prepared['requests']}
+        nodes = {record[key]['node_name'] for key in affected}
+        for node in nodes:
+            ids = {int(record[key]['guest_id']) for key in affected if record[key]['node_name'] == node}
+            _wait_for_applied_tasks(api, node, ids)
         ledger=ReservationLedger(DATA/'reservations.sqlite3')
         try:ledger.reconcile_job(prepared['plan_id'],operation_terminal=True,allocations_reconciled=True)
         finally:ledger.close()
@@ -852,6 +997,50 @@ def abandon_plan(prepared):
     ledger=ReservationLedger(DATA/'reservations.sqlite3')
     try:ledger.reconcile_job(prepared['plan_id'],operation_terminal=True,allocations_reconciled=True)
     finally:ledger.close()
+
+
+def reconcile_applied_reservations(path, *, api=None):
+    """Release only retained apply allocations proved present in provider state.
+
+    Never infer completion from age or a missing worker. Exact saved placements,
+    current Terraform identities and terminal provider tasks are all required.
+    """
+    from crange import ProxmoxAPI
+    api = api or ProxmoxAPI()
+    path = Path(path)
+    project = int(path.name.split('-')[-1])
+    ledger = ReservationLedger(DATA / 'reservations.sqlite3')
+    released = []
+    try:
+        for manifest in sorted((path / '.crange-plans').glob('*.json')):
+            try:
+                saved = ledger.get_job(manifest.stem)
+            except PlacementError:
+                continue
+            if saved['project_id'] != project or saved['state'] != 'running':
+                continue
+            record = json.loads(manifest.read_text())
+            placements = {item['resource_key']: item for item in record.get('placements', [])}
+            allocations = saved['allocations']
+            if (record.get('plan_id') != manifest.stem or not allocations or
+                    any(item.get('operation') for item in allocations) or
+                    any(placements.get(item['resource_key'], {}).get('reservation_id') != item['reservation_id']
+                        or placements[item['resource_key']]['resolved'] != item['resolved']
+                        for item in allocations)):
+                raise PlacementError('Retained apply reservation differs from its saved placement manifest.')
+            # Reuse the normal apply completion gate: all saved allocations must
+            # exist at their reviewed node in Terraform state, have project
+            # ownership in PVE, and have no active provider task.
+            prepared = {'plan_id': manifest.stem, 'placements': record['placements'],
+                        'requests': allocations}
+            finish_apply(path, prepared, succeeded=True, api=api)
+            record.update(reservation_state='released', reservation_reconciled_at=time.time(),
+                          reservation_reconciliation='exact_applied_state_and_terminal_provider_tasks')
+            atomic_json(manifest, record, 0o640)
+            released.append(manifest.stem)
+        return released
+    finally:
+        ledger.close()
 
 
 def print_review(prepared):
@@ -885,7 +1074,7 @@ def required_preparations(path, cfg, *, api=None):
     """
     import tempfile
     from crange import ProxmoxAPI
-    from crange_distribution import required_capacity
+    from crange_distribution import required_capacity, preparation_peak_capacity
     policy, catalog = read_settings()
     if not policy.get('enabled'):
         raise PlacementError('Automatic distribution is not enabled; complete cache/network acceptance first.')
@@ -902,6 +1091,8 @@ def required_preparations(path, cfg, *, api=None):
         if key in existing and not explicit_change:
             continue
         new.append(row)
+    if not new:
+        return []
     inventory = discover(api, policy, {n for row in rows for n in row['networks']})
     DATA.mkdir(parents=True, exist_ok=True, mode=0o700)
     ledger = ReservationLedger(DATA/'reservations.sqlite3')
@@ -913,7 +1104,12 @@ def required_preparations(path, cfg, *, api=None):
     def consume(node_name, storage_id, resources):
         node=working['nodes'][node_name];storage=node['storages'][storage_id]
         node['committed_memory_mb'] += resources['memory_mb']
-        node['observed_memory_mb'] += resources['memory_mb']
+        # capacity_window expresses observed headroom in configured-RAM
+        # units using the approved ratio. Reserve each queued guest once,
+        # matching the ledger's nominal subtraction from that window.
+        settings = {**policy, **policy.get('nodes', {}).get(node_name, {})}
+        ratio = settings.get('memory_overcommit_ratio', 1)
+        node['observed_memory_mb'] += resources['memory_mb'] / ratio
         node['committed_cpu_cores'] += resources['cpu_cores']
         storage['committed_gb'] += resources['disk_gb'];storage['free_gb'] -= resources['disk_gb']
     for reservation in pending:
@@ -954,7 +1150,8 @@ def required_preparations(path, cfg, *, api=None):
                     source=next((r for r in image.get('replicas',[]) if r['state']=='ready' and r.get('template_id')),None)
                     config=api.request('GET',f'/nodes/{source["node"]}/{"qemu" if row["kind"]=="vm" else "lxc"}/{source["template_id"]}/config') if source else {}
                     cache_demand=required_capacity(image,source_config=config)
-                total={key:demand[key]+cache_demand[key] for key in demand}
+                peak = preparation_peak_capacity(cache_demand, demand)
+                total = {key: peak[key] for key in demand}
                 profile=template_profile(path,row)
                 if row['kind']=='vm' and profile.get('cpu_type','host')=='host':
                     feature=image.get('host_compatibility_feature')
@@ -967,15 +1164,44 @@ def required_preparations(path, cfg, *, api=None):
                             allocation=trial.reserve_preparation(project_id=int(cfg['project_id']),job_id='trial',owner='stage-preview',image_id=row['image'],catalog=catalog,node_name=node_name,datastore_id=storage_id,capacity={**total,'clone_mode':'linked' if not replicas or not replicas[0].get('template_file_id') else 'full'},inventory=working,policy=policy)
                         finally:trial.close()
                 except PlacementError as exc:
-                    failures[node_name+'/'+storage_id]=str(exc);continue
+                    reason=str(exc)
+                    prefix='cache preparation has insufficient '
+                    if reason.startswith(prefix):
+                        key=reason[len(prefix):].split()[0]
+                        if key in total:
+                            from crange_placement import capacity_window
+                            mode='linked' if not replicas or not replicas[0].get('template_file_id') else 'full'
+                            window=capacity_window(node,policy,node_name,storage,mode)
+                            label='guest + cache' if any(cache_demand.values()) else 'guest'
+                            units={'memory_mb':'MiB RAM','cpu_cores':'CPU cores','disk_gb':'GiB disk'}
+                            reason=(f'{label} preparation needs {total[key]:g} {units[key]}; '
+                                    f'available {max(0,window[key]):.1f} '
+                                    f'(guest={demand[key]:g}, cache={cache_demand[key]:g})')
+                            if key=='memory_mb':
+                                reason+=(f'; configured={node["committed_memory_mb"]:.1f} MiB, '
+                                         f'observed={node["observed_memory_mb"]:.1f} MiB, '
+                                         f'host reserve={window["memory_reserve_mb"]:.1f} MiB; '
+                                         'queued guests and live reservations already accounted')
+                    failures[node_name+'/'+storage_id]=reason;continue
                 score=sum(total[k]/max(allocation['headroom'][k]+total[k],.01) for k in total)/3
                 if intent.get('preferred_node')==node_name:score-=min(policy.get('preference_bonus',.05),.1)
                 candidates.append((score,node_name,storage_id,not replicas and not already,cache_demand,total))
         if not candidates:
             detail={'node_exclusions':excluded_nodes,'storage_or_capacity_failures':failures}
             raise PlacementError(f'{row["resource_key"]}: no safe cache-plus-guest target: {json.dumps(detail,sort_keys=True)}')
+        # A larger empty pool on the same host does not justify another
+        # archive copy while a verified (or already planned) cache can fit.
+        # Cross-node load balancing and safe capacity fallbacks still apply.
+        reusable_nodes={candidate[1] for candidate in candidates if not candidate[3]}
+        candidates=[candidate for candidate in candidates
+                    if not candidate[3] or candidate[1] not in reusable_nodes]
         _,node_name,storage_id,missing,cache_demand,total=min(candidates,key=lambda x:x[:3])
-        consume(node_name,storage_id,total)
+        # Verification and transfer finish before guests are deployed. The
+        # published base remains, but disposable probe CPU/RAM/disks do not.
+        steady = dict(demand)
+        if missing:
+            steady['disk_gb'] += cache_demand['base_disk_gb']
+        consume(node_name,storage_id,steady)
         if missing:
             fills.append({'image':row['image'],'node':node_name,'storage':storage_id,'additional_capacity':demand,'resource_keys':[row['resource_key']]})
             planned_caches.add((row['image'],node_name,storage_id))

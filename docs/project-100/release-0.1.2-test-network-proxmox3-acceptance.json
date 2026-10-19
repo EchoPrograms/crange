@@ -1,0 +1,78 @@
+{
+  "network_receipt": {
+    "checks": {
+      "controller": {
+        "artifact_sha256": "051a86321121696babe03fe48e263b055d0015e9417759e64a36df325acca1e7",
+        "duration_seconds": 0.10108608100563288,
+        "passed": true
+      },
+      "dns": {
+        "artifact_sha256": "b362ba106f8c52d04757c76e86894e2a75ba05315958b0dd4a006ec7fad99ad7",
+        "duration_seconds": 5.612290443852544,
+        "passed": true
+      },
+      "guacamole": {
+        "artifact_sha256": "2e2688c694183b33280cfc8a2e6c41f2c7af229656b2d825437df16ee6a0fea5",
+        "duration_seconds": 16.83818058297038,
+        "passed": true,
+        "relay_sha256": "ab20e0da5496642ba27adf90aa113ca3869f32b24add046686181887aa9e5a8b",
+        "source_address": "10.60.0.10",
+        "target_address": "10.100.100.2",
+        "target_port": 22
+      },
+      "internet_egress": {
+        "artifact_sha256": "18025070e0b25283719d0a390f69a32afde2f065ea8bfd2ed1b4b57b8adf9b59",
+        "duration_seconds": 1.0781999798491597,
+        "passed": true
+      },
+      "team_isolation": {
+        "artifact_sha256": "0cb2f2f289fb849123153d390858d4216e410291cfe4a7f0bbeecf6aa6bc8ec9",
+        "duration_seconds": 19.041903408244252,
+        "passed": true
+      },
+      "vxlan_mtu": {
+        "artifact_sha256": "cf160a8a0b8f243b84b1228a408e10bb52b3b0476510848921bb86f9b51247f1",
+        "duration_seconds": 4.8239231668412685,
+        "passed": true
+      }
+    },
+    "cleanup": {
+      "artifact_sha256": "07d0b3adb6107276e7ec27b382eb718db2b360cc5a04b54b1b2eea328608539a",
+      "input_unchanged": true,
+      "probe_state_empty": true,
+      "temporary_rules_absent": true,
+      "vmid_absent_after": true,
+      "vmid_absent_before": true
+    },
+    "mtu": 1450,
+    "schema_version": 2,
+    "scope": {
+      "address": "10.100.100.2/24",
+      "job_id": "network-a0c578e9f7944e158866956a2573b838",
+      "node": "proxmox3",
+      "project_id": 100,
+      "vmid": 900000,
+      "vnet": "p100c100"
+    },
+    "source_binding": {
+      "controller_sha256": {
+        "crange_network_acceptance.py": "cafd6fcd90d41abe811812822b60305ebe4173a4b2eaabc46f25b809d5b92e20",
+        "crange_network_adapters.py": "6bd39cf1c056160c1a63ad442329adb559c2cb2dec17859c04d5215fed2fa62f",
+        "crange_network_checks.py": "1e0ca5daae4924bf61349967bde29a06ba434342c31f5675209d08b82f6f523f",
+        "crange_network_guac_probe.py": "132975203eb17e02a211bc34ccd4e7e0fddc3d861d4d09c8ab1bb10d236528df",
+        "crange_network_runner.py": "ee1c9faf62a946223cd3015a81b06501ac22ded5adbdf28b08d954222d4e3287",
+        "crange_network_worker.py": "4db1869def24b6a26820cfb85762471f636d6d848fdf545de55eafffe27f9892",
+        "crange_network_workflow.py": "c1c3fecddd296e38a5deb98ce689f12f1bd67f266bfcd92972f394b0e072df71"
+      },
+      "git_dirty": true,
+      "relay_sha256": "ab20e0da5496642ba27adf90aa113ca3869f32b24add046686181887aa9e5a8b",
+      "schema_version": 1
+    },
+    "source_revision": "5332cf431f943efbb31294b57f19ffa1c1bff2a5",
+    "tested_at": "2026-10-17T17:38:41Z",
+    "zone": "crange"
+  },
+  "cleanup_state": "accepted_cleaned",
+  "receipt_sha256": "050cdf4a9afaf4fa71baa4b8246026c3729843aff2a0590d14303858aef6b503",
+  "job_id": "a0c578e9f7944e158866956a2573b838"
+}

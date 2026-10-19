@@ -1,5 +1,7 @@
+import os
 import sys
 import tempfile
+import threading
 import time
 import unittest
 from urllib.parse import parse_qs
@@ -13,6 +15,52 @@ from crange_server import job_query_params
 
 
 class JobTests(unittest.TestCase):
+    def test_capture_settings_are_platform_admin_scope_and_bounded(self):
+        options={'bridge':'crprobe1450','storage':'local-lvm','backup':'crange-library'}
+        self.assertEqual(command('template-capture-settings',0,options),
+                         ['capture-settings','--bridge','crprobe1450','--storage','local-lvm','--backup','crange-library'])
+        for project,value in [(100,options),(0,{**options,'storage':'../../private'}),(0,{**options,'bridge':'x; reboot'})]:
+            with self.assertRaises(ValueError):command('template-capture-settings',project,value)
+
+    def test_capture_selection_is_optional_distinct_and_not_shell_input(self):
+        self.assertEqual(command('release-capture',100,{'version':'0.0.1','boot_order':[]}),
+                         ['release-capture','100','0.0.1'])
+        self.assertEqual(command('release-capture',100,{'version':'0.0.1','boot_order':[],
+                                                      'machines':['t254-mhl-app01']}),
+                         ['release-capture','100','0.0.1','--machine','t254-mhl-app01'])
+        for value in [['t254-mhl-app01']*2,[[]],['../../secrets'],[True]]:
+            with self.assertRaises(ValueError):command('release-capture',100,{'version':'0.0.1','boot_order':[],'machines':value})
+
+    def test_snapshot_probe_retry_is_exact_and_admin_scoped(self):
+        options={'source_job_id':'cache-'+'a'*32}
+        self.assertEqual(command('template-cache-snapshot-retry',0,options),['cache-snapshot-probe-retry',options['source_job_id']])
+        for project,value in ((100,options),(0,{'source_job_id':'../secret'})):
+            with self.assertRaises(ValueError):command('template-cache-snapshot-retry',project,value)
+
+    def test_windows_cache_recovery_is_bound_to_one_image_and_source_job(self):
+        options = {'image': 'mhl-windows-server-2025-base-p100-v1',
+                   'source_job_id': 'cache-15f3498e404342fbb096bd1f9012b4b2',
+                   'action': 'resume'}
+        self.assertEqual(command('template-cache-recovery', 0, options),
+            ['cache-windows-p100-recovery', options['image'], '--source-job-id',
+             options['source_job_id'], '--action', 'resume'])
+        for project, changed in ((3, options), (0, {**options, 'image': '/tmp/image'}),
+                                 (0, {**options, 'source_job_id': '../secrets'}),
+                                 (0, {**options, 'action': 'delete'})):
+            with self.subTest(project=project, options=changed), self.assertRaises(ValueError):
+                command('template-cache-recovery', project, changed)
+
+    def test_capacity_policy_job_is_admin_scope_and_bounded(self):
+        self.assertEqual(command('template-capacity-policy-set', 0,
+            {'cpu_ratio': 5, 'memory_ratio': 2, 'disk_ratio': 2}),
+            ['cluster-capacity-policy-set', '--cpu-ratio', '5', '--memory-ratio', '2', '--disk-ratio', '2'])
+        for project, options in ((3, {'cpu_ratio': 5, 'memory_ratio': 2, 'disk_ratio': 2}),
+                                 (0, {'cpu_ratio': 6.25, 'memory_ratio': 2, 'disk_ratio': 2}),
+                                 (0, {'cpu_ratio': 5, 'memory_ratio': 2.25, 'disk_ratio': 2}),
+                                 (0, {'cpu_ratio': 5, 'memory_ratio': 2, 'disk_ratio': 2.25})):
+            with self.subTest(project=project, options=options), self.assertRaises(ValueError):
+                command('template-capacity-policy-set', project, options)
+
     def test_job_query_parameters_are_bounded_and_project_authorized(self):
         manager = {'admin': False, 'managed_projects': ['3']}
         self.assertEqual(job_query_params(parse_qs('page=2&page_size=50&project=3'), manager), (2, 50, 3))
@@ -30,6 +78,92 @@ class JobTests(unittest.TestCase):
                            ('network-add', {'name': '../x', 'team': 1, 'id': 100, 'node': 'proxmox4'})]:
             with self.subTest(op=op, fields=fields), self.assertRaises(ValueError):
                 command(op, 3, fields)
+
+    def test_network_verification_accepts_only_fixed_project_scope(self):
+        self.assertEqual(command('network-verify', 3,
+                                 {'node': 'proxmox2', 'network': 'p003t254'}),
+                         ['network-verify', '3', '--node', 'proxmox2', '--network', 'p003t254'])
+        self.assertEqual(command('network-verify', 3,
+                                 {'node': 'proxmox2', 'network': 'p003t253'})[0], 'network-verify')
+        self.assertEqual(command('network-verify', 3,
+                                 {'node': 'proxmox2', 'network': 'p003c100'}),
+                         ['network-verify', '3', '--node', 'proxmox2', '--network', 'p003c100'])
+        for options in ({'node': 'proxmox2', 'network': 'p004t254'},
+                        {'node': 'proxmox7', 'network': 'p003t254'},
+                        {'node': 'proxmox2', 'network': 'p004c100'},
+                        {'node': 'proxmox2', 'network': 'p003t255'},
+                        {'node': 'proxmox2', 'network': 'p003t254', 'command': 'id'}):
+            with self.subTest(options=options), self.assertRaises(ValueError):
+                command('network-verify', 3, options)
+
+    def test_network_cancel_is_durable_cooperative_and_stays_running(self):
+        with tempfile.TemporaryDirectory() as directory:
+            store = JobStore(Path(directory) / 'jobs.sqlite3')
+            job = store.submit('alice', 3, 'network-verify',
+                               {'node': 'proxmox2', 'network': 'p003t254'})
+            with store.connect() as db:
+                db.execute("UPDATE jobs SET status='running' WHERE id=?", (job,))
+            proc = SimpleNamespace(pid=12345)
+            store._processes[job] = proc
+            with patch('crange_jobs.os.killpg') as kill:
+                self.assertTrue(store.cancel(job, ['3']))
+                kill.assert_not_called()
+            self.assertTrue(store.cancel_requested(job))
+            self.assertEqual(store.get(job, ['3'])['status'], 'running')
+            self.assertFalse(store.cancel(job, ['4']))
+
+    def test_network_worker_deadline_never_kills_cooperative_child(self):
+        import sys
+        with tempfile.TemporaryDirectory() as directory:
+            store=JobStore(Path(directory)/'jobs.sqlite3')
+            job=store.submit('alice',3,'network-verify',
+                             {'node':'proxmox2','network':'p003t254'})
+            with store.connect() as db:
+                db.execute("UPDATE jobs SET status='running' WHERE id=?",(job,))
+            result=store._run_streamed(job,[sys.executable,'-c','print("cleanup-complete")'],
+                                      dict(os.environ),'',timeout=-1)
+            self.assertEqual(result.returncode,0)
+            self.assertIn('cleanup-complete',result.stdout)
+
+    def test_infrastructure_workflows_have_bounded_long_timeout_without_extending_ordinary_jobs(self):
+        for operation,options,expected in [('release-capture',{'version':'0.1.1','boot_order':[]},43200),
+                                           ('stage-changes',{},43200),
+                                           ('release-stage',{'teams':[1]},43200),
+                                           ('release-configure',{'teams':[1]},43200),
+                                           ('release-apply',{'teams':[1], 'plan_id':'a'*32, 'allow_destroy':False, 'allow_replace':False},43200),
+                                           ('apply',{'plan_id':'a'*32, 'allow_destroy':False, 'allow_replace':False},43200),
+                                           ('stage-deploy',{'plan_id':'a'*32, 'allow_destroy':False, 'allow_replace':False},43200),
+                                           ('team-add',{'team':1},3600)]:
+            with self.subTest(operation=operation),tempfile.TemporaryDirectory() as directory:
+                store=JobStore(Path(directory)/'jobs.sqlite3')
+                job=store.submit('alice',100,operation,options)
+                with patch('crange_jobs.subprocess.run',return_value=SimpleNamespace(returncode=0,stdout='',stderr='')) as execute:
+                    self.assertTrue(store.run_next())
+                invocation=next(c for c in execute.call_args_list if ('infra-apply' if operation=='apply' else operation) in c.args[0])
+                self.assertEqual(invocation.kwargs['timeout'],expected)
+                self.assertEqual(store.get(job,['100'])['status'],'succeeded')
+
+    def test_worker_lanes_do_not_claim_network_verification_as_unprivileged_job(self):
+        with tempfile.TemporaryDirectory() as directory:
+            store = JobStore(Path(directory) / 'jobs.sqlite3')
+            network = store.submit('alice', 3, 'network-verify',
+                                   {'node': 'proxmox2', 'network': 'p003t254'})
+            normal = store.submit('alice', 3, 'team-add', {'team': 1})
+            with patch('crange_jobs.subprocess.run', return_value=SimpleNamespace(returncode=0, stdout='', stderr='')) as execute:
+                self.assertTrue(store.run_next())
+                self.assertEqual(execute.call_args.args[0][1], str(Path(__file__).resolve().parents[1] / 'scripts/crange.py'))
+            self.assertEqual(store.get(network, ['3'])['status'], 'queued')
+
+    def test_process_argument_type_error_fails_one_job_without_crashing_worker(self):
+        with tempfile.TemporaryDirectory() as directory:
+            store = JobStore(Path(directory) / 'jobs.sqlite3')
+            job = store.submit('alice', 100, 'mhl-business-configure', {'network_id': 254})
+            with patch('crange_jobs.subprocess.run', side_effect=TypeError(
+                    'expected str, bytes or os.PathLike object, not int')):
+                self.assertTrue(store.run_next())
+            result = store.get(job, ['100'])
+            self.assertEqual(result['status'], 'failed')
+            self.assertIn('expected str, bytes or os.PathLike object, not int', result['output'])
 
     def test_project_visibility_and_persistence(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -119,6 +253,32 @@ class JobTests(unittest.TestCase):
             self.assertEqual(record['status'], 'interrupted')
             self.assertIn('Cancelled before starting', record['output'])
             self.assertFalse(store.cancel(job, ['3']))
+
+    def test_external_dashboard_stop_reaches_the_owning_worker(self):
+        with tempfile.TemporaryDirectory() as directory:
+            database = Path(directory) / 'jobs.sqlite3'
+            worker, dashboard = JobStore(database), JobStore(database)
+            job = worker.submit('alice', 3, 'inventory', {})
+            with worker.connect() as db:
+                db.execute("UPDATE jobs SET status='running' WHERE id=?", (job,))
+            result = []
+            thread = threading.Thread(target=lambda:result.append(worker._run_streamed(
+                job, [sys.executable, '-u', '-c',
+                      'import threading; print("child ready", flush=True); threading.Event().wait(30)'],
+                os.environ.copy(), '', timeout=15)), daemon=True)
+            thread.start()
+            deadline = time.monotonic() + 5
+            while time.monotonic() < deadline and 'child ready' not in worker.get(job, ['3'])['output']:
+                time.sleep(.02)
+            self.assertIn('child ready', worker.get(job, ['3'])['output'])
+            self.assertFalse(dashboard._processes)
+            self.assertFalse(dashboard.cancel(job, ['4']))
+            self.assertTrue(dashboard.cancel(job, ['3']))
+            thread.join(5)
+            self.assertFalse(thread.is_alive())
+            self.assertEqual(result[0].returncode, 130)
+            self.assertEqual(worker.get(job, ['3'])['status'], 'interrupted')
+            self.assertTrue(worker.cancel_requested(job))
 
     def test_apply_job_exposes_only_reviewed_plan_id(self):
         with tempfile.TemporaryDirectory() as directory:

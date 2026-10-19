@@ -67,10 +67,11 @@ class BridgeTests(unittest.TestCase):
         broker.assert_called_once_with(data)
         api = Mock()
         api.status.return_value = 'running'
-        with patch('crange_guac_bridge._project_rows', return_value=[{'resource_key': 'vm:web'}]), \
-                patch('crange_guac_boxes.resolve', return_value=(None, None, None, api, 'vm', 'node', 123, None)):
+        with patch('crange_guac_bridge._project_rows', return_value=[{'resource_key':'vm:web','state':'running','power_error':None,'observed_at':123}]), \
+                patch('crange_guac_boxes.resolve') as resolve:
             self.assertEqual(box_status(data, auth=_Auth(), root=Path('/repo')),
-                             {'resource_key': 'vm:web', 'state': 'running'})
+                             {'resource_key':'vm:web','state':'running','power_error':None,'observed_at':123})
+            resolve.assert_not_called()
         with patch('crange_guac_bridge._project_rows', return_value=[]), \
                 patch('crange_guac_boxes.resolve') as resolve:
             with self.assertRaisesRegex(TicketError, 'access denied'):
@@ -156,11 +157,12 @@ class BridgeTests(unittest.TestCase):
             cfg = {'scenario_boxes': {'web': {'name': 'web', 'team_id': '1'},
                                       'secret': {'name': 'secret', 'team_id': '2'}}}
             auth, jobs = _Auth(), _Jobs()
-            with patch('crange.ENVS', envs), patch('crange.json_config', return_value=cfg):
+            with patch('crange.ENVS', envs), patch('crange.json_config', return_value=cfg), patch('crange_user_management.preferences', return_value={'display_name':'Meridian Harbor Logistics'}):
                 status, payload = handle('alice', {'operation': 'list'}, auth=auth,
                                          jobs=jobs, root=root)
                 self.assertEqual(status, 200)
                 self.assertEqual(len(payload['boxes']), 1)
+                self.assertEqual(payload['boxes'][0]['project_name'], 'Meridian Harbor Logistics (p003)')
                 self.assertEqual({p['protocol'] for p in payload['boxes'][0]['protocols']},
                                  {'ssh', 'vnc'})
                 with self.assertRaisesRegex(BridgeError, 'access denied'):

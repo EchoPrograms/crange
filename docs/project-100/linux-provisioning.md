@@ -31,8 +31,18 @@ Only deploy after reviewing the resulting four-host inventory and confirming
 that the selected guests are reachable on the accepted project network.
 
 The database and application roles require `mhl_db_runtime_password`; the build
-role requires `mhl_ci_synthetic_token`. Supply these through an operator-owned,
-project-protected Ansible vars file outside Git, for example:
+role requires `mhl_ci_synthetic_token`. The Project 100 team page now exposes
+**Configure MHL business services** for the selected staging/team network. Its
+fixed worker generates stable per-network values in
+`~/.config/crange/secrets/project-100/mhl-business-network-N.yml` with mode `0600`
+and runs only `ansible/linux/project-100-business.yml`. The UI accepts only a
+network ID inferred from the selected Team page; it cannot supply playbook,
+inventory, Ansible arguments, or secrets. A regular team is unchanged until
+that team is explicitly selected and configured. Team targets must also be
+applied release containers; hand-declared team services and release-test
+clones are refused.
+
+The equivalent operator path remains:
 
 ```sh
 ansible-playbook -i ansible/inventory/generated/project-100-mhl.json \
@@ -40,15 +50,40 @@ ansible-playbook -i ansible/inventory/generated/project-100-mhl.json \
   --extra-vars @/home/crange/.config/crange/project-100-mhl-secrets.yml
 ```
 
-Create that file only on the controller with restrictive permissions (mode
-`0600`), use unique synthetic values that meet each role's declared format
-checks, and keep it in the approved secrets store. Do not put secret values in
-inventory, command-line arguments, source control, shell history, or logs. The
+Keep any manually provisioned vars file only on the controller with restrictive
+permissions (mode `0600`). Do not put secret values in inventory, command-line
+arguments, source control, shell history, or logs. The
 database and application tasks suppress secret-bearing output; the build token
 is also installed into a protected root-owned artifact file.
+
+The fixed job refuses to run unless canonical applied inventory identifies all
+four expected guests in the selected network and their guest IDs, image IDs,
+address, declared template, and worker SSH identity match
+`crange-applied-placements.json`. If the scenario has not been placed yet, the
+job reports that the reviewed scenario plan must be applied first; it does not
+probe or contact undeclared guests. Release capture records the configured
+staging service profile metadata without copying any secrets into the release.
+
+The service-role job and API/GUI controls are deployed. All four staging
+containers exist and the fixed staging business workflow has run successfully.
+Seven declared Linux service checks passed. APP template CT134/P2 and backup
+template CT135/P2 now passed independent linked-clone verification for pending
+release 0.1.0. CI/database capture, complete fresh-release replay, and production
+rollout acceptance remain pending. See [STATUS.md](STATUS.md) for current jobs.
 
 The backup role has no secret input. The database and application roles are
 coupled by their network-specific `.30` and `.40` addresses, so deploy the full
 selected set only after those guests and their router/DNS path have passed the
 Project 100 network acceptance checks. Ansible syntax validation is safe before
 deployment; applying the playbook to absent or unaccepted guests is not.
+
+## Captured-container acceptance — October 12
+
+APP CT125 was captured through GUI job 6ac926cf6f76428ca2663ed9d759df35 to
+immutable template CT130/P2 and project-scoped image p100-image-2f571d3a89d3.
+The central archive checksum is verified. Independent linked clone CT20000
+passed identity/readiness and physical origin checks, then was deleted through
+confirmed tasks. Identity preparation clears only the isolated capture clone's
+machine-ID files before sealing; the staging source's identities are preserved.
+The partial release 0.0.1 is an image acceptance artifact, not the complete lab
+release. Cross-node restore and complete scenario testing remain required.

@@ -1,0 +1,20 @@
+{
+  "real_dashboard_request": {
+    "project": 100,
+    "operation": "mhl-business-configure",
+    "options": {
+      "network_id": 254
+    }
+  },
+  "job_id": "d32e4ecab18245388242191f51e88cad",
+  "scope": "staging only; five deployed companies remain on 0.1.2",
+  "javascript_errors": [],
+  "completion_not_yet_accepted": false,
+  "terminal_status": "succeeded",
+  "operation": "mhl-business-configure",
+  "checks": [
+    "actual HTTP artifact token authenticates warehouse-bot over local SSH",
+    "UID is unprivileged",
+    "no root, sudo, wheel or admin group"
+  ]
+}

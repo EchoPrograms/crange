@@ -1,5 +1,62 @@
 """Classify a Terraform plan before permitting a staging-only deployment."""
 import re
+import copy
+import json
+
+
+def staging_projection(cfg):
+    """Plan capacity only for staging; leave the persisted desired state intact."""
+    result = copy.deepcopy(cfg)
+    for field in ('jump_boxes', 'scenario_boxes', 'scenario_containers'):
+        result[field] = {key: value for key, value in cfg.get(field, {}).items()
+                         if str(value.get('team_id')) == '254'}
+    result['custom_networks'] = {key: value for key, value in cfg.get('custom_networks', {}).items()
+                                 if str(value.get('owner_team_id')) == '254'}
+    return result
+
+
+def staging_targets(cfg, state):
+    """Fixed Terraform scope includes desired and removed staging resources."""
+    staging = f'p{int(cfg["project_id"]):03d}t254'
+    bridges = {staging} | {f'p{int(cfg["project_id"]):03d}c{int(value["network_id"]):03d}'
+                          for value in cfg.get('custom_networks', {}).values()
+                          if str(value['owner_team_id']) == '254'}
+    targets = {'proxmox_sdn_vnet.staging'}
+    for field, module in (('jump_boxes', 'jumpbox'), ('scenario_boxes', 'scenario_box'),
+                          ('scenario_containers', 'scenario_container')):
+        for key, value in cfg.get(field, {}).items():
+            if str(value.get('team_id')) == '254':
+                targets.add(f'module.{module}[{json.dumps(key)}]')
+    for key, value in cfg.get('custom_networks', {}).items():
+        if str(value['owner_team_id']) == '254':
+            targets.update((f'module.custom_router[{json.dumps(key)}]',
+                            f'proxmox_sdn_vnet.custom[{json.dumps(key)}]'))
+    def walk(module):
+        yield from module.get('resources', [])
+        for child in module.get('child_modules', []):
+            yield from walk(child)
+    resources = list(walk(state.get('values', {}).get('root_module', {})))
+    # Learn prior staging subnets first, independent of Terraform state ordering.
+    for resource in resources:
+        address = resource.get('address', '')
+        custom = re.match(r'(module\.custom_router\["[^"\]]+"\])\.', address)
+        value = resource.get('values', {})
+        nics = value.get('network_interface', [])
+        interfaces = {nic.get('name'): nic.get('bridge') for nic in nics}
+        if custom and interfaces.get('eth0') == staging:
+            targets.add(custom[1])
+            if interfaces.get('eth1'):
+                bridges.add(interfaces['eth1'])
+    for resource in resources:
+        address = resource.get('address', '')
+        value = resource.get('values', {})
+        match = re.match(r'(module\.(?:jumpbox|scenario_box|scenario_container)\["[^"\]]+"\])\.', address)
+        nics = value.get('network_device', value.get('network_interface', []))
+        if match and nics and all(nic.get('bridge') in bridges for nic in nics):
+            targets.add(match[1])
+        if address.startswith('proxmox_sdn_vnet.custom[') and value.get('id') in bridges:
+            targets.add(address)
+    return sorted(targets)
 
 
 def staging_blockers(detail, cfg):

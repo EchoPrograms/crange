@@ -1,0 +1,28 @@
+{
+  "project": 100,
+  "jobs": [
+    {
+      "id": "b9dac5d4da124840bab762590aa38e93",
+      "operation": "guac-refresh",
+      "status": "succeeded"
+    },
+    {
+      "id": "36db335306804229bb028baec32ac3a3",
+      "operation": "template-cache-restore-resume",
+      "status": "succeeded"
+    },
+    {
+      "id": "7ec764af704a4db4a7e44f5ac8d4a202",
+      "operation": "release-configure",
+      "status": "running"
+    }
+  ],
+  "guacamole_applied_real_server_connections": 36,
+  "undeployed_workstations_excluded": 20,
+  "parrot_p6_existing_restore_verified": true,
+  "parrot_cache_template": 169,
+  "disposable_probe": 219,
+  "probe_cleanup_succeeded": true,
+  "cache_reservation": "released",
+  "company_health_not_yet_accepted": true
+}

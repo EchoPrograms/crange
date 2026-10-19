@@ -68,7 +68,7 @@ class NetworkRunnerTests(unittest.TestCase):
     def run_probe(self):
         return self.runner.run(self.fixture.scope,source_revision='b'*40,tested_at='2026-10-06T12:00:00Z')
 
-    def record(self): return json.loads(self.journal.read_text())
+    def record(self): return json.loads(self.runner.journal.read_text())
 
     def test_receipt_only_after_all_checks_owned_cleanup_and_reservation_release(self):
         receipt=self.run_probe()
@@ -81,6 +81,18 @@ class NetworkRunnerTests(unittest.TestCase):
         self.assertEqual(self.record()['rule']['destination'],'10.240.254.98/32')
         self.assertEqual(self.record()['rule']['sources'],['10.60.0.20','10.60.0.10'])
 
+    def test_protected_diagnostic_receives_original_before_public_classification(self):
+        self.backend.failure = 'test'
+        errors = []
+        with self.assertRaises(ValueError):
+            self.runner.run(self.fixture.scope, source_revision='b' * 40,
+                            tested_at='2026-10-06T12:00:00Z', diagnostic=errors.append)
+        self.assertEqual(len(errors), 1)
+        self.assertIsInstance(errors[0], RuntimeError)
+        self.assertEqual(str(errors[0]), 'private provider detail')
+        self.assertNotIn('private provider detail', self.runner.journal.read_text())
+        self.assertEqual(self.record()['cause'], 'runtimeerror_detail_redacted')
+
     def test_partial_create_rule_and_check_failure_all_attempt_owned_destroy(self):
         for failure in ('create','rule_install','test'):
             with self.subTest(failure=failure):
@@ -91,7 +103,7 @@ class NetworkRunnerTests(unittest.TestCase):
                 self.assertNotIn('receipt',self.record())
                 self.assertFalse(self.backend.exists)
                 self.assertFalse(self.backend.rules)
-                self.assertNotIn('private provider detail',self.journal.read_text())
+                self.assertNotIn('private provider detail',self.runner.journal.read_text())
                 self.assertEqual(self.record()['cause'],'timeout_detail_redacted' if failure=='create' else 'runtimeerror_detail_redacted')
 
     def test_reservation_error_is_bounded_in_owned_journal(self):
@@ -99,7 +111,7 @@ class NetworkRunnerTests(unittest.TestCase):
         with self.assertRaises(ValueError):self.run_probe()
         self.assertEqual(self.record()['state'],'reservation_uncertain')
         self.assertEqual(self.record()['cause'],'valueerror_detail_redacted')
-        self.assertNotIn('private provider detail',self.journal.read_text())
+        self.assertNotIn('private provider detail',self.runner.journal.read_text())
 
     def test_failed_check_name_and_safe_category_survive_cleanup(self):
         from crange_network_runner import require_diagnostic
@@ -114,6 +126,30 @@ class NetworkRunnerTests(unittest.TestCase):
         self.assertEqual(record['completed_checks'],['controller'])
         self.assertEqual(record['cause'],'dns_dhcp_dora_failed')
         self.assertEqual(record['state'],'failed_cleaned')
+        self.assertTrue(self.backend.released)
+
+    def test_cooperative_cancel_stops_checks_then_completes_owned_cleanup(self):
+        requested = {'value': False}
+        run_check = self.backend.run_check
+
+        def check_then_request(target, check, timeout):
+            result = run_check(target, check, timeout)
+            requested['value'] = True
+            return result
+
+        self.backend.run_check = check_then_request
+        with self.assertRaisesRegex(ValueError, 'Network acceptance failed'):
+            self.runner.run(self.fixture.scope, source_revision='b' * 40,
+                            tested_at='2026-10-06T12:00:00Z',
+                            cancellation_requested=lambda: requested['value'])
+
+        checks = [call[1] for call in self.backend.calls
+                  if isinstance(call, tuple) and call[0] == 'check']
+        self.assertEqual(checks, ['controller'])
+        self.assertEqual(self.record()['cause'], 'cancel_requested')
+        self.assertEqual(self.record()['state'], 'failed_cleaned')
+        self.assertFalse(self.backend.exists)
+        self.assertFalse(self.backend.rules)
         self.assertTrue(self.backend.released)
 
     def test_rule_cleanup_failure_does_not_skip_destroy_and_retains_reservation(self):

@@ -14,6 +14,24 @@ from pathlib import Path
 
 CHECKS = frozenset({'vxlan_mtu', 'controller', 'guacamole', 'dns',
                     'internet_egress', 'team_isolation'})
+CONTROLLER_SOURCE_FILES = frozenset({
+    'crange_network_worker.py','crange_network_workflow.py','crange_network_runner.py',
+    'crange_network_adapters.py','crange_network_acceptance.py','crange_network_checks.py',
+    'crange_network_guac_probe.py'})
+
+
+def validate_source_binding(binding):
+    require(isinstance(binding,dict) and set(binding)=={'schema_version','controller_sha256','relay_sha256','git_dirty'}
+            and type(binding['schema_version']) is int and binding['schema_version']==1 and type(binding['git_dirty']) is bool,
+            'Invalid workflow source binding.')
+    hashes=binding['controller_sha256']
+    require(isinstance(hashes,dict) and set(hashes)==CONTROLLER_SOURCE_FILES,
+            'Bind every fixed controller workflow source file.')
+    require(all(isinstance(value,str) and re.fullmatch(r'[a-f0-9]{64}',value)
+                for value in list(hashes.values())+[binding['relay_sha256']]),
+            'Workflow source hashes must be SHA-256.')
+    return binding
+
 PROBE_ADDRESS = 'proxmox_virtual_environment_vm.network_acceptance_probe'
 
 
@@ -25,7 +43,7 @@ def require(condition, message):
 def scope(project_id, node, vnet, address, vmid, job_id):
     require(type(project_id) is int and 1 <= project_id <= 255 and project_id not in (60, 61),
             'Invalid range project.')
-    require(isinstance(node, str) and re.fullmatch(r'proxmox[1-5]', node), 'Invalid enrolled node.')
+    require(isinstance(node, str) and re.fullmatch(r'proxmox[1-6]', node), 'Invalid enrolled node.')
     require(isinstance(vnet, str) and re.fullmatch(fr'p{project_id:03d}[tc](?:00[1-9]|0[1-9][0-9]|1[0-9]{{2}}|2[0-4][0-9]|25[0-4])', vnet),
             'Choose an exact project team/custom LAN VNet; transit acceptance is separate.')
     lan_id = int(vnet[-3:])
@@ -74,7 +92,9 @@ def probe_from_plan(plan, operation, expected):
 
 
 def validate_receipt(report, create_plan, delete_plan):
-    require(isinstance(report, dict) and report.get('schema_version') == 1, 'Unsupported evidence schema.')
+    require(isinstance(report, dict) and type(report.get('schema_version')) is int and report.get('schema_version') in (1,2), 'Unsupported evidence schema.')
+    if report['schema_version']==1:
+        require('source_binding' not in report,'Legacy evidence cannot claim bound workflow sources.')
     expected = scope(**report['scope'])
     probe_from_plan(create_plan, 'create', expected)
     probe_from_plan(delete_plan, 'delete', expected)
@@ -91,6 +111,13 @@ def validate_receipt(report, create_plan, delete_plan):
         require(type(duration) in (int, float) and 0 < duration <= 60, f'{name} must be bounded to 60 seconds.')
         require(isinstance(result.get('artifact_sha256'), str) and re.fullmatch(r'[a-f0-9]{64}', result['artifact_sha256']),
                 f'{name} needs retained command-level evidence.')
+    if report['schema_version']==2:
+        binding=validate_source_binding(report.get('source_binding'))
+        guac=checks['guacamole']
+        require(guac.get('source_address')=='10.60.0.10' and
+                guac.get('target_address')==expected['address'].split('/')[0] and guac.get('target_port')==22
+                and guac.get('relay_sha256')==binding['relay_sha256'],
+                'Guac evidence must bind actual source, owned target and reviewed relay code.')
     cleanup = report.get('cleanup', {})
     for key in ('vmid_absent_before', 'vmid_absent_after', 'probe_state_empty', 'temporary_rules_absent', 'input_unchanged'):
         require(cleanup.get(key) is True, f'Cleanup evidence missing: {key}.')

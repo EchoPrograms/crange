@@ -131,16 +131,33 @@ def _access(auth, root: Path, project: int, username: str):
     return connections, available & current & applied_grants
 
 
-def _project_rows(auth, root: Path, project: int, username: str):
-    from crange import ENVS, json_config
+def _project_rows(auth, root: Path, project: int, username: str, *, include_state=False):
+    from crange import CrangeError, ENVS, json_config, templates_for
     from crange_jumpboxes import FIELDS
     path = ENVS / f'project-{project:03d}'
-    if not path.is_dir():
+    from crange_project_lifecycle import is_active
+    if not path.is_dir() or not is_active(path):
         return []
     connections, allowed = _access(auth, root, project, username)
     if not allowed:
         return []
     cfg = json_config(path)
+    try:
+        outputs = json.loads((path / 'terraform.tfstate').read_text()).get('outputs', {})
+    except (OSError, ValueError):
+        outputs = {}
+    from crange_user_management import preferences
+    display_name = preferences(auth, project)['display_name'] or f'Project {project}'
+    project_name = f'{display_name} (p{project:03d})'
+    try:
+        approvals = templates_for(path)
+    except (CrangeError, OSError, ValueError):
+        approvals = {}
+    try:
+        admins=json.loads(Path(os.environ.get('CRANGE_GUAC_MANAGEMENT_ADMINS',
+                          '/home/crange/.config/crange/guac-management-admins.json')).read_text())
+    except (OSError,ValueError):admins=[]
+    console_admin=isinstance(admins,list) and username in admins
     grouped = {}
     for item in connections:
         key = str(item.get('resource_key', ''))
@@ -150,15 +167,29 @@ def _project_rows(auth, root: Path, project: int, username: str):
         box = cfg.get(FIELDS.get(kind, ''), {}).get(name)
         if not box:
             continue
+        profile = approvals.get(box.get('template'), {}).get('profile', {})
+        ostype = str(profile.get('os_type', '')).lower()
+        guest_os = item.get('guest_os') or ('linux' if kind == 'container' or ostype.startswith(('l2', 'l6')) else 'windows' if ostype.startswith('win') else 'bsd' if 'bsd' in ostype else '')
+        field = FIELDS.get(kind, '')
+        guest = (outputs.get(field, {}).get('value') or {}).get(name, {})
+        network = cfg.get('custom_networks', {}).get(box.get('network_key', ''))
+        network_id = int(network['network_id']) if network else int(box['team_id'])
+        vnet = f'p{project:03d}{"c" if network else "t"}{network_id:03d}'
+        guest_name = f'{vnet}-jump-{int(box.get("jump_number",1)):02d}' if kind == 'jumpbox' else f'{vnet}-{box["name"]}'
         row = grouped.setdefault(key, {
-            'project': project, 'resource_key': key, 'kind': kind,
-            'name': box.get('display_name') or name, 'ip': item['address'],
+            'project': project, 'project_name': project_name, 'guest_id': guest.get('id'), 'guest_name': guest_name, 'resource_key': key, 'kind': kind,
+            'name': box.get('display_name') or name, 'ip': item['address'], 'guest_os': guest_os,
             'team': 0 if int(box['team_id']) == 254 else int(box['team_id']),
             'desired_power': 'running' if box.get('started', True) else 'stopped',
             'protocols': [],
+            'console_available':console_admin and kind in ('vm','jumpbox','container'),
         })
         row['protocols'].append({'protocol': item['protocol'], 'connection_name': item['name']})
-    return list(grouped.values())
+    rows = list(grouped.values())
+    if include_state:
+        from crange_live_status import box_states
+        rows = box_states(rows)
+    return rows
 
 
 def broker_rows(auth, root, project, username):
@@ -200,6 +231,10 @@ def handle(username: str, request: dict, *, auth, jobs, root: Path, rows_provide
                               'status': job['status'], 'output': job['output']}
         return 200, {'boxes': rows}
 
+    if operation == 'power-status':
+        from crange_guac_ticket import request_broker
+        return 200, request_broker({'operation':'guac-power-status','username':username})
+
     if operation == 'native-inventory':
         from crange_guac_ticket import request_broker
         result = request_broker({'operation': 'guac-native-inventory', 'username': username,
@@ -223,6 +258,12 @@ def handle(username: str, request: dict, *, auth, jobs, root: Path, rows_provide
         from crange_guac_ticket import request_broker
         return 200, request_broker({'operation': 'guac-box-status', 'username': username,
                                    'project': project, 'resource_key': key})
+    if operation=='console':
+        if not any(row['resource_key']==key and row.get('console_available') for row in rows):
+            raise BridgeError('Administrator console access denied.')
+        from crange_guac_ticket import request_broker
+        return 200,request_broker({'operation':'guac-console-ticket','username':username,
+                                  'project':project,'resource_key':key})
 
     if operation == 'submit':
         action = request.get('action')

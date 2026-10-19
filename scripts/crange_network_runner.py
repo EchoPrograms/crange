@@ -75,7 +75,14 @@ class NetworkProbeRunner:
         self.journal = Path(journal)
         self.clock = clock
 
-    def run(self, target, *, source_revision, tested_at):
+    def run(self, target, *, source_revision, tested_at, cancellation_requested=lambda: False,
+            progress=lambda _message: None, diagnostic=lambda _error: None, source_binding=None):
+        def retain(error):
+            try:
+                diagnostic(error)
+            except Exception:
+                pass  # Diagnostic storage must never interrupt owned cleanup.
+
         target = scope(**target)
         if self.journal.exists():
             raise ValueError('Existing probe journal requires owned reconciliation; never retry allocation blindly.')
@@ -108,8 +115,10 @@ class NetworkProbeRunner:
         # Journal before every possible mutation; uncertain reservations are kept.
         save('reserving')
         try:
+            progress('Reserving approved capacity, probe address and VMID.')
             self.backend.reserve(target)
         except Exception as error:
+            retain(error)
             save('reservation_uncertain', failure=type(error).__name__,
                  cause=safe_failure_cause(error))
             raise
@@ -128,32 +137,46 @@ class NetworkProbeRunner:
             if self.backend.reviewed_plan(target, 'create', digest) is not True:
                 raise ValueError('Exact create plan lacks administrator review.')
             save('create_pending', create_plan_sha256=digest)
+            progress('Capacity reserved; applying the inspected single-probe saved plan.')
             created = True  # apply may partially succeed or time out
             self.backend.apply_saved_plan(target, 'create', digest, timeout=600)
             save('created')
+            progress('Disposable probe created; installing temporary management access.')
             rule_attempted = True  # rule mutation may partially succeed
             save('management_rule_pending')
             self.backend.install_management_rule(target, rule)
             save('testing')
             for check in sorted(CHECKS):
+                # Cancellation is cooperative: stop before starting another
+                # diagnostic, then let the owned cleanup below complete.
+                if cancellation_requested():
+                    error = ValueError('Network acceptance cancellation requested.')
+                    error.safe_cause = 'cancel_requested'
+                    raise error
                 save('testing', active_check=check)
+                progress('Running fixed network check: ' + check + '.')
                 started = self.clock()
                 result = self.backend.run_check(target, check, timeout=60)
                 elapsed = self.clock() - started
                 if not isinstance(result, dict) or result.get('passed') is not True or not 0 < elapsed <= 60:
                     raise ValueError('Fixed network check failed or exceeded deadline: ' + check)
                 checks[check] = dict(result, duration_seconds=elapsed)
+                progress('Fixed network check passed: ' + check + '.')
                 save('testing', completed_checks=sorted(checks), active_check=None)
         except Exception as error:
-            # Do not persist exception text: provider errors can contain secrets.
+            # A protected root-owned sink runs before public categorization.
+            retain(error)
             failure = type(error).__name__
             cause = safe_failure_cause(error)
         finally:
+            if created or rule_attempted:
+                progress('Cleaning up the owned probe and temporary management rule.')
             if rule_attempted:
                 save('rule_cleanup_pending')
                 try:
                     self.backend.remove_management_rule(target, rule)
-                except Exception:
+                except Exception as error:
+                    retain(error)
                     cleanup_errors.append('management_rule')
             if created:
                 save('destroy_pending')
@@ -165,7 +188,8 @@ class NetworkProbeRunner:
                         raise ValueError('Exact destroy plan lacks administrator review.')
                     save('destroy_pending', delete_plan_sha256=digest)
                     self.backend.apply_saved_plan(target, 'delete', digest, timeout=600)
-                except Exception:
+                except Exception as error:
+                    retain(error)
                     cleanup_errors.append('probe')
         try:
             cleanup = {
@@ -178,7 +202,8 @@ class NetworkProbeRunner:
             }
             if not all(cleanup[key] for key in cleanup if key != 'artifact_sha256'):
                 cleanup_errors.append('absence_verification')
-        except Exception:
+        except Exception as error:
+            retain(error)
             cleanup_errors.append('absence_verification')
             cleanup = {}
         if cleanup_errors:
@@ -188,16 +213,21 @@ class NetworkProbeRunner:
         # Failed tests can release only after absence has been independently checked.
         save('cleaned_release_pending', cleanup=cleanup)
         self.backend.release_reservation(target)
+        progress('Owned guest, temporary rule, state and reservation cleanup confirmed.')
         if failure:
             save('failed_cleaned', failure=failure, cause=cause)
             raise ValueError('Network acceptance failed; owned probe and temporary rules removed.')
-        receipt = {'schema_version': 1, 'scope': target, 'zone': 'crange', 'mtu': 1450,
+        receipt = {'schema_version': 2 if source_binding is not None else 1, 'scope': target, 'zone': 'crange', 'mtu': 1450,
                    'source_revision': source_revision, 'tested_at': tested_at,
                    'checks': checks, 'cleanup': cleanup}
+        if source_binding is not None:
+            receipt['source_binding']=source_binding
         try:
             validate_receipt(receipt, create, delete)
-        except Exception:
+        except Exception as error:
+            retain(error)
             save('failed_cleaned', failure='InvalidEvidence')
             raise ValueError('Completed run has invalid evidence; no receipt issued.')
         save('accepted_cleaned', receipt=receipt)
+        progress('All six checks passed; accepted receipt retained for this exact tuple.')
         return receipt

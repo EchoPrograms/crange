@@ -9,10 +9,27 @@ from unittest.mock import Mock, patch
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'scripts'))
 
 from crange import CrangeError
-from crange_guac_boxes import power, snapshots
+from crange_guac_boxes import power, snapshots, resolve
 
 
 class BoxActionsTests(unittest.TestCase):
+    def test_resolve_automatic_or_migrated_guest_uses_live_node(self):
+        api = Mock()
+        api.request.return_value = [{'vmid': 123, 'type': 'qemu', 'node': 'proxmox5'}]
+        api.vm.return_value = {'name': 'p003t001-web', 'net0': 'virtio=AA,bridge=p003t001'}
+        with patch('crange.project_dir', return_value=Path('/project')), \
+             patch('crange.json_config', return_value={'scenario_boxes': {'web': {'team_id': 1, 'name': 'web', 'node_name': 'auto'}}}), \
+             patch('crange.output_json', return_value={'scenario_boxes': {'value': {'web': {'id': 123, 'address': '10.3.1.20', 'node_name': 'proxmox1'}}}}), \
+             patch('crange.ProxmoxAPI', return_value=api):
+            self.assertEqual(resolve(3, 'vm:web')[5], 'proxmox5')
+            api.vm.assert_called_once_with('proxmox5', 123)
+            api.vm.return_value['net0'] = 'virtio=AA,bridge=p004t001'
+            with self.assertRaisesRegex(CrangeError, 'network does not match'):
+                resolve(3, 'vm:web')
+            api.request.return_value = []
+            with self.assertRaisesRegex(CrangeError, 'missing or ambiguous'):
+                resolve(3, 'vm:web')
+
     def fixture(self, kind='vm'):
         api = Mock()
         box = {'started': True}

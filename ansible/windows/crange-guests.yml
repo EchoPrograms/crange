@@ -1,0 +1,60 @@
+---
+- name: Apply the fixed CRANGE Windows access baseline
+  hosts: windows_guests
+  gather_facts: false
+  serial: 1
+  pre_tasks:
+    - name: Wait for authenticated Windows management after initial boot
+      ansible.builtin.wait_for_connection:
+        connect_timeout: 30
+        sleep: 5
+        timeout: 600
+    - name: Require an approved, applied Windows guest and worker-bound login
+      ansible.builtin.assert:
+        that:
+          - crange_project_id | int >= 1
+          - crange_box_key is match('^[a-z][a-z0-9_.-]{0,63}$')
+          - crange_guest_id | int >= 100
+          - crange_image_id | length > 0
+          - crange_guest_network_id | int >= 1
+          - crange_guest_network_id | int <= 254
+          - ansible_host is match('^10\.' ~ (crange_project_id | string) ~ '\.' ~ (crange_guest_network_id | string) ~ '\.')
+          - ansible_user | length > 0
+          - ansible_password | length >= 16
+        fail_msg: Windows access requires canonical applied identity and its worker-private credential.
+      no_log: true
+  tasks:
+    - name: Enable RDP and restrict RDP and WinRM to their approved management sources
+      ansible.windows.win_powershell:
+        script: |
+          $ErrorActionPreference = 'Stop'
+          Set-ItemProperty -Path 'HKLM:\SYSTEM\CurrentControlSet\Control\Terminal Server' `
+            -Name 'fDenyTSConnections' -Value 0
+          Set-Service -Name 'TermService' -StartupType Automatic
+          Start-Service -Name 'TermService'
+          Set-Service -Name 'WinRM' -StartupType Automatic
+          $policies = @(
+            @{ Name = 'RemoteDesktop*'; RemoteAddress = '10.60.0.10' },
+            @{ Name = 'WINRM*'; RemoteAddress = '10.60.0.20' }
+          )
+          foreach ($policy in $policies) {
+            $rules = Get-NetFirewallRule -Name $policy.Name -ErrorAction Stop |
+              Where-Object { $_.Direction -eq 'Inbound' }
+            if (-not $rules) { throw "No inbound firewall rules found matching $($policy.Name)." }
+            $rules | Set-NetFirewallRule -Enabled True -Profile Any -Direction Inbound
+            $rules | Get-NetFirewallAddressFilter |
+              Set-NetFirewallAddressFilter -RemoteAddress $policy.RemoteAddress
+          }
+          # This health exception adds no TCP service and accepts echo only
+          # from the guest's own declared router, including during NLA startup.
+          $gateway = '10.{{ crange_project_id }}.{{ crange_guest_network_id }}.1'
+          $health = @{
+            Action = 'Allow'; Direction = 'Inbound'; Enabled = 'True'; Profile = 'Any'
+            Protocol = 'ICMPv4'; IcmpType = '8'; RemoteAddress = $gateway
+          }
+          if (Get-NetFirewallRule -Name 'CRANGE-Router-Health-ICMPv4' -ErrorAction SilentlyContinue) {
+            Set-NetFirewallRule -Name 'CRANGE-Router-Health-ICMPv4' @health | Out-Null
+          } else {
+            New-NetFirewallRule -Name 'CRANGE-Router-Health-ICMPv4' `
+              -DisplayName 'CRANGE router health echo' @health | Out-Null
+          }

@@ -1,0 +1,10 @@
+{
+  "job_id": "f3a5c66716154d95b30c5503ca10b380",
+  "checks": {
+    "scroll_position_survives_real_output_update": true,
+    "dialog_stays_open_after_update": true,
+    "closing_dialog_keeps_capture_running": true
+  },
+  "passed": true,
+  "time": 1792028745
+}

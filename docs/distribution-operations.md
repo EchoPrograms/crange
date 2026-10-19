@@ -1,3 +1,10 @@
+> Current enrollment update (2026-10-15): Proxmox 6 has joined the cluster and
+> passed pinned-provider, VM and CT cache acceptance on local-lvm. Its local-hdd
+> datastore was converted from an empty thick VG to a verified native thin pool.
+> Exact project/LAN admission still requires published network receipts; see
+> [the live enrollment record](project-100/proxmox6-enrollment.md).
+> Older pilot restrictions below describe the original rollout.
+
 # Distribution implementation and activation
 
 The automatic-placement code and Cluster GUI were deployed to the controller on
@@ -120,7 +127,7 @@ capture provenance alongside the existing artifact verification evidence.
 Identity records contain a machine ID and public SSH host key; retain them as
 release provenance.
 
-## Remaining activation gates
+## Historical activation gates (October 2026 pilot)
 
 1. Dedicated CT145/NFS library and scoped storage/discovery permissions were deployed and verified on 2026-10-02; see [library-deployment.md](library-deployment.md). Independent backup/restore protection remains pending. The legacy Alpine P1 pilot has linked-clone acceptance; the portable Alpine image cache is verified on P2, P3 and P5. Broader image/archive acceptance remains pending.
 2. Global read-only VM.Audit and library storage ACLs are installed; preserve those narrowly scoped roles and validate fresh discovery before admission.

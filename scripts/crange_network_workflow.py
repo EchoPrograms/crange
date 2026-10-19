@@ -6,13 +6,17 @@ import hashlib
 import json
 import os
 from pathlib import Path
+import sys
 import re
 import subprocess
+import stat
+import traceback
 from datetime import datetime, timezone
 
 from crange_network_acceptance import require, probe_from_plan, validate_bundle
-from crange_network_adapters import (SavedTerraformProbe, BoundedPVE, FixedRouterUFW,
-    FixedManagementChecks, cluster_probe, durable_json, protected, reconcile_owned_probe)
+from crange_network_adapters import (SavedTerraformProbe, BoundedPVE, router_firewall,
+    FixedManagementChecks, cluster_probe, durable_json, protected, reconcile_owned_probe,
+    controller_source_hashes, trusted_relay_source_hash)
 from crange_network_checks import FixedGuestNetworkChecks, drop_counter
 from crange_network_runner import NetworkProbeRunner, plan_digest
 from crange_placement import ReservationLedger
@@ -29,6 +33,46 @@ def no_active_node_tasks(api, node):
     return not tasks
 
 
+def cancellation_requested():
+    """Read the durable queue flag; do not infer cancellation from signals."""
+    job_id=os.environ.get('CRANGE_JOB_ID')
+    database=os.environ.get('CRANGE_JOB_DB')
+    if not job_id or not database:
+        return False
+    import sqlite3
+    with sqlite3.connect(database,timeout=10) as db:
+        row=db.execute('SELECT operation,cancel_requested FROM jobs WHERE id=?',(job_id,)).fetchone()
+    return bool(row and row[0]=='network-verify' and row[1])
+
+
+def _persist_workflow_error(job_id, error, *, probe_root=Path('/var/lib/crange-network-probes')):
+    """Keep precise workflow diagnostics in the root-only owned bundle."""
+    if isinstance(job_id,str) and job_id.startswith('network-'):
+        job_id=job_id.removeprefix('network-')
+    if not re.fullmatch(r'[a-f0-9]{32}', job_id or ''):
+        return
+    directory=Path(probe_root)/('network-'+job_id)
+    try:
+        info=directory.lstat()
+        if not stat.S_ISDIR(info.st_mode) or stat.S_ISLNK(info.st_mode) or info.st_uid != os.geteuid():
+            return
+        fd=os.open(directory/'workflow-error.txt',os.O_WRONLY|os.O_CREAT|os.O_APPEND|os.O_NOFOLLOW,0o600)
+        try:
+            info=os.fstat(fd)
+            if not stat.S_ISREG(info.st_mode) or info.st_uid != os.geteuid():
+                return
+            os.fchmod(fd,0o600)
+            with os.fdopen(fd,'w',closefd=False) as stream:
+                stream.write('exception='+type(error).__name__+'\n')
+                stream.write(traceback.format_exc())
+                stream.flush()
+                os.fsync(fd)
+        finally:
+            os.close(fd)
+    except OSError:
+        return
+
+
 class NetworkAcceptanceBackend:
     def __init__(self, saved, api, ledger, *, run=subprocess.run):
         self.saved=saved
@@ -42,6 +86,11 @@ class NetworkAcceptanceBackend:
         self.project=saved.manifest['scope']['project_id']
         from crange import project_dir
         self.project_path=project_dir(str(self.project))
+        from crange_network_acceptance import validate_source_binding
+        self.source_binding=validate_source_binding(saved.manifest.get('source_binding'))
+        require(self.source_binding['controller_sha256']==controller_source_hashes() and
+                self.source_binding['relay_sha256']==trusted_relay_source_hash(),
+                'Reviewed workflow source binding differs from deployment.')
         self.inputs=self._project_inputs()
         require(saved.manifest.get('project_input_sha256')==self.inputs,'Project input revision differs from approved manifest.')
         self.plan=saved.inspect('create')
@@ -79,24 +128,40 @@ class NetworkAcceptanceBackend:
         self.capacity={'memory_mb':memory[0]['dedicated'],'cpu_cores':cpu[0]['cores'],
                        'disk_gb':max(source_disk,sum(row['size'] for row in disks))*1.1}
         self.routers=self._routers()
-        self.router=FixedRouterUFW(self.target,project_router=self.routers['project_router'],
-                                   team_router=self.routers['team_router'])
-        self.management=FixedManagementChecks(self.transport,saved.manifest['origins'])
+        self.router=router_firewall(self.target,self.routers)
+        self.management=FixedManagementChecks(self.transport,saved.manifest['origins'],
+                                               guac_probe=self._guac_origin_probe)
         self.guest=FixedGuestNetworkChecks(self.transport,self.router,router_node=self.routers['node'],
+                                         project_router_node=self.routers.get('project_node'),
                                          other_team_id=saved.manifest['other_team_id'])
 
     def _project_inputs(self):
-        files={path.name:path for path in self.project_path.iterdir()
-               if path.name.endswith(('.tf','.tf.json','.tfvars','.tfvars.json')) or path.name=='.terraform.lock.hcl'}
-        require(bool(files),'Project desired-state inputs missing.')
-        return {name:hashlib.sha256(path.read_bytes()).hexdigest() for name,path in sorted(files.items())}
+        from crange_network_adapters import project_input_hashes
+        return project_input_hashes(self.project_path)
+
+    def _guac_origin_probe(self,target,origin,*,timeout):
+        require(1 <= timeout <= 60 and origin == self.saved.manifest['origins']['guacamole'],
+                'Fixed Guac origin request differs from the protected manifest.')
+        command=['/usr/sbin/runuser','-u','crange','--',sys.executable,
+                 str(Path(__file__).with_name('crange_network_guac_probe.py')),
+                 '--project',str(target['project_id']),'--node',target['node'],
+                 '--network',target['vnet'],'--address',target['address'],
+                 '--vmid',str(target['vmid']),'--job-id',target['job_id'],
+                 '--guac-node',origin['node'], '--relay-source-sha256',self.source_binding['relay_sha256']]
+        result=self.run(command,capture_output=True,text=True,timeout=timeout,check=False)
+        require(result.returncode==0,'Fixed Guac-origin relay request failed.')
+        response=json.loads(result.stdout)
+        require(isinstance(response,dict) and response.get('passed') is True and
+                response.get('origin')==origin,'Fixed Guac-origin relay response differs.')
+        return response
 
     def _routers(self):
         output=self.run(['terraform','output','-json','routers'],cwd=self.project_path,
                         capture_output=True,text=True,timeout=30,check=False)
         require(output.returncode==0,'Cannot read project router desired-state outputs.')
         routers=json.loads(output.stdout)
-        require(self.target['vnet'][4]=='t','Custom-router acceptance needs a separate routed-origin adapter.')
+        if self.target['vnet'][4] == 'c':
+            return self._custom_routers(routers)
         team=int(self.target['vnet'][-3:])
         router=routers['staging'] if team==254 else routers['teams'][str(team)]
         require(router['lan']==str(__import__('ipaddress').ip_interface(self.target['address']).network),
@@ -112,7 +177,73 @@ class NetworkAcceptanceBackend:
         net=dict(item.split('=',1) for item in config.get('net1','').split(',') if '=' in item)
         gateway=self.target['address'].split('/')[0].rsplit('.',1)[0]+'.1/24'
         require(net.get('ip')==gateway and net.get('bridge')==self.target['vnet'], 'Router downstream interface differs.')
-        return {'project_router':routers['project']['address'],'team_router':router['address'],'node':node}
+        result = {'project_router':routers['project']['address'],'team_router':router['address'],'node':node}
+        if node == self.target['node']:
+            project = routers['project']
+            parent = [row for row in rows if int(row.get('vmid', 0)) == project['id']]
+            require(len(parent) == 1 and parent[0].get('type') == 'lxc' and parent[0].get('status') == 'running',
+                    'Project router identity is not live.')
+            parent_node = parent[0]['node']
+            require(parent_node in {f'proxmox{i}' for i in range(1,7)}, 'Project router node is not enrolled.')
+            parent_config = self.api.request('GET', f'/nodes/{parent_node}/lxc/{project["id"]}/config')
+            require(f'p{self.project:03d}' in str(parent_config.get('tags', '')).split(';'),
+                    'Project router ownership differs.')
+            transit = f'p{self.project:03d}tr'
+            parent_lan = dict(item.split('=',1) for item in parent_config.get('net1','').split(',') if '=' in item)
+            uplink = dict(item.split('=',1) for item in config.get('net0','').split(',') if '=' in item)
+            require(parent_lan.get('bridge') == transit and parent_lan.get('ip') == f'10.{self.project}.0.1/24'
+                    and uplink.get('bridge') == transit and uplink.get('gw') == f'10.{self.project}.0.1',
+                    'Verified routers do not share the declared project transit.')
+            result['project_node'] = parent_node
+        return result
+
+    def _custom_routers(self, routers):
+        from crange import json_config
+        from crange_network_worker import declared_router_path
+        cfg = json_config(self.project_path)
+        chain = declared_router_path(self.project, cfg, routers, self.target['vnet'])
+        project, parent, custom = chain
+        owner = int(custom['owner_team_id'])
+        rows = self.api.request('GET', '/cluster/resources', {'type': 'vm'})
+        configs = []
+        for index, router in enumerate(chain):
+            node = router['placement']['node_name']
+            matches = [row for row in rows if int(row.get('vmid', 0)) == router['id']]
+            require(node in {f'proxmox{i}' for i in range(1, 7)} and len(matches) == 1
+                    and matches[0].get('node') == node and matches[0].get('type') == 'lxc'
+                    and matches[0].get('status') == 'running',
+                    'Applied custom router chain is not live on its recorded nodes.')
+            config = self.api.request('GET', f'/nodes/{node}/lxc/{router["id"]}/config')
+            required_tags = {f'p{self.project:03d}'}
+            if index:
+                required_tags.add(f'p{self.project:03d}t{owner:03d}' if index == 1 else self.target['vnet'])
+            require(required_tags <= set(str(config.get('tags', '')).split(';'))
+                    and not config.get('template') and not config.get('lock'),
+                    'Custom router chain ownership or readiness differs.')
+            configs.append({name: dict(part.split('=', 1) for part in str(config.get(name, '')).split(',')
+                                      if '=' in part) for name in ('net0', 'net1')})
+        transit = f'p{self.project:03d}tr'
+        parent_lan = f'p{self.project:03d}t{owner:03d}'
+        require(configs[0]['net0'].get('bridge') == 'crtrans'
+                and configs[0]['net0'].get('ip') == project['address'] + '/24'
+                and configs[0]['net1'].get('bridge') == transit
+                and configs[0]['net1'].get('ip') == f'10.{self.project}.0.1/24'
+                and configs[1]['net0'].get('bridge') == transit
+                and configs[1]['net0'].get('ip') == parent['address'] + '/24'
+                and configs[1]['net0'].get('gw') == f'10.{self.project}.0.1'
+                and configs[1]['net1'].get('bridge') == parent_lan
+                and configs[1]['net1'].get('ip') == f'10.{self.project}.{owner}.1/24'
+                and configs[2]['net0'].get('bridge') == parent_lan
+                and configs[2]['net0'].get('ip') == custom['address'] + '/24'
+                and configs[2]['net0'].get('gw') == f'10.{self.project}.{owner}.1'
+                and configs[2]['net1'].get('bridge') == self.target['vnet']
+                and configs[2]['net1'].get('ip') == f'10.{self.project}.{custom["network_id"]}.1/24',
+                'Custom router chain interfaces differ from declared topology.')
+        node = custom['placement']['node_name']
+        require(node != self.target['node'],
+                'Select another candidate node to verify the custom LAN across VXLAN.')
+        return {'project_router': project['address'], 'parent_team_router': parent['address'],
+                'team_router': custom['address'], 'node': node}
 
     def _live_addresses(self):
         addresses=[]
@@ -178,14 +309,32 @@ class NetworkAcceptanceBackend:
     def remove_management_rule(self,target,rule):self.router.remove_management_rule(target,rule)
     def temporary_rules_absent(self,target):return self.router.temporary_rules_absent(target)
     def probe_state_empty(self,target):return self.saved.state_addresses()==[]
-    def input_unchanged(self,target):return self._project_inputs()==self.inputs
+    def input_unchanged(self,target):
+        return (self._project_inputs()==self.inputs and
+                controller_source_hashes()==self.source_binding['controller_sha256'] and
+                trusted_relay_source_hash()==self.source_binding['relay_sha256'])
 
     def run_check(self,target,check,timeout):
-        result=(self.management if check in ('controller','guacamole') else self.guest).run(target,check,timeout=timeout)
+        require(check in __import__('crange_network_acceptance').CHECKS,'Unsupported evidence check.')
+        try:
+            if check == 'vxlan_mtu':
+                require(self._routers() == self.routers, 'Router topology changed before MTU evidence.')
+            result=(self.management if check in ('controller','guacamole') else self.guest).run(target,check,timeout=timeout)
+            if check == 'vxlan_mtu':
+                require(self._routers() == self.routers, 'Router topology changed during MTU evidence.')
+        except Exception as error:
+            failed=getattr(error,'network_check_log',None)
+            if isinstance(failed,dict):
+                durable_json(self.root/(check+'.failed.log'),failed)
+            raise
         file=self.root/(check+'.log')
         require(not file.is_symlink(),'Evidence artifact cannot be a symlink.')
         durable_json(file,result)
-        return {'passed':result['passed'],'artifact_sha256':hashlib.sha256(file.read_bytes()).hexdigest()}
+        summary={'passed':result['passed'],'artifact_sha256':hashlib.sha256(file.read_bytes()).hexdigest()}
+        if check=='guacamole':
+            require(result.get('relay_sha256')==self.source_binding['relay_sha256'],'Actual relay code differs from reviewed deployment.')
+            summary.update({key:result[key] for key in ('source_address','target_address','target_port','relay_sha256')})
+        return summary
 
     def cleanup_artifact(self,target):
         report={'scope':target,'vmid_absent_after':self.vmid_absent(target),
@@ -199,6 +348,40 @@ class NetworkAcceptanceBackend:
         require(no_active_node_tasks(self.api, target['node']),
                 'Node has active tasks; retain reservation until independent task reconciliation.')
         self.ledger.reconcile_job(target['job_id'],operation_terminal=True,allocations_reconciled=True)
+
+
+def reconcile_unadmitted(saved, api, router, ledger):
+    """Read-only absence proof for a journal whose admission never committed."""
+    journal = json.loads(protected(saved.root / 'journal.json').read_text())
+    if journal.get('state') not in ('reserving', 'reservation_uncertain'):
+        return False
+    require(journal.get('scope') == saved.target, 'Journal and manifest ownership differ.')
+    rule = {'owner': saved.target['job_id'], 'sources': ['10.60.0.20', '10.60.0.10'],
+            'destination': saved.target['address'].split('/')[0] + '/32',
+            'protocol': 'tcp', 'port': 22}
+    require(journal.get('rule') == rule, 'Journal management rule identity mismatch.')
+    ledger.db.execute('BEGIN IMMEDIATE')
+    try:
+        row = ledger.db.execute('SELECT state FROM jobs WHERE job_id=?',
+                                (saved.target['job_id'],)).fetchone()
+        if row is not None:
+            return False
+        require(cluster_probe(api, saved.target) is None, 'Unadmitted probe guest is present.')
+        require(saved.state_addresses() == [], 'Unadmitted probe state is present.')
+        require(router.temporary_rules_absent(saved.target) is True, 'Unadmitted probe rules remain.')
+        require(no_active_node_tasks(api, saved.target['node']), 'Node tasks active; retain journal.')
+        from crange import project_dir
+        from crange_network_adapters import project_input_hashes
+        require(project_input_hashes(project_dir(str(saved.target['project_id']))) ==
+                saved.manifest['project_input_sha256'], 'Project inputs changed during unadmitted probe.')
+        proof = {'vmid_absent': True, 'state_empty': True, 'rules_absent': True,
+                 'reservation_absent': True, 'input_unchanged': True}
+        durable_json(saved.root / 'unadmitted-cleanup.json', proof)
+        journal.update(state='failed_cleaned', unadmitted_cleanup=proof)
+        durable_json(saved.root / 'journal.json', journal)
+        return True
+    finally:
+        ledger.db.rollback()
 
 
 def main():
@@ -219,7 +402,10 @@ def main():
                 ledger=ReservationLedger(scheduling.DATA/'reservations.sqlite3')
             if args.operation=='reconcile':
                 routers=saved.manifest['routers']
-                router=FixedRouterUFW(saved.target,project_router=routers['project_router'],team_router=routers['team_router'])
+                router=router_firewall(saved.target,routers)
+                if reconcile_unadmitted(saved,api,router,ledger):
+                    print(json.dumps({'cleanup_verified':True,'reservation_absent':True}))
+                    return
                 result=reconcile_owned_probe(saved,api,router)
                 allocations=ledger.validate_job(saved.target['job_id'])
                 require(len(allocations)==1 and allocations[0].get('operation')=='network_probe'
@@ -248,12 +434,17 @@ def main():
                 saved.manifest['routers']=backend.routers
                 durable_json(saved.root/'review.json',saved.manifest)
                 receipt=NetworkProbeRunner(backend,saved.root/'journal.json').run(saved.target,
-                    source_revision=saved.manifest['source_revision'],tested_at=datetime.now(timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ'))
+                    source_binding=backend.source_binding,
+                    source_revision=saved.manifest['source_revision'],tested_at=datetime.now(timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ'),
+                    cancellation_requested=cancellation_requested,
+                    progress=lambda message: print(message, flush=True),
+                    diagnostic=lambda error: _persist_workflow_error(args.job_id, error))
                 durable_json(saved.root/'create-plan.json',backend.plan)
                 durable_json(saved.root/'receipt.json',receipt)
                 validate_bundle(saved.root)
                 print(json.dumps({'scope':saved.target,'accepted_cleaned':True,'policy_changed':False},sort_keys=True))
-    except Exception:
+    except Exception as error:
+        _persist_workflow_error(args.job_id,error)
         parser.exit(1,'Fixed network workflow failed. Inspect the protected owned journal; never retry allocation blindly.\n')
     finally:
         if ledger is not None:ledger.close()

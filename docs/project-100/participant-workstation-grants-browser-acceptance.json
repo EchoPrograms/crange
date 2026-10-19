@@ -1,0 +1,163 @@
+{
+  "project": 100,
+  "actual_browser_user_saves": [
+    {
+      "login": "p100-t001u01",
+      "connections": [
+        "jumpbox:t001-j01",
+        "vm:t001-assessor-win-j02"
+      ],
+      "job_id": "9ca812b468c04324bcdc9df208f0a482",
+      "broad_team_grants": false,
+      "password_unchanged": true
+    },
+    {
+      "login": "p100-t001u02",
+      "connections": [
+        "jumpbox:t001-j03",
+        "vm:t001-assessor-win-j04"
+      ],
+      "job_id": "5000fb0c148e4944b37d6ccfb8004582",
+      "broad_team_grants": false,
+      "password_unchanged": true
+    },
+    {
+      "login": "p100-t002u01",
+      "connections": [
+        "jumpbox:t002-j01",
+        "vm:t002-assessor-win-j02"
+      ],
+      "job_id": "c1426de25eeb4365b963515f3a643128",
+      "broad_team_grants": false,
+      "password_unchanged": true
+    },
+    {
+      "login": "p100-t002u02",
+      "connections": [
+        "jumpbox:t002-j03",
+        "vm:t002-assessor-win-j04"
+      ],
+      "job_id": "153e8f7e51154a62819a1d8ae9ef2dca",
+      "broad_team_grants": false,
+      "password_unchanged": true
+    },
+    {
+      "login": "p100-t003u01",
+      "connections": [
+        "jumpbox:t003-j01",
+        "vm:t003-assessor-win-j02"
+      ],
+      "job_id": "ba2a7fb0dbf94a039ce3c5c4ff5ca415",
+      "broad_team_grants": false,
+      "password_unchanged": true
+    },
+    {
+      "login": "p100-t003u02",
+      "connections": [
+        "jumpbox:t003-j03",
+        "vm:t003-assessor-win-j04"
+      ],
+      "job_id": "b39e6c1ea35b44a29730122d460b5f9e",
+      "broad_team_grants": false,
+      "password_unchanged": true
+    },
+    {
+      "login": "p100-t004u01",
+      "connections": [
+        "jumpbox:t004-j01",
+        "vm:t004-assessor-win-j02"
+      ],
+      "job_id": "09036f046dc4474794a55b146e9d6a81",
+      "broad_team_grants": false,
+      "password_unchanged": true
+    },
+    {
+      "login": "p100-t004u02",
+      "connections": [
+        "jumpbox:t004-j03",
+        "vm:t004-assessor-win-j04"
+      ],
+      "job_id": "2e8c029b23b249a99db786fa8eb7035e",
+      "broad_team_grants": false,
+      "password_unchanged": true
+    },
+    {
+      "login": "p100-t005u01",
+      "connections": [
+        "jumpbox:t005-j01",
+        "vm:t005-assessor-win-j02"
+      ],
+      "job_id": "5988741a35de43ee8fd0f3ed0e3205f9",
+      "broad_team_grants": false,
+      "password_unchanged": true
+    },
+    {
+      "login": "p100-t005u02",
+      "connections": [
+        "jumpbox:t005-j03",
+        "vm:t005-assessor-win-j04"
+      ],
+      "job_id": "f0d7cc807192435789926ccb0257f9e9",
+      "broad_team_grants": false,
+      "password_unchanged": true
+    }
+  ],
+  "workstations_not_deployed": true,
+  "effective_access_not_yet_accepted": true,
+  "javascript_errors": [],
+  "desired_grants_verified": true,
+  "each_account_exactly_two_distinct_workstations": true,
+  "sync_jobs": [
+    {
+      "login": "p100-t001u01",
+      "job_id": "9ca812b468c04324bcdc9df208f0a482",
+      "status": "succeeded"
+    },
+    {
+      "login": "p100-t001u02",
+      "job_id": "5000fb0c148e4944b37d6ccfb8004582",
+      "status": "succeeded"
+    },
+    {
+      "login": "p100-t002u01",
+      "job_id": "c1426de25eeb4365b963515f3a643128",
+      "status": "succeeded"
+    },
+    {
+      "login": "p100-t002u02",
+      "job_id": "153e8f7e51154a62819a1d8ae9ef2dca",
+      "status": "succeeded"
+    },
+    {
+      "login": "p100-t003u01",
+      "job_id": "ba2a7fb0dbf94a039ce3c5c4ff5ca415",
+      "status": "succeeded"
+    },
+    {
+      "login": "p100-t003u02",
+      "job_id": "b39e6c1ea35b44a29730122d460b5f9e",
+      "status": "succeeded"
+    },
+    {
+      "login": "p100-t004u01",
+      "job_id": "09036f046dc4474794a55b146e9d6a81",
+      "status": "succeeded"
+    },
+    {
+      "login": "p100-t004u02",
+      "job_id": "2e8c029b23b249a99db786fa8eb7035e",
+      "status": "succeeded"
+    },
+    {
+      "login": "p100-t005u01",
+      "job_id": "5988741a35de43ee8fd0f3ed0e3205f9",
+      "status": "succeeded"
+    },
+    {
+      "login": "p100-t005u02",
+      "job_id": "f0d7cc807192435789926ccb0257f9e9",
+      "status": "succeeded"
+    }
+  ],
+  "rendered_assigned_jumpbox_counts_include_custom_vms": true
+}

@@ -4,13 +4,15 @@
   gather_facts: false
   serial: 1
   vars_files:
-    - /etc/crange-secrets/project-100/windows.vault.yml
+    - "{{ lookup('env', 'CRANGE_MHL_WINDOWS_VAULT_FILE') | default('/etc/crange-secrets/project-100/windows.vault.yml', true) }}"
   vars:
     mhl_domain_name: mhl.test
     mhl_dc_dns: "{{ hostvars[inventory_hostname].mhl_dc_dns }}"
     mhl_dns_servers:
       - "{{ mhl_dc_dns }}"
-    mhl_admin_sources:
+    mhl_rdp_sources:
+      - 10.60.0.10
+    mhl_winrm_sources:
       - 10.60.0.20
   pre_tasks:
     - name: Require a concrete host in the Project 100 MHL member group
@@ -65,26 +67,29 @@
         reboot_timeout: 900
       no_log: true
 
-    - name: Restrict Remote Desktop and WinRM to the controller and Guacamole host
+    - name: Restrict Remote Desktop to Guacamole and WinRM to the controller
       ansible.windows.win_powershell:
         script: |
           $ErrorActionPreference = 'Stop'
-          $allowed = '{{ mhl_admin_sources | join(",") }}'
-          foreach ($group in @('Remote Desktop', 'Windows Remote Management')) {
-            $rules = Get-NetFirewallRule -DisplayGroup $group -ErrorAction SilentlyContinue
-            if ($rules) {
-              $rules | Set-NetFirewallRule -Enabled True -Profile Any
-              $rules | Get-NetFirewallAddressFilter | Set-NetFirewallAddressFilter -RemoteAddress $allowed
-            }
-          }
           Set-Service -Name WinRM -StartupType Automatic
           Enable-PSRemoting -Force -SkipNetworkProfileCheck
+          $policies = @(
+            @{ DisplayGroup = 'Remote Desktop'; RemoteAddress = '{{ mhl_rdp_sources | join(",") }}' },
+            @{ DisplayGroup = 'Windows Remote Management'; RemoteAddress = '{{ mhl_winrm_sources | join(",") }}' }
+          )
+          foreach ($policy in $policies) {
+            $rules = Get-NetFirewallRule -DisplayGroup $policy.DisplayGroup -ErrorAction SilentlyContinue
+            if ($rules) {
+              $rules | Set-NetFirewallRule -Enabled True -Profile Any
+              $rules | Get-NetFirewallAddressFilter | Set-NetFirewallAddressFilter -RemoteAddress $policy.RemoteAddress
+            }
+          }
 
 - name: Enable file services on the MHL file server
   hosts: mhl_file_servers
   gather_facts: false
   vars_files:
-    - /etc/crange-secrets/project-100/windows.vault.yml
+    - "{{ lookup('env', 'CRANGE_MHL_WINDOWS_VAULT_FILE') | default('/etc/crange-secrets/project-100/windows.vault.yml', true) }}"
   tasks:
     - name: Install the file server role
       ansible.windows.win_feature:
@@ -94,25 +99,135 @@
 
     - name: Create the Project 100 backup directory
       ansible.windows.win_file:
-        path: C:\\MHL\\Backups
+        path: C:\MHL\Backups
         state: directory
 
     - name: Grant MHL employees change access to the backup share
       ansible.windows.win_share:
         name: MHL-Backups
-        path: C:\\MHL\\Backups
+        path: C:\MHL\Backups
         description: MHL restore staging and backup copies
         list: true
-        change: MHL\\MHL-Employees
-        full: BUILTIN\\Administrators
+        change: MHL\MHL-Employees
+        full: BUILTIN\Administrators
         state: present
 
     - name: Give the MHL employee group modify access to backup files
       ansible.windows.win_acl:
-        path: C:\\MHL\\Backups
-        user: MHL\\MHL-Employees
+        path: C:\MHL\Backups
+        user: MHL\MHL-Employees
         rights: Modify
         type: allow
         state: present
         inherit: ContainerInherit,ObjectInherit
         propagation: None
+
+    - name: Create dispatch, finance and acquisition operations directories
+      ansible.windows.win_file:
+        path: "C:\\MHL\\{{ item }}"
+        state: directory
+      loop: [Dispatch, Finance, Operations]
+
+    - name: Publish company department and operations shares
+      ansible.windows.win_share:
+        name: "MHL-{{ item }}"
+        path: "C:\\MHL\\{{ item }}"
+        description: "Meridian Harbor Logistics {{ item }}"
+        change: MHL\MHL-Employees
+        full: BUILTIN\Administrators
+        state: present
+      loop: [Dispatch, Finance, Operations]
+
+    - name: Preserve the acquisition-era employee write access to department folders
+      ansible.windows.win_acl:
+        path: "C:\\MHL\\{{ item }}"
+        user: MHL\MHL-Employees
+        rights: Modify
+        type: allow
+        state: present
+        inherit: ContainerInherit,ObjectInherit
+        propagation: None
+      loop: [Dispatch, Finance, Operations]
+
+    - name: Publish synthetic dispatch and finance exports
+      ansible.windows.win_copy:
+        dest: "C:\\MHL\\{{ item.directory }}\\{{ item.filename }}"
+        content: "{{ item.content }}"
+      loop:
+        - directory: Dispatch
+          filename: dispatch.csv
+          content: |
+            shipment_id,customer_id,customer,destination,status
+            61001,4101,Northwind Cold Storage,"Duluth MN",delayed
+            61002,4102,Cedar Freight Cooperative,"Madison WI",in_transit
+            61003,4101,Northwind Cold Storage,"Green Bay WI",delivered
+        - directory: Finance
+          filename: invoices-q3.csv
+          content: |
+            shipment_id,customer_id,invoice_total,classification
+            61001,4101,18420.00,internal-finance
+            61002,4102,9730.50,internal-finance
+            61003,4101,1280.00,internal-finance
+        - directory: Backups
+          filename: finance-recovery.csv
+          content: |
+            customer_id,customer,open_invoice_total,classification
+            4101,Northwind Cold Storage,19700.00,synthetic-sensitive-backup
+            4102,Cedar Freight Cooperative,9730.50,synthetic-sensitive-backup
+
+    - name: Install the fixed acquisition-era dispatch export consumer
+      ansible.windows.win_copy:
+        dest: C:\MHL\Operations\publish-dispatch.ps1
+        content: |
+          $ErrorActionPreference = 'Stop'
+          Copy-Item -LiteralPath 'C:\MHL\Dispatch\dispatch.csv' -Destination 'C:\MHL\Backups\dispatch-latest.csv' -Force
+          [ordered]@{
+            exported_rows = @(Import-Csv -LiteralPath 'C:\MHL\Backups\dispatch-latest.csv').Count
+            identity_sid = [Security.Principal.WindowsIdentity]::GetCurrent().User.Value
+          } | ConvertTo-Json | Set-Content -LiteralPath 'C:\MHL\Backups\dispatch-export-status.json'
+
+    - name: Register and exercise the fixed privileged dispatch export schedule
+      ansible.windows.win_powershell:
+        script: |
+          $ErrorActionPreference = 'Stop'
+          $name = 'MHL Dispatch Export'
+          $arguments = '-NoProfile -NonInteractive -ExecutionPolicy Bypass -File C:\MHL\Operations\publish-dispatch.ps1'
+          $task = Get-ScheduledTask -TaskName $name -ErrorAction SilentlyContinue
+          if (-not $task -or $task.Actions.Arguments -ne $arguments -or $task.Principal.UserId -notin @('SYSTEM','S-1-5-18')) {
+            $action = New-ScheduledTaskAction -Execute 'powershell.exe' -Argument $arguments
+            $trigger = New-ScheduledTaskTrigger -Once -At (Get-Date).Date -RepetitionInterval (New-TimeSpan -Minutes 5)
+            $principal = New-ScheduledTaskPrincipal -UserId 'SYSTEM' -LogonType ServiceAccount -RunLevel Highest
+            Register-ScheduledTask -TaskName $name -Action $action -Trigger $trigger -Principal $principal -Force | Out-Null
+          } else { $Ansible.Changed = $false }
+          $started = Get-Date
+          Remove-Item -LiteralPath 'C:\MHL\Backups\dispatch-export-status.json' -Force -ErrorAction SilentlyContinue
+          Start-ScheduledTask -TaskName $name
+          $deadline = (Get-Date).AddSeconds(60)
+          do {
+            Start-Sleep -Seconds 2
+            $info = Get-ScheduledTaskInfo -TaskName $name
+          } until (($info.LastRunTime -ge $started.AddSeconds(-2) -and $info.LastTaskResult -eq 0) -or (Get-Date) -ge $deadline)
+          if ($info.LastTaskResult -ne 0) { throw 'The fixed dispatch export scheduled consumer did not complete successfully.' }
+          $proof = Get-Content -LiteralPath 'C:\MHL\Backups\dispatch-export-status.json' -Raw | ConvertFrom-Json
+          if ($proof.identity_sid -ne 'S-1-5-18' -or $proof.exported_rows -ne 3) { throw 'Dispatch export consumer proof failed.' }
+          $acl = Get-Acl -LiteralPath 'C:\MHL\Operations\publish-dispatch.ps1'
+          $write = @($acl.Access | Where-Object { $_.IdentityReference.Value -eq 'MHL\MHL-Employees' -and $_.AccessControlType -eq 'Allow' -and ($_.FileSystemRights -band [Security.AccessControl.FileSystemRights]::Modify) -eq [Security.AccessControl.FileSystemRights]::Modify })
+          if ($write.Count -eq 0) { throw 'The declared employee-writable operations permission is absent.' }
+
+    - name: Install the legacy company intranet service
+      ansible.windows.win_feature:
+        name: [Web-Server, Web-Default-Doc]
+        include_management_tools: true
+        state: present
+
+    - name: Publish the legacy company intranet landing page
+      ansible.windows.win_copy:
+        dest: C:\inetpub\wwwroot\index.htm
+        content: |
+          <!doctype html><html lang="en"><meta charset="utf-8"><title>MHL Operations</title>
+          <style>body{font:16px monospace;max-width:60rem;margin:3rem auto;padding:1rem;color:#17212b;background:#f5f6f7}li{margin:1rem 0}</style>
+          <h1>Meridian Harbor Logistics</h1><h2>Operations desk</h2>
+          <p>Dispatch and finance exports are maintained on this server. Acquisition support staff retain write access to the operations share for report maintenance.</p>
+          <ul><li>Dispatch: \\MHL-FS01\MHL-Dispatch</li><li>Finance: \\MHL-FS01\MHL-Finance</li><li>Recovery reports: \\MHL-FS01\MHL-Backups</li></ul>
+          <p><a href="http://10.100.{{ mhl_network_id }}.40:8080/">Shipment portal</a></p>
+          <p>All company data in this environment is synthetic.</p></html>

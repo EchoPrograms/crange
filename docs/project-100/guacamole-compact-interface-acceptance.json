@@ -1,0 +1,59 @@
+{
+  "dashboard_launch": {
+    "user": "admin",
+    "queryKeys": [],
+    "route": "#/"
+  },
+  "reload": {
+    "user": "admin",
+    "queryKeys": [],
+    "route": "#/"
+  },
+  "token_http_statuses": [
+    200,
+    200,
+    200
+  ],
+  "real_server_rows": 6,
+  "row_data": [
+    {
+      "name": "\u25a3t254-mhl-app01container",
+      "ip": "10.100.254.40",
+      "power": "running"
+    },
+    {
+      "name": "\u25a3t254-mhl-bkp01container",
+      "ip": "10.100.254.60",
+      "power": "running"
+    },
+    {
+      "name": "\u25a3t254-mhl-ci01container",
+      "ip": "10.100.254.50",
+      "power": "running"
+    },
+    {
+      "name": "\u25a3t254-mhl-db01container",
+      "ip": "10.100.254.30",
+      "power": "running"
+    },
+    {
+      "name": "\u25a3t254-mhl-dc01vm",
+      "ip": "10.100.254.10",
+      "power": "stopped"
+    },
+    {
+      "name": "\u25a3t254-mhl-file01vm",
+      "ip": "10.100.254.20",
+      "power": "running"
+    }
+  ],
+  "menu_escape": true,
+  "mobile_no_overflow": true,
+  "browser_errors": [],
+  "unexpected_control_operations": [],
+  "passed": true,
+  "explicit_dc_status": {
+    "resource_key": "vm:t254-mhl-dc01",
+    "state": "stopped"
+  }
+}

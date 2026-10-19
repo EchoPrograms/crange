@@ -20,7 +20,7 @@ class InventoryError(ValueError):
     """Raised when canonical inventory cannot safely identify the target guests."""
 
 
-def selected_hosts(document, network_id):
+def selected_hosts(document, network_id, test_keys=None):
     """Return the four selected canonical guest records, or fail closed."""
     try:
         children = document["all"]["children"]
@@ -36,14 +36,14 @@ def selected_hosts(document, network_id):
         if projects:
             raise InventoryError("canonical inventory contains no Project 100 containers")
 
-    scope_name = "staging_containers" if network_id == 254 else f"team_{network_id:03d}_containers"
+    scope_name = "staging_containers" if network_id == 254 or test_keys is not None else f"team_{network_id:03d}_containers"
     scope = scopes.get(scope_name, {})
     scoped_hosts = scope.get("hosts", {})
     all_vars = document["all"].get("vars", {})
     scope_vars = scope.get("vars", {})
     result = {}
     for key, (group, hostname, last_octet) in GUESTS.items():
-        expected_key = f"t254-{key}" if network_id == 254 else None
+        expected_key = test_keys.get(key) if test_keys is not None else (f"t254-{key}" if network_id == 254 else None)
         marker = key.lower().split("-")
         candidates = []
         for canonical_name, host_value in scoped_hosts.items():

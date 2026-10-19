@@ -1,0 +1,181 @@
+{
+  "release": "p100-0.1.2",
+  "caches": [
+    {
+      "image_id": "p100-image-18a9ebf121e5",
+      "template_id": 178,
+      "node": "proxmox5",
+      "storage": "crange-thin",
+      "verification": {
+        "evidence": {
+          "isolated_bridge": "crprobe1450",
+          "machine_id": "ab7896a2b5b140d79a30a58eddce42f0",
+          "readiness": "running",
+          "ssh_host_key": "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIKFjIIEfQJegRfiGvy07/DLU2tRMaWQNTyod6afu9bCm root@crange-probe-179"
+        },
+        "identity_unique": true,
+        "passed": true
+      },
+      "journal_state": "ready",
+      "reservation_state": "released",
+      "archive_pin_present": false,
+      "probe_replacement": null
+    },
+    {
+      "image_id": "p100-image-2c2746c5613c",
+      "template_id": 179,
+      "node": "proxmox5",
+      "storage": "crange-thin",
+      "verification": {
+        "evidence": {
+          "isolated_bridge": "crprobe1450",
+          "machine_id": "dc72d5a39a784627af84121776e32f35",
+          "readiness": "running",
+          "ssh_host_key": "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIN/egHG5kkoMXP2uo4cowiG5MD6rlZQbk2wzfOUvD46a root@crange-probe-180"
+        },
+        "identity_unique": true,
+        "passed": true
+      },
+      "journal_state": "ready",
+      "reservation_state": "released",
+      "archive_pin_present": false,
+      "probe_replacement": null
+    },
+    {
+      "image_id": "p100-image-37860ad5ae16",
+      "template_id": 180,
+      "node": "proxmox5",
+      "storage": "crange-thin",
+      "verification": {
+        "evidence": {
+          "identity": {
+            "computer_name": "MHL-FS01",
+            "directory_invocation_id": null,
+            "domain_name": "mhl.test",
+            "domain_role": 3,
+            "generation_counter_present": true,
+            "identity_mode": "windows-scenario-snapshot-v1",
+            "image_state": "IMAGE_STATE_COMPLETE",
+            "machine_guid": "75648ec1-2b2a-4e6b-9186-43f18461e4fa",
+            "oobe_in_progress": 0,
+            "os_caption": "Microsoft Windows Server 2025 Standard Evaluation",
+            "os_family": "windows",
+            "part_of_domain": true,
+            "qemu_guest_agent": true,
+            "qemu_guest_agent_automatic": true,
+            "rdp_allowed_sources": [
+              "10.60.0.10"
+            ],
+            "setup_type": 0,
+            "snapshot_project_id": 100,
+            "system_setup_in_progress": 0,
+            "term_service_automatic": true,
+            "term_service_running": true,
+            "vm_generation_id": "bbdc9bf7-5edd-43eb-8bfa-140b94f14521",
+            "winrm_service_automatic": true,
+            "winrm_service_running": true
+          },
+          "isolated_bridge": "crprobe1450",
+          "service_identity_preserved": true,
+          "type": "windows-scenario-restore"
+        },
+        "identity_unique": true,
+        "passed": true
+      },
+      "journal_state": "ready",
+      "reservation_state": "released",
+      "archive_pin_present": false,
+      "probe_replacement": null
+    },
+    {
+      "image_id": "p100-image-44891a7a6389",
+      "template_id": 181,
+      "node": "proxmox5",
+      "storage": "crange-thin",
+      "verification": {
+        "evidence": {
+          "identity": {
+            "computer_name": "MHL-DC01",
+            "directory_invocation_id": "05fa6ac8-dccc-4a17-8bd3-992231e78770",
+            "domain_name": "mhl.test",
+            "domain_role": 5,
+            "generation_counter_present": true,
+            "identity_mode": "windows-scenario-snapshot-v1",
+            "image_state": "IMAGE_STATE_COMPLETE",
+            "machine_guid": "8956c148-0103-4caa-95aa-72d356d0bef1",
+            "oobe_in_progress": 0,
+            "os_caption": "Microsoft Windows Server 2025 Standard Evaluation",
+            "os_family": "windows",
+            "part_of_domain": true,
+            "qemu_guest_agent": true,
+            "qemu_guest_agent_automatic": true,
+            "rdp_allowed_sources": [
+              "10.60.0.10"
+            ],
+            "setup_type": 0,
+            "snapshot_project_id": 100,
+            "system_setup_in_progress": 0,
+            "term_service_automatic": true,
+            "term_service_running": true,
+            "vm_generation_id": "6a0b6b02-b976-4c98-930d-d11eb6051df6",
+            "winrm_service_automatic": true,
+            "winrm_service_running": true
+          },
+          "isolated_bridge": "crprobe1450",
+          "service_identity_preserved": true,
+          "type": "windows-scenario-restore"
+        },
+        "identity_unique": true,
+        "passed": true
+      },
+      "journal_state": "ready",
+      "reservation_state": "released",
+      "archive_pin_present": false,
+      "probe_replacement": {
+        "probe_id": 182,
+        "reason": "guest-agent-verification-failed",
+        "requested_at": "2026-10-17T17:28:43.953862+00:00"
+      }
+    },
+    {
+      "image_id": "p100-image-a7e08b9b44ac",
+      "template_id": 182,
+      "node": "proxmox3",
+      "storage": "local-lvm",
+      "verification": {
+        "evidence": {
+          "isolated_bridge": "crprobe1450",
+          "machine_id": "6617fc35fb4a453b9a9135b84792da3a",
+          "readiness": "running",
+          "ssh_host_key": "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIDtnDPOQCTq1nita+mHFqpMF2++zhX1Tl9OFg923bsQk root@crange-probe-183"
+        },
+        "identity_unique": true,
+        "passed": true
+      },
+      "journal_state": "ready",
+      "reservation_state": "released",
+      "archive_pin_present": false,
+      "probe_replacement": null
+    },
+    {
+      "image_id": "p100-image-d1d3883a4571",
+      "template_id": 183,
+      "node": "proxmox1",
+      "storage": "local-lvm",
+      "verification": {
+        "evidence": {
+          "isolated_bridge": "crprobe1450",
+          "machine_id": "baf5646e4e1a4f32a90f2946dd08ca57",
+          "readiness": "running",
+          "ssh_host_key": "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOgZgUT1b8j6ytDAbJLiGrZN0sEnkYPSpXiQSnZm2C43 root@crange-probe-184"
+        },
+        "identity_unique": true,
+        "passed": true
+      },
+      "journal_state": "ready",
+      "reservation_state": "released",
+      "archive_pin_present": false,
+      "probe_replacement": null
+    }
+  ]
+}

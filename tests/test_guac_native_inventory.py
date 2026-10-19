@@ -5,7 +5,7 @@ from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'scripts'))
 
-from crange_guac_broker import native_inventory
+from crange_guac_broker import native_inventory, _native_guest_cache
 
 
 class _Guac:
@@ -35,9 +35,11 @@ class _Guac:
 
 class _Pve:
     def request(self, method, path, fields=None):
+        if path == '/nodes':
+            return [{'node': 'proxmox4', 'status': 'online'}, {'node': 'proxmox1', 'status': 'offline'}]
         if path == '/cluster/resources':
-            return [{'node': 'proxmox4', 'vmid': 114, 'type': 'lxc'},
-                    {'node': 'proxmox4', 'vmid': 200, 'type': 'qemu'},
+            return [{'node': 'proxmox4', 'vmid': 114, 'type': 'lxc', 'status': 'running'},
+                    {'node': 'proxmox4', 'vmid': 200, 'type': 'qemu', 'status': 'stopped'},
                     {'node': 'proxmox4', 'vmid': 201, 'type': 'qemu'},
                     {'node': 'proxmox4', 'vmid': 202, 'type': 'qemu'}]
         if path.endswith('/lxc/114/config'):
@@ -57,6 +59,39 @@ class _Pve:
 
 
 class NativeInventoryTests(unittest.TestCase):
+    def setUp(self):
+        _native_guest_cache.update(expires=0, addresses={})
+
+    def tearDown(self):
+        _native_guest_cache.update(expires=0, addresses={})
+
+    def test_offline_node_and_disappearing_guest_do_not_abort_healthy_inventory(self):
+        class DegradedPve(_Pve):
+            def request(self, method, path, fields=None):
+                if '/proxmox1/' in path:
+                    raise AssertionError('Offline nodes must never be queried.')
+                if path == '/cluster/resources':
+                    return super().request(method, path, fields) + [
+                        {'node': 'proxmox1', 'vmid': 100, 'type': 'lxc'},
+                        {'node': 'proxmox4', 'vmid': 999, 'type': 'lxc'}]
+                if '/lxc/999/' in path:
+                    raise RuntimeError('Guest disappeared after listing.')
+                return super().request(method, path, fields)
+        with patch('crange_guac.GuacamoleClient', return_value=_Guac()), patch('crange.ProxmoxAPI', return_value=DegradedPve()):
+            rows = native_inventory('alice', 'mysql')
+        self.assertTrue(rows[0]['guest_matched'])
+        self.assertEqual(rows[0]['state'], 'running')
+        self.assertEqual(rows[0]['guest_os'], 'linux')
+        self.assertFalse(rows[2]['guest_matched'])
+
+    def test_cluster_inventory_failure_remains_visible(self):
+        class BrokenPve(_Pve):
+            def request(self, method, path, fields=None):
+                raise RuntimeError('Cluster unavailable')
+        with patch('crange_guac.GuacamoleClient', return_value=_Guac()), patch('crange.ProxmoxAPI', return_value=BrokenPve()):
+            with self.assertRaisesRegex(RuntimeError, 'Cluster unavailable'):
+                native_inventory('alice', 'mysql')
+
     def test_uses_current_guac_grants_and_unique_live_guest_addresses(self):
         with patch('crange_guac.GuacamoleClient', return_value=_Guac()), \
                 patch('crange.ProxmoxAPI', return_value=_Pve()):

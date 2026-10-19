@@ -24,11 +24,43 @@ import urllib.request
 import urllib.error
 
 from crange_network_acceptance import PROBE_ADDRESS, probe_from_plan, require, scope
-from crange_network_runner import plan_digest
+from crange_network_runner import plan_digest, safe_failure_cause
 from crange_scheduling import atomic_json
 
 ROOT = Path('/var/lib/crange-network-probes')
 CREDENTIALS = Path('/home/crange/.config/crange/proxmox.env')
+
+
+RELAY_SOURCE_HASH = Path('/etc/crange/network-relay-source.sha256')
+
+
+def controller_source_hashes():
+    from crange_network_acceptance import CONTROLLER_SOURCE_FILES
+    directory=Path(__file__).resolve().parent
+    hashes={}
+    for name in sorted(CONTROLLER_SOURCE_FILES):
+        path=directory/name
+        require(path.is_file() and not path.is_symlink(),'Controller source must be a regular file.')
+        hashes[name]=hashlib.sha256(path.read_bytes()).hexdigest()
+    return hashes
+
+
+def trusted_relay_source_hash():
+    path=protected(RELAY_SOURCE_HASH)
+    require(not path.stat().st_mode & 0o077,'Relay source trust file must be root-private.')
+    value=path.read_text().strip()
+    require(re.fullmatch(r'[a-f0-9]{64}',value),'Invalid trusted relay source SHA-256.')
+    return value
+
+
+def project_input_hashes(path):
+    """Bind identical desired-state files and pinned provider in every workflow."""
+    files = {item.name: item for item in Path(path).iterdir()
+             if item.name.endswith(('.tf', '.tf.json', '.tfvars', '.tfvars.json'))
+             or item.name == '.terraform.lock.hcl'}
+    require(bool(files), 'Project desired-state inputs are missing.')
+    return {name: hashlib.sha256(item.read_bytes()).hexdigest()
+            for name, item in sorted(files.items())}
 
 
 def protected(path, *, directory=False):
@@ -55,7 +87,10 @@ def worker_file(path, *, private=False):
 def safe_terraform_apply_cause(output, returncode):
     """Classify provider failures without journaling raw CLI diagnostics."""
     text = str(output).lower()
-    if re.search(r'\b403\b', text) or 'permission denied' in text or 'not authorized' in text:
+    if 'permission denied' in text and any(term in text for term in
+            ('fork/exec', 'failed to instantiate provider', 'failed to load plugin')):
+        return 'terraform_local_provider_exec_permission'
+    if re.search(r'\b403\b', text) or 'not authorized' in text:
         return 'proxmox_http_403_authorization'
     if re.search(r'\b401\b', text) or 'unauthorized' in text:
         return 'proxmox_http_401_authentication'
@@ -97,7 +132,7 @@ class SavedTerraformProbe:
         lock = (self.root/'.terraform.lock.hcl').read_text()
         require('registry.terraform.io/bpg/proxmox' in lock and '"0.104.0"' in lock, 'Provider version must remain pinned.')
 
-    def inspect(self, operation):
+    def inspect(self, operation, *, partial_source=None):
         require(operation in ('create','delete'), 'Unknown plan operation.')
         self._check_inputs()
         path = protected(self.root/(operation+'.tfplan'))
@@ -108,7 +143,10 @@ class SavedTerraformProbe:
                           capture_output=True,text=True,timeout=30,check=False)
         require(result.returncode == 0, 'Cannot inspect saved probe plan.')
         plan = json.loads(result.stdout)
-        probe_from_plan(plan, operation, self.target)
+        if operation == 'delete' and partial_source is not None:
+            partial_delete_plan(plan, self.target, self.inspect('create'), partial_source)
+        else:
+            probe_from_plan(plan, operation, self.target)
         require(plan_digest(plan) == approval.get('json_sha256'), 'Decoded plan differs from reviewed digest.')
         return plan
 
@@ -129,12 +167,28 @@ class SavedTerraformProbe:
         return {'PATH':'/usr/local/bin:/usr/bin:/bin', 'HOME':'/root',
                 'PROXMOX_VE_INSECURE':'true', **values}
 
-    def apply_saved_plan(self, target, operation, digest, timeout):
+    def apply_saved_plan(self, target, operation, digest, timeout, *, partial_source=None):
         require(target == self.target and 0 < timeout <= 600, 'Invalid saved-plan application scope.')
-        plan = self.inspect(operation)
+        plan = self.inspect(operation, partial_source=partial_source)
         require(plan_digest(plan) == digest, 'Caller plan digest mismatch.')
         result = self.run(['terraform','apply','-no-color','-input=false',str(self.root/(operation+'.tfplan'))],
                           cwd=self.root,env=self._env(),capture_output=True,text=True,timeout=timeout,check=False)
+        # Keep provider diagnostics private before reducing them to a safe cause.
+        # These files are administrator evidence, never journal/UI content.
+        for stream, output in (('stdout', result.stdout), ('stderr', result.stderr)):
+            path = self.root / (operation + '-apply.' + stream)
+            fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC | os.O_NOFOLLOW, 0o600)
+            try:
+                info = os.fstat(fd)
+                require(info.st_uid == 0 and stat.S_ISREG(info.st_mode),
+                        'Provider diagnostic file must be root-owned and regular.')
+                os.fchmod(fd, 0o600)
+                with os.fdopen(fd, 'w', closefd=False) as evidence:
+                    evidence.write(output or '')
+                    evidence.flush()
+                    os.fsync(fd)
+            finally:
+                os.close(fd)
         if result.returncode != 0:
             error = ValueError('Reviewed probe plan apply failed; reconcile owned resources.')
             error.safe_cause = safe_terraform_apply_cause(result.stdout + '\n' + result.stderr, result.returncode)
@@ -152,7 +206,7 @@ class SavedTerraformProbe:
         require(addresses in ([],[PROBE_ADDRESS]), 'Standalone state owns an unrelated resource.')
         return addresses
 
-    def generate_delete_plan(self):
+    def generate_delete_plan(self, *, partial_source=None):
         """Machine review: exactly one owned delete, then persist both digests."""
         self._check_inputs()
         require(self.state_addresses() == [PROBE_ADDRESS], 'Probe is not the sole state resource.')
@@ -161,11 +215,19 @@ class SavedTerraformProbe:
         result=self.run(['terraform','plan','-destroy','-no-color','-input=false','-out='+str(path)],
                         cwd=self.root,env=self._env(),capture_output=True,text=True,timeout=600,check=False)
         require(result.returncode == 0, 'Owned destroy plan generation failed.')
+        # Terraform inherits the worker umask and may otherwise create 0660.
+        info=path.lstat()
+        require(stat.S_ISREG(info.st_mode) and not stat.S_ISLNK(info.st_mode) and info.st_uid == self.root.stat().st_uid,
+                'Generated destroy plan must be an owned regular file.')
+        path.chmod(0o600)
         exported=self.run(['terraform','show','-json',str(protected(path))],cwd=self.root,
                           capture_output=True,text=True,timeout=30,check=False)
         require(exported.returncode == 0, 'Owned destroy plan decoding failed.')
         plan=json.loads(exported.stdout)
-        probe_from_plan(plan,'delete',self.target)
+        if partial_source is None:
+            probe_from_plan(plan,'delete',self.target)
+        else:
+            partial_delete_plan(plan,self.target,self.inspect('create'),partial_source)
         self.manifest.setdefault('plans',{})['delete']={
             'binary_sha256':hashlib.sha256(path.read_bytes()).hexdigest(),
             'json_sha256':plan_digest(plan),'review':'fixed-owned-probe-delete'}
@@ -191,15 +253,32 @@ class BoundedPVE:
         else: data=encoded.encode()
         request=urllib.request.Request(url,data=data,method=method,
             headers={'Authorization':'PVEAPIToken='+self.api.token,'Content-Type':'application/x-www-form-urlencoded'})
-        try:
-            with self.open_url(request,context=self.api.ssl_context,timeout=min(10,remaining)) as response:
-                body=json.load(response)
-        except urllib.error.HTTPError as failure:
-            error=ValueError('Bounded probe API request failed.')
-            error.safe_cause=f'guest_api_http_{failure.code}' if 400 <= failure.code <= 599 else 'guest_api_http_error'
+        for attempt in range(2 if method == 'GET' else 1):
+            remaining = deadline - time.monotonic()
+            require(remaining > 0, 'Probe diagnostic deadline expired.')
+            try:
+                with self.open_url(request,context=self.api.ssl_context,timeout=min(10,remaining)) as response:
+                    body=json.load(response)
+                break
+            except urllib.error.HTTPError as failure:
+                if method == 'GET' and failure.code == 595 and attempt == 0:
+                    continue
+                cause=f'guest_api_http_{failure.code}' if 400 <= failure.code <= 599 else 'guest_api_http_error'
+            except (TimeoutError, socket.timeout):
+                if method == 'GET' and attempt == 0:
+                    continue
+                cause='guest_api_timeout'
+            except (urllib.error.URLError, ConnectionError):
+                if method == 'GET' and attempt == 0:
+                    continue
+                cause='guest_api_transport'
+            except (ValueError, UnicodeError):
+                cause='guest_api_invalid_json'
+            except Exception:
+                cause='guest_api_unknown_failure'
+            error=ValueError('Bounded probe API request failed: '+cause)
+            error.safe_cause=cause
             raise error from None
-        except Exception:
-            raise ValueError('Bounded probe API request failed.') from None
         require(isinstance(body,dict) and 'data' in body, 'Probe API response missing data.')
         return body['data']
 
@@ -263,19 +342,40 @@ class FixedRouterUFW:
     """
     KEY = Path('/home/crange/.ssh/id_ed25519_range')
 
-    def __init__(self, target, *, project_router, team_router, run=subprocess.run):
+    def __init__(self, target, *, project_router, team_router, parent_team_router=None,
+                 forwarding_parent=False, run=subprocess.run):
         self.target=scope(**target)
         project=ipaddress.ip_address(project_router)
         team=ipaddress.ip_address(team_router)
         require(project in ipaddress.ip_network('10.60.2.0/24') and 2 <= int(str(project).split('.')[-1]) <= 254,
                 'Project router must use declared shared transit.')
-        require(team in ipaddress.ip_network(f'10.{target["project_id"]}.0.0/24')
-                and 2 <= int(str(team).split('.')[-1]) <= 254, 'Team router must use project transit.')
+        transit = ipaddress.ip_network(f'10.{target["project_id"]}.0.0/24')
+        if forwarding_parent:
+            require(target['vnet'][4] == 'c' and team in transit
+                    and parent_team_router == str(team)
+                    and 2 <= int(str(team).split('.')[-1]) <= 254,
+                    'Custom probe forwarding parent must be its verified team router.')
+        elif parent_team_router is None:
+            require(target['vnet'][4] == 't' and team in transit
+                    and 2 <= int(str(team).split('.')[-1]) <= 254,
+                    'Team router must use project transit.')
+        else:
+            parent = ipaddress.ip_address(parent_team_router)
+            owner = int(str(team).split('.')[2])
+            require(target['vnet'][4] == 'c' and parent in transit
+                    and 2 <= int(str(parent).split('.')[-1]) <= 254
+                    and 1 <= owner <= 254 and owner != int(target['vnet'][-3:])
+                    and team in ipaddress.ip_network(f'10.{target["project_id"]}.{owner}.0/24')
+                    and 2 <= int(str(team).split('.')[-1]) <= 100,
+                    'Custom router must use its declared parent LAN.')
         worker_file(self.KEY,private=True)
         worker_file('/home/crange/.ssh/known_hosts')
         proxy=shlex.join(['ssh','-o','BatchMode=yes','-o','StrictHostKeyChecking=yes',
                          '-o','ConnectTimeout=5','-o','UserKnownHostsFile=/home/crange/.ssh/known_hosts',
                          '-i',str(self.KEY),'-W','%h:%p','root@'+str(project)])
+        # The parent router forwards this connection. Preserve the project
+        # router as its SSH source, matching the managed firewall allowlist.
+        # Opening another SSH tunnel on the parent would change that source.
         self.prefix=['ssh','-o','BatchMode=yes','-o','StrictHostKeyChecking=yes',
                      '-o','ConnectTimeout=5','-o','UserKnownHostsFile=/home/crange/.ssh/known_hosts',
                      '-i',str(self.KEY),'-o','ProxyCommand='+proxy,'root@'+str(team)]
@@ -292,7 +392,8 @@ class FixedRouterUFW:
 
     def observe(self, observation, *, timeout=5):
         commands={'firewall_counters':['/usr/sbin/iptables-save','-c'],
-                  'dhcp_config':['/bin/cat','/etc/dnsmasq.d/crange-dhcp.conf']}
+                  'dhcp_config':['/bin/cat','/etc/dnsmasq.d/crange-dhcp.conf'],
+                  'upstream_route':['/sbin/ip','-4','route','get','1.1.1.1']}
         require(observation in commands, 'Unknown fixed router observation.')
         return self._fixed_ssh(commands[observation],timeout=timeout)
 
@@ -340,11 +441,53 @@ class FixedRouterUFW:
         return self.target['job_id'] not in self._status()
 
 
+class RoutedRouterUFW:
+    """Own the probe's two-source allowlist on both routed firewalls."""
+    def __init__(self, parent, child):
+        self.parent, self.child = parent, child
+
+    def install_management_rule(self, target, rule):
+        self.parent.install_management_rule(target, rule)
+        self.child.install_management_rule(target, rule)
+
+    def remove_management_rule(self, target, rule):
+        failures = []
+        for router in (self.child, self.parent):
+            try:
+                router.remove_management_rule(target, rule)
+            except Exception as error:
+                failures.append(error)
+        require(not failures, 'Owned custom probe rules require reconciliation on both routers.')
+
+    def temporary_rules_absent(self, target):
+        observed = [router.temporary_rules_absent(target) for router in (self.parent, self.child)]
+        return all(observed)
+
+    def observe(self, observation, *, timeout=5):
+        return self.child.observe(observation, timeout=timeout)
+
+
+def router_firewall(target, routers):
+    child = FixedRouterUFW(target, project_router=routers['project_router'],
+                           team_router=routers['team_router'],
+                           parent_team_router=routers.get('parent_team_router'))
+    if not routers.get('parent_team_router'):
+        return child
+    parent = FixedRouterUFW(target, project_router=routers['project_router'],
+                            team_router=routers['parent_team_router'],
+                            parent_team_router=routers['parent_team_router'], forwarding_parent=True)
+    return RoutedRouterUFW(parent, child)
+
+
 def durable_json(path, value):
     atomic_json(path,value)
     descriptor=os.open(Path(path).parent,os.O_RDONLY | os.O_DIRECTORY)
     try: os.fsync(descriptor)
     finally: os.close(descriptor)
+
+
+def _config_digest(config):
+    return hashlib.sha256(json.dumps(config, sort_keys=True, separators=(',', ':')).encode()).hexdigest()
 
 
 def cluster_probe(api, target):
@@ -370,6 +513,123 @@ def cluster_probe(api, target):
     return config
 
 
+def partial_delete_plan(plan, target, create_plan, source_config):
+    """Validate one destroy of a clone left disconnected before configuration."""
+    require(isinstance(plan, dict) and plan.get('errored', False) is False,
+            'Partial-clone delete plan has errors.')
+    changes = plan.get('resource_changes', [])
+    mutations = [r for r in changes if r.get('change', {}).get('actions') != ['no-op']]
+    require(len(mutations) == 1, 'Partial-clone delete must mutate exactly one VM.')
+    row = mutations[0]
+    require(row.get('address') == PROBE_ADDRESS and row.get('mode') == 'managed'
+            and row.get('type') == 'proxmox_virtual_environment_vm'
+            and row.get('change', {}).get('actions') == ['delete'],
+            'Partial-clone plan must contain only the exact VM deletion.')
+    expected = probe_from_plan(create_plan, 'create', target)
+    before = row.get('change', {}).get('before')
+    require(isinstance(before, dict) and before.get('node_name') == target['node']
+            and before.get('vm_id') == target['vmid'] and before.get('id') == str(target['vmid'])
+            and before.get('pool_id') == 'crange-probes' and before.get('name') == expected.get('name')
+            and before.get('template', False) is False,
+            'Partial-clone deletion identity differs from approved scope.')
+    source_tags = set(source_config.get('tags', '').split(';'))
+    require(source_tags and set(before.get('tags', [])) == source_tags,
+            'Partial-clone deletion does not match approved source tags.')
+    clones = before.get('clone', [])
+    approved_clones = expected.get('clone', [])
+    source = approved_clones[0].get('vm_id') if len(approved_clones) == 1 else None
+    require(len(clones) == 1 and clones[0].get('vm_id') == source
+            and clones[0].get('node_name') == target['node'] and clones[0].get('full') is True,
+            'Partial-clone deletion source differs from approved plan.')
+    disks = before.get('disk', [])
+    expected_disks = expected.get('disk', [])
+    require(len(disks) == len(expected_disks) == 1 and disks[0].get('datastore_id') == 'local-lvm'
+            and disks[0].get('size') == expected_disks[0].get('size')
+            and disks[0].get('path_in_datastore') == f'vm-{target["vmid"]}-disk-0',
+            'Partial-clone deletion disk is outside the exact target VM.')
+    source_net = dict(item.split('=', 1) for item in source_config.get('net0', '').split(',') if '=' in item)
+    devices = before.get('network_device', [])
+    require(len(devices) == 1 and devices[0].get('bridge') == source_net.get('bridge')
+            and devices[0].get('disconnected') is True,
+            'Partial-clone deletion network differs from disconnected source baseline.')
+    source_ip = dict(item.split('=', 1) for item in source_config.get('ipconfig0', '').split(',') if '=' in item)
+    init = before.get('initialization', [])
+    require(len(init) == 1 and len(init[0].get('ip_config', [])) == 1,
+            'Partial-clone deletion lacks source initialization identity.')
+    ipv4 = init[0]['ip_config'][0].get('ipv4', [])
+    require(len(ipv4) == 1 and ipv4[0].get('address') == source_ip.get('ip')
+            and ipv4[0].get('gateway') == source_ip.get('gw'),
+            'Partial-clone deletion initialization differs from source baseline.')
+    return before
+
+
+def partial_create_probe(backend, api, target, journal):
+    """Prove ownership of a clone left behind before provider config completed.
+
+    This path is cleanup-only. It requires the protected 403 journal, the
+    reviewed create plan, the sole Terraform state resource, and a stopped VM
+    matching that plan which still has the approved template's pre-config
+    network settings. It never treats the guest as accepted or runnable.
+    """
+    require(journal.get('scope') == target
+            and journal.get('state') in ('cleanup_uncertain','reconcile_destroy_pending')
+            and journal.get('cause') == 'proxmox_http_403_authorization',
+            'Partial create journal is not eligible for owned cleanup.')
+    plan = backend.inspect('create')
+    expected = probe_from_plan(plan, 'create', target)
+    require(journal.get('create_plan_sha256') == plan_digest(plan),
+            'Partial create journal does not bind the reviewed create plan.')
+    require(backend.state_addresses() == [PROBE_ADDRESS],
+            'Partial create must be the sole Terraform-owned resource.')
+    state_path = protected(backend.root/'terraform.tfstate')
+    state = json.loads(state_path.read_text())
+    resources = [r for r in state.get('resources', []) if r.get('mode') == 'managed']
+    require(len(resources) == 1 and resources[0].get('type') == 'proxmox_virtual_environment_vm'
+            and resources[0].get('name') == 'network_acceptance_probe',
+            'Partial create Terraform identity is ambiguous.')
+    instances = resources[0].get('instances', [])
+    require(len(instances) == 1, 'Partial create Terraform instance is ambiguous.')
+    attrs = instances[0].get('attributes', {})
+    require(attrs.get('id') == str(target['vmid']),
+            'Partial create Terraform VM ID differs from target.')
+    for key in ('vm_id', 'node_name', 'name', 'pool_id', 'tags'):
+        require(attrs.get(key) == expected.get(key),
+                'Partial create Terraform identity differs from reviewed plan.')
+    state_clones = attrs.get('clone', [])
+    plan_clones = expected.get('clone', [])
+    require(len(state_clones) == len(plan_clones) == 1
+            and state_clones[0].get('vm_id') == plan_clones[0].get('vm_id')
+            and state_clones[0].get('node_name') == target['node']
+            and state_clones[0].get('full') is True,
+            'Partial create clone source differs from reviewed plan.')
+    rows = api.request('GET', '/cluster/resources', {'type': 'vm'})
+    matches = [row for row in rows if int(row.get('vmid', 0)) == target['vmid']]
+    require(len(matches) == 1, 'Partial create cluster identity is ambiguous.')
+    row = matches[0]
+    require(row.get('node') == target['node'] and row.get('type') == 'qemu'
+            and row.get('name') == expected.get('name') and row.get('pool') == 'crange-probes'
+            and row.get('status') == 'stopped', 'Partial create live identity differs.')
+    config = api.request('GET', f'/nodes/{target["node"]}/qemu/{target["vmid"]}/config')
+    source = backend.manifest['source']
+    source_config = api.request('GET', f'/nodes/{target["node"]}/qemu/{source["template_id"]}/config')
+    require(_config_digest(source_config) == source['config_sha256']
+            and source_config.get('template') in (1, '1', True),
+            'Partial create source template changed.')
+    require(config.get('name') == expected.get('name') and config.get('lock') is None
+            and config.get('template', 0) in (0, '0', False)
+            and config.get('tags') == source_config.get('tags'),
+            'Partial create live config is not an untouched source clone.')
+    require(config.get('cores') == expected['cpu'][0]['cores']
+            and int(config.get('memory', 0)) == expected['memory'][0]['dedicated'],
+            'Partial create resource limits differ.')
+    source_net = dict(item.split('=', 1) for item in source_config.get('net0', '').split(',') if '=' in item)
+    live_net = dict(item.split('=', 1) for item in config.get('net0', '').split(',') if '=' in item)
+    require(source_net.get('bridge') and live_net.get('bridge') == source_net['bridge']
+            and live_net.get('link_down') == '1' and config.get('ipconfig0') == source_config.get('ipconfig0'),
+            'Partial create network config is not the untouched disconnected source clone.')
+    return {'live': config, 'source': source_config}
+
+
 def reconcile_owned_probe(backend, api, router):
     """Crash-safe cleanup only. No retry/create/test/policy change or ledger release.
 
@@ -393,7 +653,17 @@ def reconcile_owned_probe(backend, api, router):
             journal.update(state=state,**fields)
             durable_json(journal_path,journal)
         # Ownership must be established before any cleanup mutation.
-        existing=cluster_probe(api,target)
+        partial = False
+        source_config = None
+        try:
+            existing=cluster_probe(api,target)
+        except ValueError:
+            # A 403 can leave only the initial, disconnected template clone.
+            # Admit that exact state for cleanup only after the stricter proof.
+            proof=partial_create_probe(backend,api,target,journal)
+            existing=proof['live']
+            source_config=proof['source']
+            partial=True
         addresses=backend.state_addresses()
         save('reconcile_rule_cleanup_pending')
         errors=[]
@@ -401,14 +671,31 @@ def reconcile_owned_probe(backend, api, router):
         except Exception:errors.append('management_rules')
         if existing is not None:
             save('reconcile_destroy_pending')
+            phase='destroy_plan_generation'
             try:
-                plan=backend.generate_delete_plan()
+                plan=(backend.generate_delete_plan(partial_source=source_config) if partial
+                      else backend.generate_delete_plan())
                 digest=plan_digest(plan)
                 save('reconcile_destroy_pending',delete_plan_sha256=digest)
                 # Recheck actual ownership immediately before applying saved plan.
-                require(cluster_probe(api,target) is not None,'Probe disappeared during cleanup; reconcile state separately.')
-                backend.apply_saved_plan(target,'delete',digest,600)
-            except Exception:errors.append('probe')
+                phase='ownership_recheck'
+                if partial:
+                    proof=partial_create_probe(backend,api,target,journal)
+                    require(proof['live'] == existing and proof['source'] == source_config,
+                            'Partial clone changed during cleanup; reconcile state separately.')
+                else:
+                    require(cluster_probe(api,target) is not None,'Probe disappeared during cleanup; reconcile state separately.')
+                phase='saved_plan_application'
+                if partial:
+                    backend.apply_saved_plan(target,'delete',digest,600,partial_source=source_config)
+                else:
+                    backend.apply_saved_plan(target,'delete',digest,600)
+            except Exception as error:
+                errors.append('probe')
+                cause=safe_failure_cause(error)
+                if cause == f'{type(error).__name__.lower()}_detail_redacted':
+                    cause=f'reconcile_{phase}_validation'
+                save('reconcile_destroy_pending',destroy_failure_cause=cause)
         elif addresses:
             # Do not blindly drop state after a timed-out create/delete task.
             errors.append('absent_guest_retained_state')
@@ -430,21 +717,22 @@ class FixedManagementChecks:
 
     Origin node bindings come only from a protected administrator manifest.
     Controller execution must occur inside the controller: the TCP socket binds
-    10.60.0.20 explicitly. Guac execution uses its exact VM110 QGA transport,
-    verifies that guest's reported IPv4 .10, and disables authentication methods.
+    10.60.0.20 explicitly. Guac execution uses the fixed root relay, which runs
+    only a bounded TCP/22 banner probe from VM110 and grants no QGA API rights.
     """
-    def __init__(self, transport, origins, *, connect_socket=socket.socket, sleep=time.sleep):
+    def __init__(self, transport, origins, *, guac_probe=None,
+                 connect_socket=socket.socket):
         require(set(origins) == {'controller','guacamole'}, 'Bind both exact management origins.')
         expected={'controller':(114,'10.60.0.20','lxc'),'guacamole':(110,'10.60.0.10','qemu')}
         for name,(vmid,address,kind) in expected.items():
             origin=origins[name]
             require(set(origin) == {'node','vmid','address','kind'} and origin['vmid']==vmid
                     and origin['address']==address and origin['kind']==kind
-                    and origin['node'] in {f'proxmox{i}' for i in range(1,6)}, 'Management origin binding mismatch.')
+                    and origin['node'] in {f'proxmox{i}' for i in range(1,7)}, 'Management origin binding mismatch.')
         self.origins=origins
         self.transport=transport
         self.connect_socket=connect_socket
-        self.sleep=sleep
+        self.guac_probe=guac_probe
 
     def run(self, target, check, *, timeout=30):
         target=scope(**target)
@@ -461,7 +749,7 @@ class FixedManagementChecks:
         require(len(matches)==1 and matches[0].get('node')==origin['node']
                 and matches[0].get('type')==origin['kind'], 'Management origin node/type differs.')
         base=f'/nodes/{origin["node"]}/{origin["kind"]}/{origin["vmid"]}'
-        require(read('GET',base+'/status/current').get('status')=='running','Management origin must be running.')
+        require(matches[0].get('status')=='running','Management origin must be running.')
         address=target['address'].split('/')[0]
         if check=='controller':
             config=read('GET',base+'/config')
@@ -474,31 +762,13 @@ class FixedManagementChecks:
                 banner=client.recv(256).decode('ascii','replace')
             require(banner.startswith('SSH-2.0-'),'Controller did not receive an SSH protocol banner.')
             return {'passed':True,'origin':origin,'output':banner.strip()}
-        interfaces=read('GET',base+'/agent/network-get-interfaces')
-        interfaces=interfaces.get('result',[]) if isinstance(interfaces,dict) else interfaces
-        addresses={ip.get('ip-address') for interface in interfaces
-                   for ip in interface.get('ip-addresses',[]) if ip.get('ip-address-type')=='ipv4'}
-        require('10.60.0.10' in addresses,'Guac QGA guest does not report its bound source address.')
-        command=['/usr/bin/timeout','15','/usr/bin/ssh','-vv','-b','10.60.0.10',
-                 '-o','BatchMode=yes','-o','ConnectTimeout=5',
-                 '-o','StrictHostKeyChecking=no','-o','UserKnownHostsFile=/dev/null',
-                 '-o','PreferredAuthentications=none','-o','PubkeyAuthentication=no',
-                 '-o','PasswordAuthentication=no','-o','KbdInteractiveAuthentication=no',
-                 '-o','GSSAPIAuthentication=no','-o','HostbasedAuthentication=no','root@'+address]
-        response=read('POST',base+'/agent/exec',{'command':command})
-        require(type(response.get('pid')) is int and response['pid']>0,'Invalid Guac check PID.')
-        pid=response['pid']
-        while time.monotonic()<deadline:
-            result=read('GET',base+'/agent/exec-status',{'pid':pid})
-            if result.get('exited'):
-                output=str(result.get('err-data',''))
-                require(len(output.encode())<=65536,'Guac handshake log exceeded bound.')
-                passed=(result.get('exitcode')==255 and 'Connection established' in output
-                        and 'Remote protocol version 2.0' in output)
-                require(passed,'Guac SSH handshake was not established with disabled authentication.')
-                return {'passed':True,'origin':origin,'output':output}
-            self.sleep(min(0.25,max(0,deadline-time.monotonic())))
-        raise ValueError('Fixed Guac origin check exceeded deadline.')
+        require(callable(self.guac_probe),'Fixed Guac-origin relay is unavailable.')
+        result=self.guac_probe(target,origin,timeout=max(1,int(deadline-time.monotonic())))
+        require(isinstance(result,dict) and result.get('passed') is True and
+                result.get('origin')==origin and isinstance(result.get('output'),str) and
+                result['output'].startswith('SSH-2.0-'),
+                'Guac-origin TCP handshake was not established through the fixed relay.')
+        return result
 
 
 def main():
@@ -512,7 +782,7 @@ def main():
         if args.operation == 'reconcile':
             from crange import ProxmoxAPI
             routers=backend.manifest['routers']
-            router=FixedRouterUFW(backend.target,project_router=routers['project_router'],team_router=routers['team_router'])
+            router=router_firewall(backend.target,routers)
             print(json.dumps(reconcile_owned_probe(backend,ProxmoxAPI(),router),sort_keys=True))
             return
         plan=backend.inspect(args.operation)

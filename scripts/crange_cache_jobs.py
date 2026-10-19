@@ -18,8 +18,9 @@ import uuid
 
 from crange import ProxmoxAPI
 from crange_distribution import (DistributionError, FileJournal, ProbeVerifier,
-    ReplicaWorker, SSHContainerExec, SSHVolumeHasher, catalog_transaction, required_capacity,
+    ReplicaWorker, SSHContainerExec, SSHVolumeHasher, catalog_transaction, required_capacity, preparation_peak_capacity,
     shared_reservation_validator, UnixContainerBackingVerifier)
+from crange_distribution import automatic_probe_candidate
 from crange_image_cache import CacheError, build_eviction_plan, apply_eviction_plan
 from crange_cache_ownership import cache_owned
 from crange_placement import ReservationLedger
@@ -74,6 +75,19 @@ def _ready(image, node, storage):
             and 'linked' in r.get('clone_modes_verified', [])]
 
 
+def _cache_probe_identity(image):
+    """Return the exact captured probe reference and its fixed guest profile."""
+    capture = image.get('identity_capture') or {}
+    sealed_windows = capture.get('provenance_type') == 'sealed-windows-source-v1'
+    identity = (capture if sealed_windows else
+                image.get('source_identity') or image.get('verification', {}).get('source_identity'))
+    if not identity:
+        raise DistributionError('Captured source identity evidence is missing.')
+    profile = ('windows' if sealed_windows or identity.get('os_family') == 'windows'
+               else image.get('init_system', 'systemd'))
+    return identity, profile, sealed_windows
+
+
 def select_probe_bridge(policy):
     """Choose only an administrator-approved isolated bridge before allocation."""
     settings = policy.get('cache', policy)
@@ -96,7 +110,7 @@ def select_probe_bridge(policy):
 
 def _prove_absent_cache_allocation(api, node, template_id, created_at):
     """Require complete PVE inventory and task evidence before clearing an absent allocation."""
-    expected = {f'proxmox{i}' for i in range(1, 6)}
+    expected = {f'proxmox{i}' for i in range(1, 7)}
     nodes = api.request('GET', '/nodes')
     if ({row.get('node') for row in nodes} != expected or
             any(row.get('status') != 'online' for row in nodes)):
@@ -126,8 +140,237 @@ def _prove_absent_cache_allocation(api, node, template_id, created_at):
             'verified_at': time.time()}
 
 
+def proved_linked_storage(policy, node, storage):
+    proof=policy.get('nodes',{}).get(node,{}).get('storage_proofs',{}).get(storage,{})
+    return ([(node,storage)] if proof.get('node')==node and proof.get('storage')==storage
+            and proof.get('state')=='ready' and proof.get('snapshots_verified') is True
+            and proof.get('proof_volumes_deleted') is True
+            and storage in policy.get('nodes',{}).get(node,{}).get('snapshot_storages',[]) else [])
+
+
+def reconcile_unstarted_caches(project_id):
+    """Release journal-first cache admissions that never reached provider allocation.
+
+    Node/library/allocation locks exclude live preparation. Every provider create
+    requires its durable ownership journal first. Existing journals, published
+    generations or mismatched archive pins prevent this automatic recovery.
+    No guest, disk, archive or provider task is deleted by this operation.
+    """
+    policy,_=_settings();journal=FileJournal(_root()/'cache-journal')
+    ledger=ReservationLedger(_root()/'reservations.sqlite3');released=[]
+    try:
+        rows=ledger.db.execute("SELECT job_id,allocations FROM jobs WHERE project_id=? AND state IN ('reviewed','running')",(project_id,)).fetchall()
+        for job_id,raw in rows:
+            items=json.loads(raw)
+            if (not re.fullmatch(r'cache-[a-f0-9]{32}',job_id) or len(items)!=1 or
+                    items[0].get('operation')!='cache_prepare'):continue
+            item=items[0];node=item.get('resolved',{}).get('node_name')
+            if node not in policy.get('allowed_nodes',[]):continue
+            with scheduling.node_locks([node],library=True),journal.allocation_lock():
+                if (journal.directory/(job_id+'.json')).exists():continue
+                _,catalog=_settings()
+                if any(r.get('job_id')==job_id for image in catalog['images'].values() for r in image.get('replicas',[])):continue
+                pin=_root()/'artifact-pins'/(job_id+'.json')
+                if pin.exists():
+                    value=json.loads(pin.read_text());image=catalog['images'].get(item.get('image'),{})
+                    if (value.get('job_id')!=job_id or value.get('state')!='active' or
+                            value.get('artifact_sha256')!=item.get('artifact_sha256') or
+                            value.get('artifact_sha256')!=image.get('artifact_sha256') or
+                            value.get('volume_id')!=image.get('artifact',{}).get('volume_id')):continue
+                    pin.unlink()
+                ledger.reconcile_job(job_id,operation_terminal=True,allocations_reconciled=True)
+                released.append(job_id)
+        return released
+    finally:ledger.close()
+
+
+def resume_snapshot_cache(job_id, *, replace_probe=False):
+    """Verify one stopped, owned Windows snapshot probe; never restore or clone again."""
+    from crange_catalog import publish_replica
+    from crange_distribution import _JournaledProbeAPI, _require_probe_pool
+    from datetime import datetime, timezone
+    from urllib.parse import quote
+    if not re.fullmatch(r'cache-[a-f0-9]{32}',job_id):raise DistributionError('Choose an exact cache job.')
+    policy,catalog=_settings();journal=FileJournal(_root()/'cache-journal')
+    path=journal.directory/(job_id+'.json');record=json.loads(path.read_text())
+    node=record.get('node');storage=record.get('datastore_id');image_id=record.get('image_id')
+    if node not in policy.get('allowed_nodes',[]):raise DistributionError('Cache node is not enrolled.')
+    api=ProxmoxAPI();ledger=ReservationLedger(_root()/'reservations.sqlite3')
+    try:
+        with scheduling.node_locks([node],library=True),journal.allocation_lock():
+            record=json.loads(path.read_text());policy,catalog=_settings();image=catalog['images'].get(image_id,{})
+            identity,profile,sealed=_cache_probe_identity(image)
+            saved=ledger.get_job(job_id)
+            allocation=saved.get('allocations',[]) if saved else []
+            if (not saved or saved.get('state')!='running' or record.get('job_id')!=job_id or record.get('state')!='verifying' or record.get('kind')!='qemu' or
+                    identity.get('identity_mode')!='windows-scenario-snapshot-v1' or sealed or
+                    record.get('artifact_sha256')!=image.get('artifact_sha256') or len(allocation)!=1 or
+                    allocation[0].get('operation')!='cache_prepare' or allocation[0].get('image')!=image_id or
+                    allocation[0].get('artifact_sha256')!=image.get('artifact_sha256') or
+                    allocation[0].get('resolved',{}).get('node_name')!=node or
+                    allocation[0].get('resolved',{}).get('datastore_id')!=storage or
+                    storage not in policy.get('allowed_storages',[]) or
+                    (storage!='local-lvm' and not proved_linked_storage(policy,node,storage))):
+                raise DistributionError('Existing snapshot cache does not match its immutable owned admission.')
+            vmid=record.get('template_id');probe=record.get('probe_id')
+            if (type(vmid) is not int or type(probe) is not int or min(vmid,probe)<100 or vmid==probe):
+                raise DistributionError('Existing snapshot cache/probe identity is incomplete.')
+            pin=_root()/'artifact-pins'/(job_id+'.json');pin_value=json.loads(pin.read_text())
+            if (pin_value.get('job_id')!=job_id or pin_value.get('artifact_sha256')!=image.get('artifact_sha256') or
+                    pin_value.get('volume_id')!=image.get('artifact',{}).get('volume_id')):
+                raise DistributionError('Existing immutable archive pin differs from the cache.')
+            for task in record.get('provider_tasks',[]):
+                task_node=task.get('node') or task.get('path','').split('/')[2]
+                status=api.request('GET',f'/nodes/{task_node}/tasks/{quote(task["upid"],safe="")}/status')
+                if status.get('status')!='stopped' or status.get('exitstatus')!='OK':
+                    raise DistributionError('Existing cache provider task is active, failed or uncertain.')
+            for guest,template in ((vmid,True),(probe,False)):
+                config=api.request('GET',f'/nodes/{node}/qemu/{guest}/config')
+                status=api.request('GET',f'/nodes/{node}/qemu/{guest}/status/current')
+                if (not cache_owned(config,guest,job_id) or bool(int(config.get('template',0)))!=template or
+                        config.get('lock') or status.get('status')!='stopped'):
+                    raise DistributionError('Existing cache/probe ownership, template or stopped state changed.')
+            _require_probe_pool(api,node,'qemu',probe)
+            bridge=select_probe_bridge(policy);settings=policy.get('cache',policy)
+            verifier=ProbeVerifier(bridge,settings.get('isolated_bridges',[]),identity,init_system=profile)
+            wrapped=_JournaledProbeAPI(api,record,journal)
+            if not replace_probe:
+                print(f'Resuming Windows snapshot verification for cache {vmid}, existing probe {probe}; no restore or clone is submitted.',flush=True)
+            if replace_probe:
+                evidence=record.get('verification_evidence',[])
+                if record.get('probe_replacement') or not any(row.get('type') in ('qga-timeout','qga-exec-error') for row in evidence):
+                    raise DistributionError('Probe replacement requires recorded guest-agent verification failure.')
+                # Only this disposable probe is retired; the immutable parent,
+                # archive pin and existing peak-capacity reservation are retained.
+                record.update(state='replacing-probe',probe_replacement={'probe_id':probe,
+                    'requested_at':datetime.now(timezone.utc).isoformat(),'reason':'guest-agent-verification-failed'});journal(record)
+                upid=wrapped.request('DELETE',f'/nodes/{node}/qemu/{probe}',{'purge':1})
+                wrapped.task(node,upid,timeout=600)
+                if any(str(row.get('vmid'))==str(probe) for row in api.request('GET','/cluster/resources',{'type':'vm'})):
+                    raise DistributionError('Retired probe deletion is unconfirmed; cache and reservation retained.')
+                # Reuse only the just-proven-absent probe VMID under the existing
+                # allocation lock. Its journal identity never changes. A provider
+                # collision fails safely; this replacement is permitted once only.
+                upid=wrapped.request('POST',f'/nodes/{node}/qemu/{vmid}/clone',
+                    {'newid':probe,'full':0,'pool':'crange-probes','description':f'CRANGE verification {job_id}',
+                     'name':f'crange-probe-{probe}'})
+                wrapped.task(node,upid,timeout=600)
+                from crange_cache_ownership import cache_tags
+                wrapped.request('PUT',f'/nodes/{node}/qemu/{probe}/config',
+                    {'tags':cache_tags({},probe),'description':f'CRANGE verification {job_id}'})
+                if not cache_owned(api.request('GET',f'/nodes/{node}/qemu/{probe}/config'),probe,job_id):
+                    raise DistributionError('Replacement probe ownership could not be confirmed.')
+                _require_probe_pool(api,node,'qemu',probe)
+                record['state']='verifying';journal(record)
+                print(f'Replaced only failed disposable probe; verifying fresh linked clone {probe} from cache {vmid}.',flush=True)
+            result=verifier(wrapped,node,'qemu',probe)
+            if result.get('passed') is not True or result.get('identity_unique') is not True:
+                raise DistributionError('Existing snapshot probe did not pass identity/readiness acceptance.')
+            if not cache_owned(api.request('GET',f'/nodes/{node}/qemu/{probe}/config'),probe,job_id):
+                raise DistributionError('Existing probe ownership changed before cleanup.')
+            upid=wrapped.request('DELETE',f'/nodes/{node}/qemu/{probe}',{'purge':1});wrapped.task(node,upid,timeout=600)
+            live=api.request('GET','/cluster/resources',{'type':'vm'})
+            if any(str(row.get('vmid'))==str(probe) for row in live):raise DistributionError('Existing probe cleanup is not confirmed.')
+            replica={'node':node,'template_id':vmid,'datastore_id':storage,'state':'ready',
+                'artifact_sha256':image['artifact_sha256'],'verified_at':datetime.now(timezone.utc).isoformat(),
+                'verification':result,'job_id':job_id,'clone_modes':['linked'],'clone_modes_verified':['linked'],'cache_local':True}
+            if storage!='local-lvm':replica['storage_verification']={'node':node,'datastore_id':storage,'local':True,'snapshots_verified':True}
+            catalog_transaction(scheduling.CONFIG/'image-catalog.json',lambda current:publish_replica(current,image_id,replica))
+            record['state']='ready';journal(record)
+            inventory=scheduling.discover(api,policy);actual=inventory.get('guests',{}).get(str(vmid))
+            if not actual or not actual.get('template') or actual.get('node_name')!=node:
+                raise DistributionError('Published cache template reconciliation is incomplete; reservation retained.')
+            ledger.reconcile_job(job_id,operation_terminal=True,allocations_reconciled=True);pin.unlink()
+            return {'image_id':image_id,'template_id':vmid,'node':node,'storage':storage,'state':'ready'}
+    finally:ledger.close()
+
+
+def resume_project_snapshot_caches(project_id, image_ids):
+    ledger=ReservationLedger(_root()/'reservations.sqlite3');records=[]
+    try:
+        rows=ledger.db.execute("SELECT job_id,allocations FROM jobs WHERE project_id=? AND state='running'",(project_id,)).fetchall()
+        for job_id,raw in rows:
+            items=json.loads(raw);path=_root()/'cache-journal'/(job_id+'.json')
+            if (len(items)==1 and items[0].get('operation')=='cache_prepare' and
+                    items[0].get('image') in image_ids and path.exists()):
+                record=json.loads(path.read_text())
+                if record.get('state')=='verifying' and record.get('kind')=='qemu':
+                    _,catalog=_settings()
+                    identity,_,sealed=_cache_probe_identity(catalog['images'].get(record.get('image_id'),{}))
+                    if not sealed and identity.get('identity_mode')=='windows-scenario-snapshot-v1':records.append(job_id)
+    finally:ledger.close()
+    for job_id in records:resume_snapshot_cache(job_id)
+
+
+def _resume_accepted_container_restore(api, ledger, journal, policy, catalog, image, record, project_id):
+    """Reconcile an owned completed CT restore; never repeat restore or conversion."""
+    from urllib.parse import quote
+    job = record.get('job_id'); node = record.get('node'); storage = record.get('datastore_id')
+    vmid = record.get('template_id'); image_id = record.get('image_id')
+    saved = ledger.get_job(job); allocations = saved.get('allocations', []) if saved else []
+    artifact = image.get('artifact', {})
+    if (record.get('state') not in ('converting-template','verifying') or record.get('kind') != 'lxc' or
+            type(vmid) is not int or record.get('allocation_node') != node or
+            record.get('artifact_sha256') != image.get('artifact_sha256') or
+            len(allocations) != 1 or saved.get('state') != 'running' or
+            allocations[0] != record.get('reservation') or
+            allocations[0].get('image') != image_id or
+            allocations[0].get('operation') != 'cache_prepare' or
+            allocations[0].get('resolved', {}).get('node_name') != node or
+            allocations[0].get('resolved', {}).get('datastore_id') != storage or
+            project_id not in image.get('approved_projects', []) and '*' not in image.get('approved_projects', [])):
+        raise DistributionError('Retained container cache admission identity differs; reconcile its exact generation.')
+    validator = shared_reservation_validator(ledger, job, allocations[0], image_id, image['artifact_sha256'])
+    if not validator(allocations[0], node, storage, required_capacity(image)):
+        raise DistributionError('Retained container cache reservation no longer covers verification.')
+    pin = _root() / 'artifact-pins' / (job + '.json')
+    value = json.loads(pin.read_text())
+    if (value.get('job_id') != job or value.get('state') != 'active' or
+            value.get('artifact_sha256') != image['artifact_sha256'] or
+            value.get('volume_id') != artifact.get('volume_id') or
+            record.get('source_node') != artifact.get('node') or
+            str(record.get('source_id')) != str(artifact.get('source_id'))):
+        raise DistributionError('Retained container archive pin or provenance differs.')
+    tasks = record.get('provider_tasks', [])
+    if not tasks or any(t.get('state') != 'confirmed-terminal' for t in tasks):
+        raise DistributionError('Retained container restore lacks confirmed provider completion.')
+    for task in tasks:
+        task_node = task.get('node') or task.get('path', '').split('/')[2]
+        if task_node != node or not (f':vzrestore:{vmid}:' in task.get('upid', '') or
+                record.get('state')=='verifying' and f':vzclone:{vmid}:' in task.get('upid','')):
+            raise DistributionError('Retained task is not the exact container restore.')
+        status = api.request('GET', f'/nodes/{node}/tasks/{quote(task["upid"], safe="")}/status')
+        if status.get('status') != 'stopped' or status.get('exitstatus') != 'OK':
+            raise DistributionError('Container restore is not confirmed successful.')
+    active = api.request('GET', f'/nodes/{node}/tasks', {'source': 'active', 'limit': 1000})
+    if len(active) >= 1000 or any(str(t.get('id')) in (str(vmid),str(record.get('probe_id'))) for t in active):
+        raise DistributionError('Container cache still has an active or ambiguous provider task.')
+    config = api.request('GET', f'/nodes/{node}/lxc/{vmid}/config')
+    status = api.request('GET', f'/nodes/{node}/lxc/{vmid}/status/current')
+    bridge = select_probe_bridge(policy)
+    if (not cache_owned(config, vmid, job) or int(config.get('template', 0)) != 1 or
+            config.get('lock') or status.get('status') != 'stopped' or
+            config.get('rootfs', '').split(',')[0] != f'{storage}:base-{vmid}-disk-0' or
+            'bridge=' + bridge not in config.get('net0', '') or 'link_down=1' not in config.get('net0', '')):
+        raise DistributionError('Retained container is not the exact stopped isolated cache template.')
+    pool = api.request('GET', '/pools/crange-iac')
+    if not any(m.get('type') == 'lxc' and m.get('node') == node and
+               str(m.get('vmid')) == str(vmid) for m in pool.get('members', [])):
+        raise DistributionError('Retained container pool ownership differs.')
+    identity, init_system, _ = _cache_probe_identity(image)
+    settings = policy.get('cache', policy)
+    verify = ProbeVerifier(bridge, settings.get('isolated_bridges', []), identity,
+                           ct_exec=SSHContainerExec(api=api), init_system=init_system)
+    worker = ReplicaWorker(api, journal, verify, approved_storage=[(node, storage)],
+        tested_paths=settings.get('tested_paths', []), linked_storages=proved_linked_storage(policy,node,storage),
+        reservation_validator=validator, backing_verifier=UnixContainerBackingVerifier(api=api))
+    with journal.allocation_lock():
+        updated = worker.resume_template(catalog, image_id, record=record)
+    return updated
+
+
 def prepare_cache(*, project_id, image_id, node_name, datastore_id='local-lvm',
-                  additional_capacity=None, owner='cli', job_id=None, acceptance_policy_path=None):
+                  additional_capacity=None, owner='cli', job_id=None, acceptance_policy_path=None, _controlled_acceptance_policy=None):
     """Admit cache/probe plus optional imminent guest demand, then verify local base.
 
     Failure retains reservations, provider IDs/tasks and artifact pin. Success
@@ -142,6 +385,12 @@ def prepare_cache(*, project_id, image_id, node_name, datastore_id='local-lvm',
         if additional_capacity:
             raise DistributionError('Acceptance cache preparation cannot include guest deployment demand.')
         policy = acceptance_policy(acceptance_policy_path, node_name, datastore_id)
+    if _controlled_acceptance_policy is not None:
+        if acceptance_policy_path is not None or additional_capacity:
+            raise DistributionError('Controlled acceptance cannot include guest deployment demand or another policy override.')
+        policy=_controlled_acceptance_policy
+        if policy.get('allowed_nodes')!=[node_name] or policy.get('approved_storage')!=[[node_name,datastore_id]]:
+            raise DistributionError('Controlled acceptance requires one exact isolated cache destination.')
     api = ProxmoxAPI()
     journal = FileJournal(_root() / 'cache-journal')
     ledger = ReservationLedger(_root() / 'reservations.sqlite3')
@@ -150,10 +399,11 @@ def prepare_cache(*, project_id, image_id, node_name, datastore_id='local-lvm',
     try:
         with scheduling.node_locks([node_name], library=True):
             def update(catalog):
+                nonlocal job_id
                 image = catalog['images'].get(image_id)
                 if not image or ('*' not in image['approved_projects'] and project_id not in image['approved_projects']):
                     raise DistributionError('Image is not approved for the selected project.')
-                if acceptance_policy_path is not None and image['kind'] != 'container':
+                if (acceptance_policy_path is not None or _controlled_acceptance_policy is not None) and image['kind'] != 'container':
                     raise DistributionError('Acceptance cache policy is restricted to container images.')
                 ready = _ready(image, node_name, datastore_id)
                 if ready:
@@ -178,25 +428,29 @@ def prepare_cache(*, project_id, image_id, node_name, datastore_id='local-lvm',
                     if ((previous.get('image_id'), previous.get('node'), previous.get('datastore_id')) ==
                             (image_id, node_name, datastore_id) and previous.get('state') not in
                             ('evicted', 'cleaned-owned', 'reconciled-absent')):
+                        if (_controlled_acceptance_policy is not None and image['kind']=='container'
+                                and previous.get('state') in ('converting-template','verifying')):
+                            updated = _resume_accepted_container_restore(api,ledger,journal,policy,catalog,image,previous,project_id)
+                            job_id = previous['job_id']
+                            result.update(_ready(updated['images'][image_id],node_name,datastore_id)[0],reused=False)
+                            return updated
                         raise DistributionError('Cache fill already exists as ' + previous['job_id'] + '; attach/reconcile its exact generation.')
                 settings = policy.get('cache', policy)
-                source_identity = image.get('source_identity') or image.get('verification', {}).get('source_identity')
-                if not source_identity: raise DistributionError('Captured source identity evidence is missing.')
+                identity_capture = image.get('identity_capture') or {}
+                source_identity, init_system, sealed_windows = _cache_probe_identity(image)
                 verify = ProbeVerifier(bridge, settings.get('isolated_bridges', []), source_identity,
-                                       ct_exec=SSHContainerExec(), init_system=image.get('init_system', 'systemd'))
+                                       ct_exec=SSHContainerExec(api=api), init_system=init_system)
                 artifact = image.get('artifact', {})
                 if (not artifact.get('volume_id', '').startswith('crange-library:backup/') or
                         not artifact.get('source_id') or not artifact.get('node') or not artifact.get('complete_capture')):
                     raise DistributionError('Verified complete central artifact provenance is missing.')
                 if not {f'local-linked-{image["kind"]}', f'{image["kind"]}-archive-restore'}.issubset(settings.get('tested_paths', [])):
                     raise DistributionError('Cache linked-clone/restore capabilities have not passed acceptance.')
-                demand = required_capacity(image)
-                total = dict(demand)
-                for key in ('memory_mb', 'cpu_cores', 'disk_gb'):
-                    extra = (additional_capacity or {}).get(key, 0)
-                    if isinstance(extra, bool) or not isinstance(extra, (int, float)) or not math.isfinite(extra) or extra < 0:
-                        raise DistributionError('Invalid trusted staging capacity demand.')
-                    total[key] += extra
+                candidate = automatic_probe_candidate(image)
+                if candidate:
+                    print(f'Testing disposable clone at {candidate["memory_mb"]} MB / {candidate["cpu_cores"]} cores; approval follows live verification.', flush=True)
+                demand = required_capacity(image, probe_candidate=candidate)
+                total = preparation_peak_capacity(demand, additional_capacity or {})
                 inventory = scheduling.discover(api, policy)
                 allocation = ledger.reserve_preparation(project_id=project_id, job_id=job_id,
                     owner=owner, image_id=image_id, catalog=catalog, node_name=node_name,
@@ -208,11 +462,20 @@ def prepare_cache(*, project_id, image_id, node_name, datastore_id='local-lvm',
                     'node': artifact.get('node'), 'volume_id': artifact.get('volume_id'),
                     'complete_capture': artifact.get('complete_capture'),
                     'artifact_sha256': image['artifact_sha256']}
+                if sealed_windows:
+                    # Preserve the protected capture object exactly; it is the
+                    # probe reference and provenance binding, not a fabricated SID.
+                    from crange_catalog import validate_sealed_windows_capture
+                    validate_sealed_windows_capture(identity_capture)
+                    archive['identity_capture'] = dict(identity_capture)
+                else:
+                    archive['source_identity'] = dict(source_identity)
                 worker = ReplicaWorker(api, journal, verify,
                     approved_storage=[(node_name, datastore_id)],
                     tested_paths=settings.get('tested_paths', []),
+                    linked_storages=proved_linked_storage(policy,node_name,datastore_id),
                     allocation_lock=journal.allocation_lock, hash_volume=SSHVolumeHasher(),
-                    reservation_validator=validator, backing_verifier=UnixContainerBackingVerifier())
+                    reservation_validator=validator, backing_verifier=UnixContainerBackingVerifier(api=api), probe_candidate=candidate)
                 with artifact_pin(artifact.get('volume_id'), image['artifact_sha256'], job_id):
                     updated = worker.prepare(catalog, image_id, source_node=artifact.get('node'),
                         source_id=artifact.get('source_id'), node=node_name, datastore_id=datastore_id,
@@ -231,6 +494,7 @@ def prepare_cache(*, project_id, image_id, node_name, datastore_id='local-lvm',
                         any(t['state'] != 'confirmed-terminal' for t in record.get('provider_tasks', []))):
                     raise DistributionError('Provider tasks remain uncertain; reservation retained.')
                 ledger.reconcile_job(job_id, operation_terminal=True, allocations_reconciled=True)
+                (_root() / 'artifact-pins' / (job_id + '.json')).unlink(missing_ok=True)
         return {'job_id': job_id, 'image_id': image_id, **result}
     finally:
         ledger.close()
@@ -324,7 +588,7 @@ def collect_cache_evidence(api, catalog, image_id, node_name, template_id, *,
     if not permissions.get('/vms', {}).get('VM.Audit'):
         raise CacheError('Cluster-wide VM.Audit is required to prove complete inventory.')
     nodes = api.request('GET', '/nodes')
-    expected_nodes = set(policy.get('expected_cluster_nodes', [f'proxmox{i}' for i in range(1, 6)]))
+    expected_nodes = set(policy.get('expected_cluster_nodes', [f'proxmox{i}' for i in range(1, 7)]))
     if set(n['node'] for n in nodes) != expected_nodes or any(n.get('status') != 'online' for n in nodes):
         raise CacheError('Every cluster node must be reachable for complete backing evidence.')
     resources = api.request('GET', '/cluster/resources', {'type': 'vm'})
@@ -483,7 +747,7 @@ def _reconcile_absent_cache_job(job_id, record, *, catalog, api, journal, ledger
             record.get('provider_tasks', []) != [] or record.get('probe_id') is not None):
         raise DistributionError('Only a task-free allocated cache request can be reconciled as absent.')
     node, vmid = record.get('node'), record.get('template_id')
-    if (node not in {f'proxmox{i}' for i in range(1, 6)} or
+    if (node not in {f'proxmox{i}' for i in range(1, 7)} or
             isinstance(vmid, bool) or not isinstance(vmid, int) or vmid < 100 or
             record.get('allocation_node') != node or record.get('datastore_id') != 'local-lvm' or
             record.get('kind') != 'qemu'):
@@ -536,6 +800,27 @@ def _reconcile_absent_cache_job(job_id, record, *, catalog, api, journal, ledger
     return {'job_id': job_id, 'state': 'released', 'template_id': vmid, 'allocation_absent': True}
 
 
+def _probe_absent_or_reused(record, inventory, successful_tasks):
+    """A different guest kind may reuse an ID after confirmed owned deletion.
+
+    Never treat a same-kind guest, missing deletion receipt, or uncertain task as
+    absence. This helper changes no guest and only permits reservation cleanup.
+    """
+    probe, node, kind = record.get('probe_id'), record.get('node'), record.get('kind')
+    if type(probe) is not int or probe < 100 or kind not in ('qemu', 'lxc'):
+        return False
+    current = inventory.get('guests', {}).get(str(probe))
+    if current is None:
+        return True
+    if current.get('kind') not in ({'qemu', 'lxc'} - {kind}):
+        return False
+    operation = 'qmdestroy' if kind == 'qemu' else 'vzdestroy'
+    pattern = rf'UPID:{re.escape(node)}:[A-Fa-f0-9]+:[A-Fa-f0-9]+:[A-Fa-f0-9]+:{operation}:{probe}:[^:\r\n]+:'
+    return any(t.get('state') == 'confirmed-terminal' and t.get('upid') in successful_tasks
+               and re.fullmatch(pattern, str(t.get('upid', '')))
+               for t in record.get('provider_tasks', []))
+
+
 def reconcile_cache_job(job_id):
     """Release a completed published cache fill after fresh task/allocation checks.
 
@@ -559,6 +844,7 @@ def reconcile_cache_job(job_id):
             published = [r for r in catalog['images'][record['image_id']]['replicas']
                          if r.get('job_id') == job_id and r.get('template_id') == record['template_id']]
             if len(published) != 1: raise DistributionError('Verified generation not published; reservation retained.')
+            successful_tasks = set()
             for task in record.get('provider_tasks', []):
                 path = task.get('path', '')
                 task_node = task.get('node') or path.split('/')[2]
@@ -566,12 +852,13 @@ def reconcile_cache_job(job_id):
                 status = api.request('GET', f'/nodes/{task_node}/tasks/{quote(task["upid"], safe="")}/status')
                 if status.get('status') != 'stopped':
                     raise DistributionError('Provider operation remains active or uncertain.')
+                if status.get('exitstatus') == 'OK':successful_tasks.add(task['upid'])
             inventory = scheduling.discover(api, policy)
             actual = inventory['guests'].get(str(record['template_id']))
             if (not actual or actual['node_name'] != node or not actual.get('template') or
                     not cache_owned(api.request('GET', f'/nodes/{node}/{record["kind"]}/{record["template_id"]}/config'),
                                     record['template_id'], job_id) or
-                    str(record.get('probe_id')) in inventory['guests']):
+                    not _probe_absent_or_reused(record, inventory, successful_tasks)):
                 raise DistributionError('Actual cache/probe ownership reconciliation is incomplete.')
             ledger.reconcile_job(job_id, operation_terminal=True, allocations_reconciled=True)
             pin = _root() / 'artifact-pins' / (job_id + '.json')
@@ -690,7 +977,7 @@ def resume_cache_template(job_id):
                 approved_storage=[('proxmox2', 'local-lvm')],
                 tested_paths=settings.get('tested_paths', []),
                 allocation_lock=journal.allocation_lock,
-                reservation_validator=validator, backing_verifier=UnixContainerBackingVerifier())
+                reservation_validator=validator, backing_verifier=UnixContainerBackingVerifier(api=api))
             # The existing restore already created a template; resume only performs
             # disposable identity verification, exact probe cleanup, then publish.
             updated = worker.resume_template(catalog, image_id, record=record)

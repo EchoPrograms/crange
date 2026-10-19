@@ -1,0 +1,24 @@
+{
+  "state": {
+    "username": "admin",
+    "source": "json",
+    "available": [
+      "postgresql",
+      "postgresql-shared",
+      "json"
+    ]
+  },
+  "errors": [],
+  "protocol_controls": 6,
+  "failed_requests": [],
+  "verified_at": "2026-10-16T22:56:24.087525+00:00",
+  "entrypoint": "Actual dashboard Open Guacamole link, project 100, authenticated CRANGE admin",
+  "reload_without_banner": true,
+  "extension_sha256": "18f84841da70784785544b86c9deb72d175c91fa420179d306d1182a8a46a34c",
+  "before_fix": {
+    "native_inventory_http_status": 403,
+    "error": "Guacamole account not found.",
+    "protocol_controls": 6
+  },
+  "authorization_changed": false
+}

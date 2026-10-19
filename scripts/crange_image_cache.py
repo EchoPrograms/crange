@@ -10,7 +10,7 @@ import json
 import re
 import time
 
-from crange_catalog import validate_catalog
+from crange_catalog import validate_catalog, verified_local_cache_storage
 from crange_cache_ownership import cache_owned
 
 
@@ -29,7 +29,7 @@ def _candidate(catalog, image_id, node, template_id):
     if len(matches) != 1:
         raise CacheError('Exact local replica identity is missing or ambiguous.')
     replica = matches[0]
-    if replica.get('state') != 'ready' or not replica.get('cache_local') or replica.get('datastore_id') != 'local-lvm':
+    if replica.get('state') != 'ready' or not replica.get('cache_local') or not verified_local_cache_storage(replica):
         raise CacheError('Only a verified owned local cache replica may be evicted.')
     artifact = image.get('artifact', {})
     if (artifact.get('format') != 'vzdump' or not artifact.get('complete_capture') or
@@ -159,7 +159,7 @@ def activate_cached_version(catalog, image_id, node, *, current=None):
     image = catalog['images'][image_id]
     replicas = [r for r in image['replicas'] if r['node'] == node and
                 r.get('cache_local') and r.get('state') == 'ready' and
-                'linked' in r.get('clone_modes_verified', []) and r.get('datastore_id') == 'local-lvm']
+                'linked' in r.get('clone_modes_verified', []) and verified_local_cache_storage(r)]
     if len(replicas) != 1: raise CacheError('Prepare exactly one verified local linked-clone base first.')
     return {'image_id': image_id, 'node': node, 'template_id': replicas[0]['template_id'],
             'previous': copy.deepcopy(current), 'clone_mode': 'linked'}

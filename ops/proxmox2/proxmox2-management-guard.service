@@ -1,0 +1,6 @@
+[Unit]
+Description=Restore Proxmox2 management address if missing
+After=networking.service
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/proxmox2-management-guard

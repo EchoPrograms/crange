@@ -1,0 +1,13 @@
+[Unit]
+Description=CRANGE fixed native template backup preparation
+After=crange-ct-read-relay.service
+Requires=crange-ct-read-relay.service
+[Service]
+Type=simple
+User=root
+UMask=0077
+ExecStart=/usr/bin/python3 /usr/local/lib/crange/node_backup_relay.py /etc/crange-ct-read-relay.json 34597bb91f4294ed255bdbfebfcd17a11c7abdcce6db0fb29af45ba6e5e66448
+Restart=on-failure
+RestartSec=5
+[Install]
+WantedBy=multi-user.target

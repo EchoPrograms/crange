@@ -1,0 +1,38 @@
+{
+  "observed_at": "2026-10-19T02:22:32Z",
+  "owner_confirmed_unexpected": true,
+  "proxmox4_corosync_events": [
+    {
+      "utc": "2026-10-19T01:52:17Z",
+      "event": "Proxmox1 cluster link down; no active links"
+    },
+    {
+      "utc": "2026-10-19T01:52:26Z",
+      "event": "Membership now 2,3,4,5,6; failed to receive leave message"
+    }
+  ],
+  "proxmox1_online": false,
+  "cluster_quorate": true,
+  "online_nodes": [
+    "proxmox2",
+    "proxmox3",
+    "proxmox4",
+    "proxmox5",
+    "proxmox6"
+  ],
+  "tailscale_diagnostic_ping": "no reply",
+  "root_cause": "unknown; console or recovered host logs required",
+  "reviewed_workstation_plan": "5613c70c92cea61d9bf5675253ed618d",
+  "reviewed_plan_scope": "20 new guests and ten existing guest boot-order updates on Proxmox6; no host networking or node power changes",
+  "reservation_reconciliation": {
+    "job_id": "cea6ffa333b8453f86d04d3552f32a47",
+    "status": "failed",
+    "error": "HTTP595 reading /nodes/proxmox1/lxc/120/config"
+  },
+  "fresh_plan": {
+    "job_id": "23aa0528748547e5a72c329c4138049c",
+    "status": "failed",
+    "error": "Fixed offline config snapshot was denied or malformed."
+  },
+  "uncertain_host_recovery_not_attempted": true
+}

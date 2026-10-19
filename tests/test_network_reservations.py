@@ -12,6 +12,8 @@ class NetworkReservationTests(unittest.TestCase):
         _,inventory,_,policy=placement_test.fixtures()
         node=inventory['nodes']['n1']
         node['architectures']=['amd64']
+        node['storages']['local'].update(shared=False, snapshots_verified=True,
+                                         clone_modes=['full','linked'])
         inventory.update(nodes={'proxmox2':node},guests={},declared_addresses=[])
         policy.update(allowed_nodes=['proxmox2'])
         self.inventory=inventory
@@ -32,6 +34,7 @@ class NetworkReservationTests(unittest.TestCase):
         allocation=self.reserve()
         self.assertEqual(allocation['operation'],'network_probe')
         self.assertEqual(allocation['network_scope'],self.target)
+        self.assertEqual(allocation['resolved']['clone_mode'], 'linked')
         self.assertEqual(len(self.ledger.active_reservations()),1)
         self.assertEqual(self.ledger.active_reservations()[0]['memory_mb'],512)
 
@@ -66,3 +69,24 @@ class NetworkReservationTests(unittest.TestCase):
         self.assertEqual(len(self.ledger.active_reservations()),1)
         self.ledger.reconcile_job(self.target['job_id'],operation_terminal=True,allocations_reconciled=True)
         self.assertEqual(self.ledger.active_reservations(),[])
+
+    def test_linked_budget_keeps_physical_floor_and_requires_local_snapshot_proof(self):
+        storage = self.inventory['nodes']['proxmox2']['storages']['local']
+        storage.update(total_gb=100, free_gb=80, committed_gb=95)
+        self.policy['local_linked_disk_overcommit_ratio'] = 2
+        self.assertEqual(self.reserve()['resolved']['clone_mode'], 'linked')
+        self.ledger.reconcile_job(self.target['job_id'], operation_terminal=True, allocations_reconciled=True)
+        for field, value in [('free_gb', 25), ('shared', True), ('snapshots_verified', False)]:
+            original = storage[field]
+            storage[field] = value
+            target = dict(self.target, job_id='network-'+'d'*32)
+            with self.subTest(field=field), self.assertRaises(PlacementError): self.reserve(target)
+            storage[field] = original
+
+    def test_unscoped_vm_publication_cannot_claim_network_linked_budget(self):
+        with self.assertRaisesRegex(PlacementError, 'exact owned network scope'):
+            self.ledger.reserve_source_probe(project_id=3, job_id='capture', owner='release-capture',
+                source_ref='source:proxmox2:qemu:150', source_sha256='b'*64,
+                node_name='proxmox2', datastore_id='local', kind='vm', clone_mode='linked',
+                capacity={'memory_mb':512,'cpu_cores':1,'disk_gb':22},
+                inventory=self.inventory, policy=self.policy, now=100)

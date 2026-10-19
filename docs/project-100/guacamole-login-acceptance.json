@@ -1,0 +1,36 @@
+{
+  "date": "2026-10-16",
+  "guacadmin_enabled": true,
+  "observed_guacadmin_password_authentication": "successful_before_lockout",
+  "lockout": "temporary proxy-source address ban after repeated route authentication failures",
+  "before_native_browser": {
+    "token_statuses": [
+      403,
+      200,
+      403
+    ],
+    "login_form_visible": true
+  },
+  "after_native_browser": {
+    "token_statuses": [
+      403,
+      200,
+      200,
+      200
+    ],
+    "login_form_visible": false,
+    "page_errors": []
+  },
+  "dashboard_ticket_and_reload": {
+    "token_statuses": [
+      200,
+      200,
+      200
+    ],
+    "initial_user": "admin",
+    "reloaded_user": "admin",
+    "credential_query_parameters_remaining": []
+  },
+  "deployment": "auth-launch-only; Guacamole web container reloaded; password and permissions unchanged",
+  "pending_compact_frontend_redesign_deployed": false
+}

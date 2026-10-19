@@ -1,0 +1,165 @@
+{
+  "plan_id": "0d1d2fecd2c86b84ca3dab24b5fcf4c2",
+  "inputs_sha256": "34e4a7ff771752c406f0f4a00778ee5f3626af79db4a4ec64379ff775d107a1b",
+  "teams": [
+    "1",
+    "2",
+    "3",
+    "4",
+    "5"
+  ],
+  "all_actions_create": true,
+  "linked_clones": true,
+  "resources": [
+    {
+      "address": "module.scenario_box[\"r0.1.2-mhl-dc01-t001\"].proxmox_virtual_environment_vm.scenario",
+      "node": "proxmox6",
+      "source_template": 186
+    },
+    {
+      "address": "module.scenario_box[\"r0.1.2-mhl-dc01-t002\"].proxmox_virtual_environment_vm.scenario",
+      "node": "proxmox6",
+      "source_template": 186
+    },
+    {
+      "address": "module.scenario_box[\"r0.1.2-mhl-dc01-t003\"].proxmox_virtual_environment_vm.scenario",
+      "node": "proxmox6",
+      "source_template": 186
+    },
+    {
+      "address": "module.scenario_box[\"r0.1.2-mhl-dc01-t004\"].proxmox_virtual_environment_vm.scenario",
+      "node": "proxmox6",
+      "source_template": 186
+    },
+    {
+      "address": "module.scenario_box[\"r0.1.2-mhl-dc01-t005\"].proxmox_virtual_environment_vm.scenario",
+      "node": "proxmox6",
+      "source_template": 186
+    },
+    {
+      "address": "module.scenario_box[\"r0.1.2-mhl-file01-t001\"].proxmox_virtual_environment_vm.scenario",
+      "node": "proxmox6",
+      "source_template": 185
+    },
+    {
+      "address": "module.scenario_box[\"r0.1.2-mhl-file01-t002\"].proxmox_virtual_environment_vm.scenario",
+      "node": "proxmox6",
+      "source_template": 185
+    },
+    {
+      "address": "module.scenario_box[\"r0.1.2-mhl-file01-t003\"].proxmox_virtual_environment_vm.scenario",
+      "node": "proxmox6",
+      "source_template": 185
+    },
+    {
+      "address": "module.scenario_box[\"r0.1.2-mhl-file01-t004\"].proxmox_virtual_environment_vm.scenario",
+      "node": "proxmox6",
+      "source_template": 185
+    },
+    {
+      "address": "module.scenario_box[\"r0.1.2-mhl-file01-t005\"].proxmox_virtual_environment_vm.scenario",
+      "node": "proxmox6",
+      "source_template": 185
+    },
+    {
+      "address": "module.scenario_container[\"r0.1.2-mhl-app01-t001\"].proxmox_virtual_environment_container.scenario",
+      "node": "proxmox6",
+      "source_template": 187
+    },
+    {
+      "address": "module.scenario_container[\"r0.1.2-mhl-app01-t002\"].proxmox_virtual_environment_container.scenario",
+      "node": "proxmox6",
+      "source_template": 187
+    },
+    {
+      "address": "module.scenario_container[\"r0.1.2-mhl-app01-t003\"].proxmox_virtual_environment_container.scenario",
+      "node": "proxmox6",
+      "source_template": 187
+    },
+    {
+      "address": "module.scenario_container[\"r0.1.2-mhl-app01-t004\"].proxmox_virtual_environment_container.scenario",
+      "node": "proxmox6",
+      "source_template": 187
+    },
+    {
+      "address": "module.scenario_container[\"r0.1.2-mhl-app01-t005\"].proxmox_virtual_environment_container.scenario",
+      "node": "proxmox6",
+      "source_template": 187
+    },
+    {
+      "address": "module.scenario_container[\"r0.1.2-mhl-bkp01-t001\"].proxmox_virtual_environment_container.scenario",
+      "node": "proxmox6",
+      "source_template": 188
+    },
+    {
+      "address": "module.scenario_container[\"r0.1.2-mhl-bkp01-t002\"].proxmox_virtual_environment_container.scenario",
+      "node": "proxmox6",
+      "source_template": 188
+    },
+    {
+      "address": "module.scenario_container[\"r0.1.2-mhl-bkp01-t003\"].proxmox_virtual_environment_container.scenario",
+      "node": "proxmox6",
+      "source_template": 188
+    },
+    {
+      "address": "module.scenario_container[\"r0.1.2-mhl-bkp01-t004\"].proxmox_virtual_environment_container.scenario",
+      "node": "proxmox6",
+      "source_template": 188
+    },
+    {
+      "address": "module.scenario_container[\"r0.1.2-mhl-bkp01-t005\"].proxmox_virtual_environment_container.scenario",
+      "node": "proxmox6",
+      "source_template": 188
+    },
+    {
+      "address": "module.scenario_container[\"r0.1.2-mhl-ci01-t001\"].proxmox_virtual_environment_container.scenario",
+      "node": "proxmox6",
+      "source_template": 184
+    },
+    {
+      "address": "module.scenario_container[\"r0.1.2-mhl-ci01-t002\"].proxmox_virtual_environment_container.scenario",
+      "node": "proxmox6",
+      "source_template": 184
+    },
+    {
+      "address": "module.scenario_container[\"r0.1.2-mhl-ci01-t003\"].proxmox_virtual_environment_container.scenario",
+      "node": "proxmox6",
+      "source_template": 184
+    },
+    {
+      "address": "module.scenario_container[\"r0.1.2-mhl-ci01-t004\"].proxmox_virtual_environment_container.scenario",
+      "node": "proxmox6",
+      "source_template": 184
+    },
+    {
+      "address": "module.scenario_container[\"r0.1.2-mhl-ci01-t005\"].proxmox_virtual_environment_container.scenario",
+      "node": "proxmox6",
+      "source_template": 184
+    },
+    {
+      "address": "module.scenario_container[\"r0.1.2-mhl-db01-t001\"].proxmox_virtual_environment_container.scenario",
+      "node": "proxmox6",
+      "source_template": 177
+    },
+    {
+      "address": "module.scenario_container[\"r0.1.2-mhl-db01-t002\"].proxmox_virtual_environment_container.scenario",
+      "node": "proxmox6",
+      "source_template": 177
+    },
+    {
+      "address": "module.scenario_container[\"r0.1.2-mhl-db01-t003\"].proxmox_virtual_environment_container.scenario",
+      "node": "proxmox6",
+      "source_template": 177
+    },
+    {
+      "address": "module.scenario_container[\"r0.1.2-mhl-db01-t004\"].proxmox_virtual_environment_container.scenario",
+      "node": "proxmox6",
+      "source_template": 177
+    },
+    {
+      "address": "module.scenario_container[\"r0.1.2-mhl-db01-t005\"].proxmox_virtual_environment_container.scenario",
+      "node": "proxmox6",
+      "source_template": 177
+    }
+  ]
+}

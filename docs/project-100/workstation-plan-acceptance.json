@@ -1,0 +1,5147 @@
+{
+  "project": 100,
+  "plan_id": "5613c70c92cea61d9bf5675253ed618d",
+  "gui_plan_job": "2f5dc4801fc94360a1529a9cda19f2ab",
+  "creates": 20,
+  "windows": 10,
+  "linux": 10,
+  "existing_changes": "ten empty-CD-ROM boot-order removals only",
+  "no_destroys_or_replacements": true,
+  "all_new_disks_linked": true,
+  "windows_machine": "pc-q35-9.2+pve1",
+  "placements": {
+    "proxmox6": 20
+  },
+  "changes": [
+    {
+      "address": "module.jumpbox[\"t001-j01\"].proxmox_virtual_environment_vm.jump",
+      "actions": [
+        "create"
+      ],
+      "changed_fields": [
+        "acpi",
+        "boot_order",
+        "purge_on_destroy",
+        "amd_sev",
+        "disk",
+        "scsi_hardware",
+        "timeout_reboot",
+        "tags",
+        "name",
+        "migrate",
+        "network_device",
+        "virtiofs",
+        "node_name",
+        "numa",
+        "reboot",
+        "started",
+        "cpu",
+        "operating_system",
+        "timeout_create",
+        "delete_unreferenced_disks_on_destroy",
+        "efi_disk",
+        "timeout_clone",
+        "reboot_after_update",
+        "timeout_shutdown_vm",
+        "timeout_migrate",
+        "timeout_move_disk",
+        "serial_device",
+        "smbios",
+        "timeout_stop_vm",
+        "bios",
+        "tablet_device",
+        "usb",
+        "rng",
+        "tpm_state",
+        "initialization",
+        "stop_on_destroy",
+        "description",
+        "timeout_start_vm",
+        "cdrom",
+        "clone",
+        "watchdog",
+        "keyboard_layout",
+        "template",
+        "hostpci",
+        "audio_device",
+        "pool_id",
+        "agent",
+        "startup",
+        "protection",
+        "memory",
+        "on_boot"
+      ],
+      "safe_differences": {
+        "boot_order": {
+          "before": null,
+          "after": [
+            "scsi0"
+          ]
+        },
+        "tags": {
+          "before": null,
+          "after": [
+            "range-lan",
+            "jumpbox",
+            "p100",
+            "p100t001",
+            "terraform"
+          ]
+        },
+        "started": {
+          "before": null,
+          "after": true
+        },
+        "operating_system": {
+          "before": null,
+          "after": [
+            {
+              "type": "l26"
+            }
+          ]
+        },
+        "serial_device": {
+          "before": null,
+          "after": []
+        },
+        "bios": {
+          "before": null,
+          "after": "seabios"
+        },
+        "tablet_device": {
+          "before": null,
+          "after": true
+        },
+        "stop_on_destroy": {
+          "before": null,
+          "after": false
+        },
+        "description": {
+          "before": null,
+          "after": "Managed by Terraform: cyber range controller bootstrap"
+        },
+        "cdrom": {
+          "before": null,
+          "after": [
+            {
+              "enabled": false,
+              "file_id": "none",
+              "interface": "ide2"
+            }
+          ]
+        },
+        "keyboard_layout": {
+          "before": null,
+          "after": "en-us"
+        },
+        "agent": {
+          "before": null,
+          "after": [
+            {
+              "enabled": true,
+              "timeout": "5m",
+              "trim": false,
+              "type": "virtio",
+              "wait_for_ip": []
+            }
+          ]
+        },
+        "on_boot": {
+          "before": null,
+          "after": false
+        }
+      },
+      "before": {},
+      "after": {
+        "node_name": "proxmox6",
+        "name": "p100t001-jump-01",
+        "network_device": [
+          {
+            "bridge": "p100t001",
+            "disconnected": null,
+            "enabled": true,
+            "firewall": true,
+            "model": "virtio",
+            "mtu": 1450,
+            "queues": 0,
+            "rate_limit": 0,
+            "trunks": null,
+            "vlan_id": 0
+          }
+        ],
+        "clone": [
+          {
+            "datastore_id": null,
+            "full": false,
+            "node_name": "proxmox6",
+            "retries": 1,
+            "vm_id": 169
+          }
+        ],
+        "disk": [],
+        "cpu": [
+          {
+            "affinity": null,
+            "architecture": null,
+            "cores": 2,
+            "flags": null,
+            "hotplugged": 0,
+            "limit": 0,
+            "numa": false,
+            "sockets": 1,
+            "type": "host"
+          }
+        ],
+        "memory": [
+          {
+            "dedicated": 2048,
+            "floating": 0,
+            "hugepages": null,
+            "keep_hugepages": false,
+            "shared": 0
+          }
+        ]
+      }
+    },
+    {
+      "address": "module.jumpbox[\"t001-j03\"].proxmox_virtual_environment_vm.jump",
+      "actions": [
+        "create"
+      ],
+      "changed_fields": [
+        "acpi",
+        "boot_order",
+        "purge_on_destroy",
+        "amd_sev",
+        "disk",
+        "scsi_hardware",
+        "timeout_reboot",
+        "tags",
+        "name",
+        "migrate",
+        "network_device",
+        "virtiofs",
+        "node_name",
+        "numa",
+        "reboot",
+        "started",
+        "cpu",
+        "operating_system",
+        "timeout_create",
+        "delete_unreferenced_disks_on_destroy",
+        "efi_disk",
+        "timeout_clone",
+        "reboot_after_update",
+        "timeout_shutdown_vm",
+        "timeout_migrate",
+        "timeout_move_disk",
+        "serial_device",
+        "smbios",
+        "timeout_stop_vm",
+        "bios",
+        "tablet_device",
+        "usb",
+        "rng",
+        "tpm_state",
+        "initialization",
+        "stop_on_destroy",
+        "description",
+        "timeout_start_vm",
+        "cdrom",
+        "clone",
+        "watchdog",
+        "keyboard_layout",
+        "template",
+        "hostpci",
+        "audio_device",
+        "pool_id",
+        "agent",
+        "startup",
+        "protection",
+        "memory",
+        "on_boot"
+      ],
+      "safe_differences": {
+        "boot_order": {
+          "before": null,
+          "after": [
+            "scsi0"
+          ]
+        },
+        "tags": {
+          "before": null,
+          "after": [
+            "range-lan",
+            "jumpbox",
+            "p100",
+            "p100t001",
+            "terraform"
+          ]
+        },
+        "started": {
+          "before": null,
+          "after": true
+        },
+        "operating_system": {
+          "before": null,
+          "after": [
+            {
+              "type": "l26"
+            }
+          ]
+        },
+        "serial_device": {
+          "before": null,
+          "after": []
+        },
+        "bios": {
+          "before": null,
+          "after": "seabios"
+        },
+        "tablet_device": {
+          "before": null,
+          "after": true
+        },
+        "stop_on_destroy": {
+          "before": null,
+          "after": false
+        },
+        "description": {
+          "before": null,
+          "after": "Managed by Terraform: cyber range controller bootstrap"
+        },
+        "cdrom": {
+          "before": null,
+          "after": [
+            {
+              "enabled": false,
+              "file_id": "none",
+              "interface": "ide2"
+            }
+          ]
+        },
+        "keyboard_layout": {
+          "before": null,
+          "after": "en-us"
+        },
+        "agent": {
+          "before": null,
+          "after": [
+            {
+              "enabled": true,
+              "timeout": "5m",
+              "trim": false,
+              "type": "virtio",
+              "wait_for_ip": []
+            }
+          ]
+        },
+        "on_boot": {
+          "before": null,
+          "after": false
+        }
+      },
+      "before": {},
+      "after": {
+        "node_name": "proxmox6",
+        "name": "p100t001-jump-03",
+        "network_device": [
+          {
+            "bridge": "p100t001",
+            "disconnected": null,
+            "enabled": true,
+            "firewall": true,
+            "model": "virtio",
+            "mtu": 1450,
+            "queues": 0,
+            "rate_limit": 0,
+            "trunks": null,
+            "vlan_id": 0
+          }
+        ],
+        "clone": [
+          {
+            "datastore_id": null,
+            "full": false,
+            "node_name": "proxmox6",
+            "retries": 1,
+            "vm_id": 169
+          }
+        ],
+        "disk": [],
+        "cpu": [
+          {
+            "affinity": null,
+            "architecture": null,
+            "cores": 2,
+            "flags": null,
+            "hotplugged": 0,
+            "limit": 0,
+            "numa": false,
+            "sockets": 1,
+            "type": "host"
+          }
+        ],
+        "memory": [
+          {
+            "dedicated": 2048,
+            "floating": 0,
+            "hugepages": null,
+            "keep_hugepages": false,
+            "shared": 0
+          }
+        ]
+      }
+    },
+    {
+      "address": "module.jumpbox[\"t002-j01\"].proxmox_virtual_environment_vm.jump",
+      "actions": [
+        "create"
+      ],
+      "changed_fields": [
+        "acpi",
+        "boot_order",
+        "purge_on_destroy",
+        "amd_sev",
+        "disk",
+        "scsi_hardware",
+        "timeout_reboot",
+        "tags",
+        "name",
+        "migrate",
+        "network_device",
+        "virtiofs",
+        "node_name",
+        "numa",
+        "reboot",
+        "started",
+        "cpu",
+        "operating_system",
+        "timeout_create",
+        "delete_unreferenced_disks_on_destroy",
+        "efi_disk",
+        "timeout_clone",
+        "reboot_after_update",
+        "timeout_shutdown_vm",
+        "timeout_migrate",
+        "timeout_move_disk",
+        "serial_device",
+        "smbios",
+        "timeout_stop_vm",
+        "bios",
+        "tablet_device",
+        "usb",
+        "rng",
+        "tpm_state",
+        "initialization",
+        "stop_on_destroy",
+        "description",
+        "timeout_start_vm",
+        "cdrom",
+        "clone",
+        "watchdog",
+        "keyboard_layout",
+        "template",
+        "hostpci",
+        "audio_device",
+        "pool_id",
+        "agent",
+        "startup",
+        "protection",
+        "memory",
+        "on_boot"
+      ],
+      "safe_differences": {
+        "boot_order": {
+          "before": null,
+          "after": [
+            "scsi0"
+          ]
+        },
+        "tags": {
+          "before": null,
+          "after": [
+            "range-lan",
+            "jumpbox",
+            "p100",
+            "p100t002",
+            "terraform"
+          ]
+        },
+        "started": {
+          "before": null,
+          "after": true
+        },
+        "operating_system": {
+          "before": null,
+          "after": [
+            {
+              "type": "l26"
+            }
+          ]
+        },
+        "serial_device": {
+          "before": null,
+          "after": []
+        },
+        "bios": {
+          "before": null,
+          "after": "seabios"
+        },
+        "tablet_device": {
+          "before": null,
+          "after": true
+        },
+        "stop_on_destroy": {
+          "before": null,
+          "after": false
+        },
+        "description": {
+          "before": null,
+          "after": "Managed by Terraform: cyber range controller bootstrap"
+        },
+        "cdrom": {
+          "before": null,
+          "after": [
+            {
+              "enabled": false,
+              "file_id": "none",
+              "interface": "ide2"
+            }
+          ]
+        },
+        "keyboard_layout": {
+          "before": null,
+          "after": "en-us"
+        },
+        "agent": {
+          "before": null,
+          "after": [
+            {
+              "enabled": true,
+              "timeout": "5m",
+              "trim": false,
+              "type": "virtio",
+              "wait_for_ip": []
+            }
+          ]
+        },
+        "on_boot": {
+          "before": null,
+          "after": false
+        }
+      },
+      "before": {},
+      "after": {
+        "node_name": "proxmox6",
+        "name": "p100t002-jump-01",
+        "network_device": [
+          {
+            "bridge": "p100t002",
+            "disconnected": null,
+            "enabled": true,
+            "firewall": true,
+            "model": "virtio",
+            "mtu": 1450,
+            "queues": 0,
+            "rate_limit": 0,
+            "trunks": null,
+            "vlan_id": 0
+          }
+        ],
+        "clone": [
+          {
+            "datastore_id": null,
+            "full": false,
+            "node_name": "proxmox6",
+            "retries": 1,
+            "vm_id": 169
+          }
+        ],
+        "disk": [],
+        "cpu": [
+          {
+            "affinity": null,
+            "architecture": null,
+            "cores": 2,
+            "flags": null,
+            "hotplugged": 0,
+            "limit": 0,
+            "numa": false,
+            "sockets": 1,
+            "type": "host"
+          }
+        ],
+        "memory": [
+          {
+            "dedicated": 2048,
+            "floating": 0,
+            "hugepages": null,
+            "keep_hugepages": false,
+            "shared": 0
+          }
+        ]
+      }
+    },
+    {
+      "address": "module.jumpbox[\"t002-j03\"].proxmox_virtual_environment_vm.jump",
+      "actions": [
+        "create"
+      ],
+      "changed_fields": [
+        "acpi",
+        "boot_order",
+        "purge_on_destroy",
+        "amd_sev",
+        "disk",
+        "scsi_hardware",
+        "timeout_reboot",
+        "tags",
+        "name",
+        "migrate",
+        "network_device",
+        "virtiofs",
+        "node_name",
+        "numa",
+        "reboot",
+        "started",
+        "cpu",
+        "operating_system",
+        "timeout_create",
+        "delete_unreferenced_disks_on_destroy",
+        "efi_disk",
+        "timeout_clone",
+        "reboot_after_update",
+        "timeout_shutdown_vm",
+        "timeout_migrate",
+        "timeout_move_disk",
+        "serial_device",
+        "smbios",
+        "timeout_stop_vm",
+        "bios",
+        "tablet_device",
+        "usb",
+        "rng",
+        "tpm_state",
+        "initialization",
+        "stop_on_destroy",
+        "description",
+        "timeout_start_vm",
+        "cdrom",
+        "clone",
+        "watchdog",
+        "keyboard_layout",
+        "template",
+        "hostpci",
+        "audio_device",
+        "pool_id",
+        "agent",
+        "startup",
+        "protection",
+        "memory",
+        "on_boot"
+      ],
+      "safe_differences": {
+        "boot_order": {
+          "before": null,
+          "after": [
+            "scsi0"
+          ]
+        },
+        "tags": {
+          "before": null,
+          "after": [
+            "range-lan",
+            "jumpbox",
+            "p100",
+            "p100t002",
+            "terraform"
+          ]
+        },
+        "started": {
+          "before": null,
+          "after": true
+        },
+        "operating_system": {
+          "before": null,
+          "after": [
+            {
+              "type": "l26"
+            }
+          ]
+        },
+        "serial_device": {
+          "before": null,
+          "after": []
+        },
+        "bios": {
+          "before": null,
+          "after": "seabios"
+        },
+        "tablet_device": {
+          "before": null,
+          "after": true
+        },
+        "stop_on_destroy": {
+          "before": null,
+          "after": false
+        },
+        "description": {
+          "before": null,
+          "after": "Managed by Terraform: cyber range controller bootstrap"
+        },
+        "cdrom": {
+          "before": null,
+          "after": [
+            {
+              "enabled": false,
+              "file_id": "none",
+              "interface": "ide2"
+            }
+          ]
+        },
+        "keyboard_layout": {
+          "before": null,
+          "after": "en-us"
+        },
+        "agent": {
+          "before": null,
+          "after": [
+            {
+              "enabled": true,
+              "timeout": "5m",
+              "trim": false,
+              "type": "virtio",
+              "wait_for_ip": []
+            }
+          ]
+        },
+        "on_boot": {
+          "before": null,
+          "after": false
+        }
+      },
+      "before": {},
+      "after": {
+        "node_name": "proxmox6",
+        "name": "p100t002-jump-03",
+        "network_device": [
+          {
+            "bridge": "p100t002",
+            "disconnected": null,
+            "enabled": true,
+            "firewall": true,
+            "model": "virtio",
+            "mtu": 1450,
+            "queues": 0,
+            "rate_limit": 0,
+            "trunks": null,
+            "vlan_id": 0
+          }
+        ],
+        "clone": [
+          {
+            "datastore_id": null,
+            "full": false,
+            "node_name": "proxmox6",
+            "retries": 1,
+            "vm_id": 169
+          }
+        ],
+        "disk": [],
+        "cpu": [
+          {
+            "affinity": null,
+            "architecture": null,
+            "cores": 2,
+            "flags": null,
+            "hotplugged": 0,
+            "limit": 0,
+            "numa": false,
+            "sockets": 1,
+            "type": "host"
+          }
+        ],
+        "memory": [
+          {
+            "dedicated": 2048,
+            "floating": 0,
+            "hugepages": null,
+            "keep_hugepages": false,
+            "shared": 0
+          }
+        ]
+      }
+    },
+    {
+      "address": "module.jumpbox[\"t003-j01\"].proxmox_virtual_environment_vm.jump",
+      "actions": [
+        "create"
+      ],
+      "changed_fields": [
+        "acpi",
+        "boot_order",
+        "purge_on_destroy",
+        "amd_sev",
+        "disk",
+        "scsi_hardware",
+        "timeout_reboot",
+        "tags",
+        "name",
+        "migrate",
+        "network_device",
+        "virtiofs",
+        "node_name",
+        "numa",
+        "reboot",
+        "started",
+        "cpu",
+        "operating_system",
+        "timeout_create",
+        "delete_unreferenced_disks_on_destroy",
+        "efi_disk",
+        "timeout_clone",
+        "reboot_after_update",
+        "timeout_shutdown_vm",
+        "timeout_migrate",
+        "timeout_move_disk",
+        "serial_device",
+        "smbios",
+        "timeout_stop_vm",
+        "bios",
+        "tablet_device",
+        "usb",
+        "rng",
+        "tpm_state",
+        "initialization",
+        "stop_on_destroy",
+        "description",
+        "timeout_start_vm",
+        "cdrom",
+        "clone",
+        "watchdog",
+        "keyboard_layout",
+        "template",
+        "hostpci",
+        "audio_device",
+        "pool_id",
+        "agent",
+        "startup",
+        "protection",
+        "memory",
+        "on_boot"
+      ],
+      "safe_differences": {
+        "boot_order": {
+          "before": null,
+          "after": [
+            "scsi0"
+          ]
+        },
+        "tags": {
+          "before": null,
+          "after": [
+            "range-lan",
+            "jumpbox",
+            "p100",
+            "p100t003",
+            "terraform"
+          ]
+        },
+        "started": {
+          "before": null,
+          "after": true
+        },
+        "operating_system": {
+          "before": null,
+          "after": [
+            {
+              "type": "l26"
+            }
+          ]
+        },
+        "serial_device": {
+          "before": null,
+          "after": []
+        },
+        "bios": {
+          "before": null,
+          "after": "seabios"
+        },
+        "tablet_device": {
+          "before": null,
+          "after": true
+        },
+        "stop_on_destroy": {
+          "before": null,
+          "after": false
+        },
+        "description": {
+          "before": null,
+          "after": "Managed by Terraform: cyber range controller bootstrap"
+        },
+        "cdrom": {
+          "before": null,
+          "after": [
+            {
+              "enabled": false,
+              "file_id": "none",
+              "interface": "ide2"
+            }
+          ]
+        },
+        "keyboard_layout": {
+          "before": null,
+          "after": "en-us"
+        },
+        "agent": {
+          "before": null,
+          "after": [
+            {
+              "enabled": true,
+              "timeout": "5m",
+              "trim": false,
+              "type": "virtio",
+              "wait_for_ip": []
+            }
+          ]
+        },
+        "on_boot": {
+          "before": null,
+          "after": false
+        }
+      },
+      "before": {},
+      "after": {
+        "node_name": "proxmox6",
+        "name": "p100t003-jump-01",
+        "network_device": [
+          {
+            "bridge": "p100t003",
+            "disconnected": null,
+            "enabled": true,
+            "firewall": true,
+            "model": "virtio",
+            "mtu": 1450,
+            "queues": 0,
+            "rate_limit": 0,
+            "trunks": null,
+            "vlan_id": 0
+          }
+        ],
+        "clone": [
+          {
+            "datastore_id": null,
+            "full": false,
+            "node_name": "proxmox6",
+            "retries": 1,
+            "vm_id": 169
+          }
+        ],
+        "disk": [],
+        "cpu": [
+          {
+            "affinity": null,
+            "architecture": null,
+            "cores": 2,
+            "flags": null,
+            "hotplugged": 0,
+            "limit": 0,
+            "numa": false,
+            "sockets": 1,
+            "type": "host"
+          }
+        ],
+        "memory": [
+          {
+            "dedicated": 2048,
+            "floating": 0,
+            "hugepages": null,
+            "keep_hugepages": false,
+            "shared": 0
+          }
+        ]
+      }
+    },
+    {
+      "address": "module.jumpbox[\"t003-j03\"].proxmox_virtual_environment_vm.jump",
+      "actions": [
+        "create"
+      ],
+      "changed_fields": [
+        "acpi",
+        "boot_order",
+        "purge_on_destroy",
+        "amd_sev",
+        "disk",
+        "scsi_hardware",
+        "timeout_reboot",
+        "tags",
+        "name",
+        "migrate",
+        "network_device",
+        "virtiofs",
+        "node_name",
+        "numa",
+        "reboot",
+        "started",
+        "cpu",
+        "operating_system",
+        "timeout_create",
+        "delete_unreferenced_disks_on_destroy",
+        "efi_disk",
+        "timeout_clone",
+        "reboot_after_update",
+        "timeout_shutdown_vm",
+        "timeout_migrate",
+        "timeout_move_disk",
+        "serial_device",
+        "smbios",
+        "timeout_stop_vm",
+        "bios",
+        "tablet_device",
+        "usb",
+        "rng",
+        "tpm_state",
+        "initialization",
+        "stop_on_destroy",
+        "description",
+        "timeout_start_vm",
+        "cdrom",
+        "clone",
+        "watchdog",
+        "keyboard_layout",
+        "template",
+        "hostpci",
+        "audio_device",
+        "pool_id",
+        "agent",
+        "startup",
+        "protection",
+        "memory",
+        "on_boot"
+      ],
+      "safe_differences": {
+        "boot_order": {
+          "before": null,
+          "after": [
+            "scsi0"
+          ]
+        },
+        "tags": {
+          "before": null,
+          "after": [
+            "range-lan",
+            "jumpbox",
+            "p100",
+            "p100t003",
+            "terraform"
+          ]
+        },
+        "started": {
+          "before": null,
+          "after": true
+        },
+        "operating_system": {
+          "before": null,
+          "after": [
+            {
+              "type": "l26"
+            }
+          ]
+        },
+        "serial_device": {
+          "before": null,
+          "after": []
+        },
+        "bios": {
+          "before": null,
+          "after": "seabios"
+        },
+        "tablet_device": {
+          "before": null,
+          "after": true
+        },
+        "stop_on_destroy": {
+          "before": null,
+          "after": false
+        },
+        "description": {
+          "before": null,
+          "after": "Managed by Terraform: cyber range controller bootstrap"
+        },
+        "cdrom": {
+          "before": null,
+          "after": [
+            {
+              "enabled": false,
+              "file_id": "none",
+              "interface": "ide2"
+            }
+          ]
+        },
+        "keyboard_layout": {
+          "before": null,
+          "after": "en-us"
+        },
+        "agent": {
+          "before": null,
+          "after": [
+            {
+              "enabled": true,
+              "timeout": "5m",
+              "trim": false,
+              "type": "virtio",
+              "wait_for_ip": []
+            }
+          ]
+        },
+        "on_boot": {
+          "before": null,
+          "after": false
+        }
+      },
+      "before": {},
+      "after": {
+        "node_name": "proxmox6",
+        "name": "p100t003-jump-03",
+        "network_device": [
+          {
+            "bridge": "p100t003",
+            "disconnected": null,
+            "enabled": true,
+            "firewall": true,
+            "model": "virtio",
+            "mtu": 1450,
+            "queues": 0,
+            "rate_limit": 0,
+            "trunks": null,
+            "vlan_id": 0
+          }
+        ],
+        "clone": [
+          {
+            "datastore_id": null,
+            "full": false,
+            "node_name": "proxmox6",
+            "retries": 1,
+            "vm_id": 169
+          }
+        ],
+        "disk": [],
+        "cpu": [
+          {
+            "affinity": null,
+            "architecture": null,
+            "cores": 2,
+            "flags": null,
+            "hotplugged": 0,
+            "limit": 0,
+            "numa": false,
+            "sockets": 1,
+            "type": "host"
+          }
+        ],
+        "memory": [
+          {
+            "dedicated": 2048,
+            "floating": 0,
+            "hugepages": null,
+            "keep_hugepages": false,
+            "shared": 0
+          }
+        ]
+      }
+    },
+    {
+      "address": "module.jumpbox[\"t004-j01\"].proxmox_virtual_environment_vm.jump",
+      "actions": [
+        "create"
+      ],
+      "changed_fields": [
+        "acpi",
+        "boot_order",
+        "purge_on_destroy",
+        "amd_sev",
+        "disk",
+        "scsi_hardware",
+        "timeout_reboot",
+        "tags",
+        "name",
+        "migrate",
+        "network_device",
+        "virtiofs",
+        "node_name",
+        "numa",
+        "reboot",
+        "started",
+        "cpu",
+        "operating_system",
+        "timeout_create",
+        "delete_unreferenced_disks_on_destroy",
+        "efi_disk",
+        "timeout_clone",
+        "reboot_after_update",
+        "timeout_shutdown_vm",
+        "timeout_migrate",
+        "timeout_move_disk",
+        "serial_device",
+        "smbios",
+        "timeout_stop_vm",
+        "bios",
+        "tablet_device",
+        "usb",
+        "rng",
+        "tpm_state",
+        "initialization",
+        "stop_on_destroy",
+        "description",
+        "timeout_start_vm",
+        "cdrom",
+        "clone",
+        "watchdog",
+        "keyboard_layout",
+        "template",
+        "hostpci",
+        "audio_device",
+        "pool_id",
+        "agent",
+        "startup",
+        "protection",
+        "memory",
+        "on_boot"
+      ],
+      "safe_differences": {
+        "boot_order": {
+          "before": null,
+          "after": [
+            "scsi0"
+          ]
+        },
+        "tags": {
+          "before": null,
+          "after": [
+            "range-lan",
+            "jumpbox",
+            "p100",
+            "p100t004",
+            "terraform"
+          ]
+        },
+        "started": {
+          "before": null,
+          "after": true
+        },
+        "operating_system": {
+          "before": null,
+          "after": [
+            {
+              "type": "l26"
+            }
+          ]
+        },
+        "serial_device": {
+          "before": null,
+          "after": []
+        },
+        "bios": {
+          "before": null,
+          "after": "seabios"
+        },
+        "tablet_device": {
+          "before": null,
+          "after": true
+        },
+        "stop_on_destroy": {
+          "before": null,
+          "after": false
+        },
+        "description": {
+          "before": null,
+          "after": "Managed by Terraform: cyber range controller bootstrap"
+        },
+        "cdrom": {
+          "before": null,
+          "after": [
+            {
+              "enabled": false,
+              "file_id": "none",
+              "interface": "ide2"
+            }
+          ]
+        },
+        "keyboard_layout": {
+          "before": null,
+          "after": "en-us"
+        },
+        "agent": {
+          "before": null,
+          "after": [
+            {
+              "enabled": true,
+              "timeout": "5m",
+              "trim": false,
+              "type": "virtio",
+              "wait_for_ip": []
+            }
+          ]
+        },
+        "on_boot": {
+          "before": null,
+          "after": false
+        }
+      },
+      "before": {},
+      "after": {
+        "node_name": "proxmox6",
+        "name": "p100t004-jump-01",
+        "network_device": [
+          {
+            "bridge": "p100t004",
+            "disconnected": null,
+            "enabled": true,
+            "firewall": true,
+            "model": "virtio",
+            "mtu": 1450,
+            "queues": 0,
+            "rate_limit": 0,
+            "trunks": null,
+            "vlan_id": 0
+          }
+        ],
+        "clone": [
+          {
+            "datastore_id": null,
+            "full": false,
+            "node_name": "proxmox6",
+            "retries": 1,
+            "vm_id": 169
+          }
+        ],
+        "disk": [],
+        "cpu": [
+          {
+            "affinity": null,
+            "architecture": null,
+            "cores": 2,
+            "flags": null,
+            "hotplugged": 0,
+            "limit": 0,
+            "numa": false,
+            "sockets": 1,
+            "type": "host"
+          }
+        ],
+        "memory": [
+          {
+            "dedicated": 2048,
+            "floating": 0,
+            "hugepages": null,
+            "keep_hugepages": false,
+            "shared": 0
+          }
+        ]
+      }
+    },
+    {
+      "address": "module.jumpbox[\"t004-j03\"].proxmox_virtual_environment_vm.jump",
+      "actions": [
+        "create"
+      ],
+      "changed_fields": [
+        "acpi",
+        "boot_order",
+        "purge_on_destroy",
+        "amd_sev",
+        "disk",
+        "scsi_hardware",
+        "timeout_reboot",
+        "tags",
+        "name",
+        "migrate",
+        "network_device",
+        "virtiofs",
+        "node_name",
+        "numa",
+        "reboot",
+        "started",
+        "cpu",
+        "operating_system",
+        "timeout_create",
+        "delete_unreferenced_disks_on_destroy",
+        "efi_disk",
+        "timeout_clone",
+        "reboot_after_update",
+        "timeout_shutdown_vm",
+        "timeout_migrate",
+        "timeout_move_disk",
+        "serial_device",
+        "smbios",
+        "timeout_stop_vm",
+        "bios",
+        "tablet_device",
+        "usb",
+        "rng",
+        "tpm_state",
+        "initialization",
+        "stop_on_destroy",
+        "description",
+        "timeout_start_vm",
+        "cdrom",
+        "clone",
+        "watchdog",
+        "keyboard_layout",
+        "template",
+        "hostpci",
+        "audio_device",
+        "pool_id",
+        "agent",
+        "startup",
+        "protection",
+        "memory",
+        "on_boot"
+      ],
+      "safe_differences": {
+        "boot_order": {
+          "before": null,
+          "after": [
+            "scsi0"
+          ]
+        },
+        "tags": {
+          "before": null,
+          "after": [
+            "range-lan",
+            "jumpbox",
+            "p100",
+            "p100t004",
+            "terraform"
+          ]
+        },
+        "started": {
+          "before": null,
+          "after": true
+        },
+        "operating_system": {
+          "before": null,
+          "after": [
+            {
+              "type": "l26"
+            }
+          ]
+        },
+        "serial_device": {
+          "before": null,
+          "after": []
+        },
+        "bios": {
+          "before": null,
+          "after": "seabios"
+        },
+        "tablet_device": {
+          "before": null,
+          "after": true
+        },
+        "stop_on_destroy": {
+          "before": null,
+          "after": false
+        },
+        "description": {
+          "before": null,
+          "after": "Managed by Terraform: cyber range controller bootstrap"
+        },
+        "cdrom": {
+          "before": null,
+          "after": [
+            {
+              "enabled": false,
+              "file_id": "none",
+              "interface": "ide2"
+            }
+          ]
+        },
+        "keyboard_layout": {
+          "before": null,
+          "after": "en-us"
+        },
+        "agent": {
+          "before": null,
+          "after": [
+            {
+              "enabled": true,
+              "timeout": "5m",
+              "trim": false,
+              "type": "virtio",
+              "wait_for_ip": []
+            }
+          ]
+        },
+        "on_boot": {
+          "before": null,
+          "after": false
+        }
+      },
+      "before": {},
+      "after": {
+        "node_name": "proxmox6",
+        "name": "p100t004-jump-03",
+        "network_device": [
+          {
+            "bridge": "p100t004",
+            "disconnected": null,
+            "enabled": true,
+            "firewall": true,
+            "model": "virtio",
+            "mtu": 1450,
+            "queues": 0,
+            "rate_limit": 0,
+            "trunks": null,
+            "vlan_id": 0
+          }
+        ],
+        "clone": [
+          {
+            "datastore_id": null,
+            "full": false,
+            "node_name": "proxmox6",
+            "retries": 1,
+            "vm_id": 169
+          }
+        ],
+        "disk": [],
+        "cpu": [
+          {
+            "affinity": null,
+            "architecture": null,
+            "cores": 2,
+            "flags": null,
+            "hotplugged": 0,
+            "limit": 0,
+            "numa": false,
+            "sockets": 1,
+            "type": "host"
+          }
+        ],
+        "memory": [
+          {
+            "dedicated": 2048,
+            "floating": 0,
+            "hugepages": null,
+            "keep_hugepages": false,
+            "shared": 0
+          }
+        ]
+      }
+    },
+    {
+      "address": "module.jumpbox[\"t005-j01\"].proxmox_virtual_environment_vm.jump",
+      "actions": [
+        "create"
+      ],
+      "changed_fields": [
+        "acpi",
+        "boot_order",
+        "purge_on_destroy",
+        "amd_sev",
+        "disk",
+        "scsi_hardware",
+        "timeout_reboot",
+        "tags",
+        "name",
+        "migrate",
+        "network_device",
+        "virtiofs",
+        "node_name",
+        "numa",
+        "reboot",
+        "started",
+        "cpu",
+        "operating_system",
+        "timeout_create",
+        "delete_unreferenced_disks_on_destroy",
+        "efi_disk",
+        "timeout_clone",
+        "reboot_after_update",
+        "timeout_shutdown_vm",
+        "timeout_migrate",
+        "timeout_move_disk",
+        "serial_device",
+        "smbios",
+        "timeout_stop_vm",
+        "bios",
+        "tablet_device",
+        "usb",
+        "rng",
+        "tpm_state",
+        "initialization",
+        "stop_on_destroy",
+        "description",
+        "timeout_start_vm",
+        "cdrom",
+        "clone",
+        "watchdog",
+        "keyboard_layout",
+        "template",
+        "hostpci",
+        "audio_device",
+        "pool_id",
+        "agent",
+        "startup",
+        "protection",
+        "memory",
+        "on_boot"
+      ],
+      "safe_differences": {
+        "boot_order": {
+          "before": null,
+          "after": [
+            "scsi0"
+          ]
+        },
+        "tags": {
+          "before": null,
+          "after": [
+            "range-lan",
+            "jumpbox",
+            "p100",
+            "p100t005",
+            "terraform"
+          ]
+        },
+        "started": {
+          "before": null,
+          "after": true
+        },
+        "operating_system": {
+          "before": null,
+          "after": [
+            {
+              "type": "l26"
+            }
+          ]
+        },
+        "serial_device": {
+          "before": null,
+          "after": []
+        },
+        "bios": {
+          "before": null,
+          "after": "seabios"
+        },
+        "tablet_device": {
+          "before": null,
+          "after": true
+        },
+        "stop_on_destroy": {
+          "before": null,
+          "after": false
+        },
+        "description": {
+          "before": null,
+          "after": "Managed by Terraform: cyber range controller bootstrap"
+        },
+        "cdrom": {
+          "before": null,
+          "after": [
+            {
+              "enabled": false,
+              "file_id": "none",
+              "interface": "ide2"
+            }
+          ]
+        },
+        "keyboard_layout": {
+          "before": null,
+          "after": "en-us"
+        },
+        "agent": {
+          "before": null,
+          "after": [
+            {
+              "enabled": true,
+              "timeout": "5m",
+              "trim": false,
+              "type": "virtio",
+              "wait_for_ip": []
+            }
+          ]
+        },
+        "on_boot": {
+          "before": null,
+          "after": false
+        }
+      },
+      "before": {},
+      "after": {
+        "node_name": "proxmox6",
+        "name": "p100t005-jump-01",
+        "network_device": [
+          {
+            "bridge": "p100t005",
+            "disconnected": null,
+            "enabled": true,
+            "firewall": true,
+            "model": "virtio",
+            "mtu": 1450,
+            "queues": 0,
+            "rate_limit": 0,
+            "trunks": null,
+            "vlan_id": 0
+          }
+        ],
+        "clone": [
+          {
+            "datastore_id": null,
+            "full": false,
+            "node_name": "proxmox6",
+            "retries": 1,
+            "vm_id": 169
+          }
+        ],
+        "disk": [],
+        "cpu": [
+          {
+            "affinity": null,
+            "architecture": null,
+            "cores": 2,
+            "flags": null,
+            "hotplugged": 0,
+            "limit": 0,
+            "numa": false,
+            "sockets": 1,
+            "type": "host"
+          }
+        ],
+        "memory": [
+          {
+            "dedicated": 2048,
+            "floating": 0,
+            "hugepages": null,
+            "keep_hugepages": false,
+            "shared": 0
+          }
+        ]
+      }
+    },
+    {
+      "address": "module.jumpbox[\"t005-j03\"].proxmox_virtual_environment_vm.jump",
+      "actions": [
+        "create"
+      ],
+      "changed_fields": [
+        "acpi",
+        "boot_order",
+        "purge_on_destroy",
+        "amd_sev",
+        "disk",
+        "scsi_hardware",
+        "timeout_reboot",
+        "tags",
+        "name",
+        "migrate",
+        "network_device",
+        "virtiofs",
+        "node_name",
+        "numa",
+        "reboot",
+        "started",
+        "cpu",
+        "operating_system",
+        "timeout_create",
+        "delete_unreferenced_disks_on_destroy",
+        "efi_disk",
+        "timeout_clone",
+        "reboot_after_update",
+        "timeout_shutdown_vm",
+        "timeout_migrate",
+        "timeout_move_disk",
+        "serial_device",
+        "smbios",
+        "timeout_stop_vm",
+        "bios",
+        "tablet_device",
+        "usb",
+        "rng",
+        "tpm_state",
+        "initialization",
+        "stop_on_destroy",
+        "description",
+        "timeout_start_vm",
+        "cdrom",
+        "clone",
+        "watchdog",
+        "keyboard_layout",
+        "template",
+        "hostpci",
+        "audio_device",
+        "pool_id",
+        "agent",
+        "startup",
+        "protection",
+        "memory",
+        "on_boot"
+      ],
+      "safe_differences": {
+        "boot_order": {
+          "before": null,
+          "after": [
+            "scsi0"
+          ]
+        },
+        "tags": {
+          "before": null,
+          "after": [
+            "range-lan",
+            "jumpbox",
+            "p100",
+            "p100t005",
+            "terraform"
+          ]
+        },
+        "started": {
+          "before": null,
+          "after": true
+        },
+        "operating_system": {
+          "before": null,
+          "after": [
+            {
+              "type": "l26"
+            }
+          ]
+        },
+        "serial_device": {
+          "before": null,
+          "after": []
+        },
+        "bios": {
+          "before": null,
+          "after": "seabios"
+        },
+        "tablet_device": {
+          "before": null,
+          "after": true
+        },
+        "stop_on_destroy": {
+          "before": null,
+          "after": false
+        },
+        "description": {
+          "before": null,
+          "after": "Managed by Terraform: cyber range controller bootstrap"
+        },
+        "cdrom": {
+          "before": null,
+          "after": [
+            {
+              "enabled": false,
+              "file_id": "none",
+              "interface": "ide2"
+            }
+          ]
+        },
+        "keyboard_layout": {
+          "before": null,
+          "after": "en-us"
+        },
+        "agent": {
+          "before": null,
+          "after": [
+            {
+              "enabled": true,
+              "timeout": "5m",
+              "trim": false,
+              "type": "virtio",
+              "wait_for_ip": []
+            }
+          ]
+        },
+        "on_boot": {
+          "before": null,
+          "after": false
+        }
+      },
+      "before": {},
+      "after": {
+        "node_name": "proxmox6",
+        "name": "p100t005-jump-03",
+        "network_device": [
+          {
+            "bridge": "p100t005",
+            "disconnected": null,
+            "enabled": true,
+            "firewall": true,
+            "model": "virtio",
+            "mtu": 1450,
+            "queues": 0,
+            "rate_limit": 0,
+            "trunks": null,
+            "vlan_id": 0
+          }
+        ],
+        "clone": [
+          {
+            "datastore_id": null,
+            "full": false,
+            "node_name": "proxmox6",
+            "retries": 1,
+            "vm_id": 169
+          }
+        ],
+        "disk": [],
+        "cpu": [
+          {
+            "affinity": null,
+            "architecture": null,
+            "cores": 2,
+            "flags": null,
+            "hotplugged": 0,
+            "limit": 0,
+            "numa": false,
+            "sockets": 1,
+            "type": "host"
+          }
+        ],
+        "memory": [
+          {
+            "dedicated": 2048,
+            "floating": 0,
+            "hugepages": null,
+            "keep_hugepages": false,
+            "shared": 0
+          }
+        ]
+      }
+    },
+    {
+      "address": "module.scenario_box[\"r0.1.2-mhl-dc01-t001\"].proxmox_virtual_environment_vm.scenario",
+      "actions": [
+        "update"
+      ],
+      "changed_fields": [
+        "boot_order"
+      ],
+      "safe_differences": {
+        "boot_order": {
+          "before": [
+            "sata0",
+            "ide2"
+          ],
+          "after": [
+            "sata0"
+          ]
+        }
+      },
+      "before": {
+        "vm_id": 190,
+        "id": "190",
+        "node_name": "proxmox6",
+        "name": "p100t001-r83c116b4-mhl-dc01",
+        "network_device": [
+          {
+            "bridge": "p100t001",
+            "disconnected": false,
+            "enabled": true,
+            "firewall": true,
+            "mac_address": "BC:24:11:08:DF:0C",
+            "model": "e1000",
+            "mtu": 1450,
+            "queues": 0,
+            "rate_limit": 0,
+            "trunks": "",
+            "vlan_id": 0
+          }
+        ],
+        "clone": [
+          {
+            "datastore_id": "",
+            "full": false,
+            "node_name": "proxmox6",
+            "retries": 1,
+            "vm_id": 186
+          }
+        ],
+        "disk": [],
+        "cpu": [
+          {
+            "affinity": "",
+            "architecture": "",
+            "cores": 2,
+            "flags": [],
+            "hotplugged": 0,
+            "limit": 0,
+            "numa": false,
+            "sockets": 1,
+            "type": "x86-64-v2-AES",
+            "units": 0
+          }
+        ],
+        "memory": [
+          {
+            "dedicated": 4096,
+            "floating": 0,
+            "hugepages": "",
+            "keep_hugepages": false,
+            "shared": 0
+          }
+        ]
+      },
+      "after": {
+        "vm_id": 190,
+        "id": "190",
+        "node_name": "proxmox6",
+        "name": "p100t001-r83c116b4-mhl-dc01",
+        "network_device": [
+          {
+            "bridge": "p100t001",
+            "disconnected": false,
+            "enabled": true,
+            "firewall": true,
+            "mac_address": "BC:24:11:08:DF:0C",
+            "model": "e1000",
+            "mtu": 1450,
+            "queues": 0,
+            "rate_limit": 0,
+            "trunks": "",
+            "vlan_id": 0
+          }
+        ],
+        "clone": [
+          {
+            "datastore_id": "",
+            "full": false,
+            "node_name": "proxmox6",
+            "retries": 1,
+            "vm_id": 186
+          }
+        ],
+        "disk": [],
+        "cpu": [
+          {
+            "affinity": "",
+            "architecture": "",
+            "cores": 2,
+            "flags": [],
+            "hotplugged": 0,
+            "limit": 0,
+            "numa": false,
+            "sockets": 1,
+            "type": "x86-64-v2-AES",
+            "units": 0
+          }
+        ],
+        "memory": [
+          {
+            "dedicated": 4096,
+            "floating": 0,
+            "hugepages": "",
+            "keep_hugepages": false,
+            "shared": 0
+          }
+        ]
+      }
+    },
+    {
+      "address": "module.scenario_box[\"r0.1.2-mhl-dc01-t002\"].proxmox_virtual_environment_vm.scenario",
+      "actions": [
+        "update"
+      ],
+      "changed_fields": [
+        "boot_order"
+      ],
+      "safe_differences": {
+        "boot_order": {
+          "before": [
+            "sata0",
+            "ide2"
+          ],
+          "after": [
+            "sata0"
+          ]
+        }
+      },
+      "before": {
+        "vm_id": 198,
+        "id": "198",
+        "node_name": "proxmox6",
+        "name": "p100t002-r83c116b4-mhl-dc01",
+        "network_device": [
+          {
+            "bridge": "p100t002",
+            "disconnected": false,
+            "enabled": true,
+            "firewall": true,
+            "mac_address": "BC:24:11:8E:C1:1F",
+            "model": "e1000",
+            "mtu": 1450,
+            "queues": 0,
+            "rate_limit": 0,
+            "trunks": "",
+            "vlan_id": 0
+          }
+        ],
+        "clone": [
+          {
+            "datastore_id": "",
+            "full": false,
+            "node_name": "proxmox6",
+            "retries": 1,
+            "vm_id": 186
+          }
+        ],
+        "disk": [],
+        "cpu": [
+          {
+            "affinity": "",
+            "architecture": "",
+            "cores": 2,
+            "flags": [],
+            "hotplugged": 0,
+            "limit": 0,
+            "numa": false,
+            "sockets": 1,
+            "type": "x86-64-v2-AES",
+            "units": 0
+          }
+        ],
+        "memory": [
+          {
+            "dedicated": 4096,
+            "floating": 0,
+            "hugepages": "",
+            "keep_hugepages": false,
+            "shared": 0
+          }
+        ]
+      },
+      "after": {
+        "vm_id": 198,
+        "id": "198",
+        "node_name": "proxmox6",
+        "name": "p100t002-r83c116b4-mhl-dc01",
+        "network_device": [
+          {
+            "bridge": "p100t002",
+            "disconnected": false,
+            "enabled": true,
+            "firewall": true,
+            "mac_address": "BC:24:11:8E:C1:1F",
+            "model": "e1000",
+            "mtu": 1450,
+            "queues": 0,
+            "rate_limit": 0,
+            "trunks": "",
+            "vlan_id": 0
+          }
+        ],
+        "clone": [
+          {
+            "datastore_id": "",
+            "full": false,
+            "node_name": "proxmox6",
+            "retries": 1,
+            "vm_id": 186
+          }
+        ],
+        "disk": [],
+        "cpu": [
+          {
+            "affinity": "",
+            "architecture": "",
+            "cores": 2,
+            "flags": [],
+            "hotplugged": 0,
+            "limit": 0,
+            "numa": false,
+            "sockets": 1,
+            "type": "x86-64-v2-AES",
+            "units": 0
+          }
+        ],
+        "memory": [
+          {
+            "dedicated": 4096,
+            "floating": 0,
+            "hugepages": "",
+            "keep_hugepages": false,
+            "shared": 0
+          }
+        ]
+      }
+    },
+    {
+      "address": "module.scenario_box[\"r0.1.2-mhl-dc01-t003\"].proxmox_virtual_environment_vm.scenario",
+      "actions": [
+        "update"
+      ],
+      "changed_fields": [
+        "boot_order"
+      ],
+      "safe_differences": {
+        "boot_order": {
+          "before": [
+            "sata0",
+            "ide2"
+          ],
+          "after": [
+            "sata0"
+          ]
+        }
+      },
+      "before": {
+        "vm_id": 197,
+        "id": "197",
+        "node_name": "proxmox6",
+        "name": "p100t003-r83c116b4-mhl-dc01",
+        "network_device": [
+          {
+            "bridge": "p100t003",
+            "disconnected": false,
+            "enabled": true,
+            "firewall": true,
+            "mac_address": "BC:24:11:EA:23:B5",
+            "model": "e1000",
+            "mtu": 1450,
+            "queues": 0,
+            "rate_limit": 0,
+            "trunks": "",
+            "vlan_id": 0
+          }
+        ],
+        "clone": [
+          {
+            "datastore_id": "",
+            "full": false,
+            "node_name": "proxmox6",
+            "retries": 1,
+            "vm_id": 186
+          }
+        ],
+        "disk": [],
+        "cpu": [
+          {
+            "affinity": "",
+            "architecture": "",
+            "cores": 2,
+            "flags": [],
+            "hotplugged": 0,
+            "limit": 0,
+            "numa": false,
+            "sockets": 1,
+            "type": "x86-64-v2-AES",
+            "units": 0
+          }
+        ],
+        "memory": [
+          {
+            "dedicated": 4096,
+            "floating": 0,
+            "hugepages": "",
+            "keep_hugepages": false,
+            "shared": 0
+          }
+        ]
+      },
+      "after": {
+        "vm_id": 197,
+        "id": "197",
+        "node_name": "proxmox6",
+        "name": "p100t003-r83c116b4-mhl-dc01",
+        "network_device": [
+          {
+            "bridge": "p100t003",
+            "disconnected": false,
+            "enabled": true,
+            "firewall": true,
+            "mac_address": "BC:24:11:EA:23:B5",
+            "model": "e1000",
+            "mtu": 1450,
+            "queues": 0,
+            "rate_limit": 0,
+            "trunks": "",
+            "vlan_id": 0
+          }
+        ],
+        "clone": [
+          {
+            "datastore_id": "",
+            "full": false,
+            "node_name": "proxmox6",
+            "retries": 1,
+            "vm_id": 186
+          }
+        ],
+        "disk": [],
+        "cpu": [
+          {
+            "affinity": "",
+            "architecture": "",
+            "cores": 2,
+            "flags": [],
+            "hotplugged": 0,
+            "limit": 0,
+            "numa": false,
+            "sockets": 1,
+            "type": "x86-64-v2-AES",
+            "units": 0
+          }
+        ],
+        "memory": [
+          {
+            "dedicated": 4096,
+            "floating": 0,
+            "hugepages": "",
+            "keep_hugepages": false,
+            "shared": 0
+          }
+        ]
+      }
+    },
+    {
+      "address": "module.scenario_box[\"r0.1.2-mhl-dc01-t004\"].proxmox_virtual_environment_vm.scenario",
+      "actions": [
+        "update"
+      ],
+      "changed_fields": [
+        "boot_order"
+      ],
+      "safe_differences": {
+        "boot_order": {
+          "before": [
+            "sata0",
+            "ide2"
+          ],
+          "after": [
+            "sata0"
+          ]
+        }
+      },
+      "before": {
+        "vm_id": 189,
+        "id": "189",
+        "node_name": "proxmox6",
+        "name": "p100t004-r83c116b4-mhl-dc01",
+        "network_device": [
+          {
+            "bridge": "p100t004",
+            "disconnected": false,
+            "enabled": true,
+            "firewall": true,
+            "mac_address": "BC:24:11:B1:05:D3",
+            "model": "e1000",
+            "mtu": 1450,
+            "queues": 0,
+            "rate_limit": 0,
+            "trunks": "",
+            "vlan_id": 0
+          }
+        ],
+        "clone": [
+          {
+            "datastore_id": "",
+            "full": false,
+            "node_name": "proxmox6",
+            "retries": 1,
+            "vm_id": 186
+          }
+        ],
+        "disk": [],
+        "cpu": [
+          {
+            "affinity": "",
+            "architecture": "",
+            "cores": 2,
+            "flags": [],
+            "hotplugged": 0,
+            "limit": 0,
+            "numa": false,
+            "sockets": 1,
+            "type": "x86-64-v2-AES",
+            "units": 0
+          }
+        ],
+        "memory": [
+          {
+            "dedicated": 4096,
+            "floating": 0,
+            "hugepages": "",
+            "keep_hugepages": false,
+            "shared": 0
+          }
+        ]
+      },
+      "after": {
+        "vm_id": 189,
+        "id": "189",
+        "node_name": "proxmox6",
+        "name": "p100t004-r83c116b4-mhl-dc01",
+        "network_device": [
+          {
+            "bridge": "p100t004",
+            "disconnected": false,
+            "enabled": true,
+            "firewall": true,
+            "mac_address": "BC:24:11:B1:05:D3",
+            "model": "e1000",
+            "mtu": 1450,
+            "queues": 0,
+            "rate_limit": 0,
+            "trunks": "",
+            "vlan_id": 0
+          }
+        ],
+        "clone": [
+          {
+            "datastore_id": "",
+            "full": false,
+            "node_name": "proxmox6",
+            "retries": 1,
+            "vm_id": 186
+          }
+        ],
+        "disk": [],
+        "cpu": [
+          {
+            "affinity": "",
+            "architecture": "",
+            "cores": 2,
+            "flags": [],
+            "hotplugged": 0,
+            "limit": 0,
+            "numa": false,
+            "sockets": 1,
+            "type": "x86-64-v2-AES",
+            "units": 0
+          }
+        ],
+        "memory": [
+          {
+            "dedicated": 4096,
+            "floating": 0,
+            "hugepages": "",
+            "keep_hugepages": false,
+            "shared": 0
+          }
+        ]
+      }
+    },
+    {
+      "address": "module.scenario_box[\"r0.1.2-mhl-dc01-t005\"].proxmox_virtual_environment_vm.scenario",
+      "actions": [
+        "update"
+      ],
+      "changed_fields": [
+        "boot_order"
+      ],
+      "safe_differences": {
+        "boot_order": {
+          "before": [
+            "sata0",
+            "ide2"
+          ],
+          "after": [
+            "sata0"
+          ]
+        }
+      },
+      "before": {
+        "vm_id": 195,
+        "id": "195",
+        "node_name": "proxmox6",
+        "name": "p100t005-r83c116b4-mhl-dc01",
+        "network_device": [
+          {
+            "bridge": "p100t005",
+            "disconnected": false,
+            "enabled": true,
+            "firewall": true,
+            "mac_address": "BC:24:11:A3:AB:C9",
+            "model": "e1000",
+            "mtu": 1450,
+            "queues": 0,
+            "rate_limit": 0,
+            "trunks": "",
+            "vlan_id": 0
+          }
+        ],
+        "clone": [
+          {
+            "datastore_id": "",
+            "full": false,
+            "node_name": "proxmox6",
+            "retries": 1,
+            "vm_id": 186
+          }
+        ],
+        "disk": [],
+        "cpu": [
+          {
+            "affinity": "",
+            "architecture": "",
+            "cores": 2,
+            "flags": [],
+            "hotplugged": 0,
+            "limit": 0,
+            "numa": false,
+            "sockets": 1,
+            "type": "x86-64-v2-AES",
+            "units": 0
+          }
+        ],
+        "memory": [
+          {
+            "dedicated": 4096,
+            "floating": 0,
+            "hugepages": "",
+            "keep_hugepages": false,
+            "shared": 0
+          }
+        ]
+      },
+      "after": {
+        "vm_id": 195,
+        "id": "195",
+        "node_name": "proxmox6",
+        "name": "p100t005-r83c116b4-mhl-dc01",
+        "network_device": [
+          {
+            "bridge": "p100t005",
+            "disconnected": false,
+            "enabled": true,
+            "firewall": true,
+            "mac_address": "BC:24:11:A3:AB:C9",
+            "model": "e1000",
+            "mtu": 1450,
+            "queues": 0,
+            "rate_limit": 0,
+            "trunks": "",
+            "vlan_id": 0
+          }
+        ],
+        "clone": [
+          {
+            "datastore_id": "",
+            "full": false,
+            "node_name": "proxmox6",
+            "retries": 1,
+            "vm_id": 186
+          }
+        ],
+        "disk": [],
+        "cpu": [
+          {
+            "affinity": "",
+            "architecture": "",
+            "cores": 2,
+            "flags": [],
+            "hotplugged": 0,
+            "limit": 0,
+            "numa": false,
+            "sockets": 1,
+            "type": "x86-64-v2-AES",
+            "units": 0
+          }
+        ],
+        "memory": [
+          {
+            "dedicated": 4096,
+            "floating": 0,
+            "hugepages": "",
+            "keep_hugepages": false,
+            "shared": 0
+          }
+        ]
+      }
+    },
+    {
+      "address": "module.scenario_box[\"r0.1.2-mhl-file01-t001\"].proxmox_virtual_environment_vm.scenario",
+      "actions": [
+        "update"
+      ],
+      "changed_fields": [
+        "boot_order"
+      ],
+      "safe_differences": {
+        "boot_order": {
+          "before": [
+            "sata0",
+            "ide2"
+          ],
+          "after": [
+            "sata0"
+          ]
+        }
+      },
+      "before": {
+        "vm_id": 191,
+        "id": "191",
+        "node_name": "proxmox6",
+        "name": "p100t001-r02cdeeb6-mhl-file01",
+        "network_device": [
+          {
+            "bridge": "p100t001",
+            "disconnected": false,
+            "enabled": true,
+            "firewall": true,
+            "mac_address": "BC:24:11:C6:18:BC",
+            "model": "e1000",
+            "mtu": 1450,
+            "queues": 0,
+            "rate_limit": 0,
+            "trunks": "",
+            "vlan_id": 0
+          }
+        ],
+        "clone": [
+          {
+            "datastore_id": "",
+            "full": false,
+            "node_name": "proxmox6",
+            "retries": 1,
+            "vm_id": 185
+          }
+        ],
+        "disk": [],
+        "cpu": [
+          {
+            "affinity": "",
+            "architecture": "",
+            "cores": 2,
+            "flags": [],
+            "hotplugged": 0,
+            "limit": 0,
+            "numa": false,
+            "sockets": 1,
+            "type": "x86-64-v2-AES",
+            "units": 0
+          }
+        ],
+        "memory": [
+          {
+            "dedicated": 4096,
+            "floating": 0,
+            "hugepages": "",
+            "keep_hugepages": false,
+            "shared": 0
+          }
+        ]
+      },
+      "after": {
+        "vm_id": 191,
+        "id": "191",
+        "node_name": "proxmox6",
+        "name": "p100t001-r02cdeeb6-mhl-file01",
+        "network_device": [
+          {
+            "bridge": "p100t001",
+            "disconnected": false,
+            "enabled": true,
+            "firewall": true,
+            "mac_address": "BC:24:11:C6:18:BC",
+            "model": "e1000",
+            "mtu": 1450,
+            "queues": 0,
+            "rate_limit": 0,
+            "trunks": "",
+            "vlan_id": 0
+          }
+        ],
+        "clone": [
+          {
+            "datastore_id": "",
+            "full": false,
+            "node_name": "proxmox6",
+            "retries": 1,
+            "vm_id": 185
+          }
+        ],
+        "disk": [],
+        "cpu": [
+          {
+            "affinity": "",
+            "architecture": "",
+            "cores": 2,
+            "flags": [],
+            "hotplugged": 0,
+            "limit": 0,
+            "numa": false,
+            "sockets": 1,
+            "type": "x86-64-v2-AES",
+            "units": 0
+          }
+        ],
+        "memory": [
+          {
+            "dedicated": 4096,
+            "floating": 0,
+            "hugepages": "",
+            "keep_hugepages": false,
+            "shared": 0
+          }
+        ]
+      }
+    },
+    {
+      "address": "module.scenario_box[\"r0.1.2-mhl-file01-t002\"].proxmox_virtual_environment_vm.scenario",
+      "actions": [
+        "update"
+      ],
+      "changed_fields": [
+        "boot_order"
+      ],
+      "safe_differences": {
+        "boot_order": {
+          "before": [
+            "sata0",
+            "ide2"
+          ],
+          "after": [
+            "sata0"
+          ]
+        }
+      },
+      "before": {
+        "vm_id": 196,
+        "id": "196",
+        "node_name": "proxmox6",
+        "name": "p100t002-r02cdeeb6-mhl-file01",
+        "network_device": [
+          {
+            "bridge": "p100t002",
+            "disconnected": false,
+            "enabled": true,
+            "firewall": true,
+            "mac_address": "BC:24:11:BC:AE:BA",
+            "model": "e1000",
+            "mtu": 1450,
+            "queues": 0,
+            "rate_limit": 0,
+            "trunks": "",
+            "vlan_id": 0
+          }
+        ],
+        "clone": [
+          {
+            "datastore_id": "",
+            "full": false,
+            "node_name": "proxmox6",
+            "retries": 1,
+            "vm_id": 185
+          }
+        ],
+        "disk": [],
+        "cpu": [
+          {
+            "affinity": "",
+            "architecture": "",
+            "cores": 2,
+            "flags": [],
+            "hotplugged": 0,
+            "limit": 0,
+            "numa": false,
+            "sockets": 1,
+            "type": "x86-64-v2-AES",
+            "units": 0
+          }
+        ],
+        "memory": [
+          {
+            "dedicated": 4096,
+            "floating": 0,
+            "hugepages": "",
+            "keep_hugepages": false,
+            "shared": 0
+          }
+        ]
+      },
+      "after": {
+        "vm_id": 196,
+        "id": "196",
+        "node_name": "proxmox6",
+        "name": "p100t002-r02cdeeb6-mhl-file01",
+        "network_device": [
+          {
+            "bridge": "p100t002",
+            "disconnected": false,
+            "enabled": true,
+            "firewall": true,
+            "mac_address": "BC:24:11:BC:AE:BA",
+            "model": "e1000",
+            "mtu": 1450,
+            "queues": 0,
+            "rate_limit": 0,
+            "trunks": "",
+            "vlan_id": 0
+          }
+        ],
+        "clone": [
+          {
+            "datastore_id": "",
+            "full": false,
+            "node_name": "proxmox6",
+            "retries": 1,
+            "vm_id": 185
+          }
+        ],
+        "disk": [],
+        "cpu": [
+          {
+            "affinity": "",
+            "architecture": "",
+            "cores": 2,
+            "flags": [],
+            "hotplugged": 0,
+            "limit": 0,
+            "numa": false,
+            "sockets": 1,
+            "type": "x86-64-v2-AES",
+            "units": 0
+          }
+        ],
+        "memory": [
+          {
+            "dedicated": 4096,
+            "floating": 0,
+            "hugepages": "",
+            "keep_hugepages": false,
+            "shared": 0
+          }
+        ]
+      }
+    },
+    {
+      "address": "module.scenario_box[\"r0.1.2-mhl-file01-t003\"].proxmox_virtual_environment_vm.scenario",
+      "actions": [
+        "update"
+      ],
+      "changed_fields": [
+        "boot_order"
+      ],
+      "safe_differences": {
+        "boot_order": {
+          "before": [
+            "sata0",
+            "ide2"
+          ],
+          "after": [
+            "sata0"
+          ]
+        }
+      },
+      "before": {
+        "vm_id": 192,
+        "id": "192",
+        "node_name": "proxmox6",
+        "name": "p100t003-r02cdeeb6-mhl-file01",
+        "network_device": [
+          {
+            "bridge": "p100t003",
+            "disconnected": false,
+            "enabled": true,
+            "firewall": true,
+            "mac_address": "BC:24:11:5D:89:3C",
+            "model": "e1000",
+            "mtu": 1450,
+            "queues": 0,
+            "rate_limit": 0,
+            "trunks": "",
+            "vlan_id": 0
+          }
+        ],
+        "clone": [
+          {
+            "datastore_id": "",
+            "full": false,
+            "node_name": "proxmox6",
+            "retries": 1,
+            "vm_id": 185
+          }
+        ],
+        "disk": [],
+        "cpu": [
+          {
+            "affinity": "",
+            "architecture": "",
+            "cores": 2,
+            "flags": [],
+            "hotplugged": 0,
+            "limit": 0,
+            "numa": false,
+            "sockets": 1,
+            "type": "x86-64-v2-AES",
+            "units": 0
+          }
+        ],
+        "memory": [
+          {
+            "dedicated": 4096,
+            "floating": 0,
+            "hugepages": "",
+            "keep_hugepages": false,
+            "shared": 0
+          }
+        ]
+      },
+      "after": {
+        "vm_id": 192,
+        "id": "192",
+        "node_name": "proxmox6",
+        "name": "p100t003-r02cdeeb6-mhl-file01",
+        "network_device": [
+          {
+            "bridge": "p100t003",
+            "disconnected": false,
+            "enabled": true,
+            "firewall": true,
+            "mac_address": "BC:24:11:5D:89:3C",
+            "model": "e1000",
+            "mtu": 1450,
+            "queues": 0,
+            "rate_limit": 0,
+            "trunks": "",
+            "vlan_id": 0
+          }
+        ],
+        "clone": [
+          {
+            "datastore_id": "",
+            "full": false,
+            "node_name": "proxmox6",
+            "retries": 1,
+            "vm_id": 185
+          }
+        ],
+        "disk": [],
+        "cpu": [
+          {
+            "affinity": "",
+            "architecture": "",
+            "cores": 2,
+            "flags": [],
+            "hotplugged": 0,
+            "limit": 0,
+            "numa": false,
+            "sockets": 1,
+            "type": "x86-64-v2-AES",
+            "units": 0
+          }
+        ],
+        "memory": [
+          {
+            "dedicated": 4096,
+            "floating": 0,
+            "hugepages": "",
+            "keep_hugepages": false,
+            "shared": 0
+          }
+        ]
+      }
+    },
+    {
+      "address": "module.scenario_box[\"r0.1.2-mhl-file01-t004\"].proxmox_virtual_environment_vm.scenario",
+      "actions": [
+        "update"
+      ],
+      "changed_fields": [
+        "boot_order"
+      ],
+      "safe_differences": {
+        "boot_order": {
+          "before": [
+            "sata0",
+            "ide2"
+          ],
+          "after": [
+            "sata0"
+          ]
+        }
+      },
+      "before": {
+        "vm_id": 194,
+        "id": "194",
+        "node_name": "proxmox6",
+        "name": "p100t004-r02cdeeb6-mhl-file01",
+        "network_device": [
+          {
+            "bridge": "p100t004",
+            "disconnected": false,
+            "enabled": true,
+            "firewall": true,
+            "mac_address": "BC:24:11:44:92:5B",
+            "model": "e1000",
+            "mtu": 1450,
+            "queues": 0,
+            "rate_limit": 0,
+            "trunks": "",
+            "vlan_id": 0
+          }
+        ],
+        "clone": [
+          {
+            "datastore_id": "",
+            "full": false,
+            "node_name": "proxmox6",
+            "retries": 1,
+            "vm_id": 185
+          }
+        ],
+        "disk": [],
+        "cpu": [
+          {
+            "affinity": "",
+            "architecture": "",
+            "cores": 2,
+            "flags": [],
+            "hotplugged": 0,
+            "limit": 0,
+            "numa": false,
+            "sockets": 1,
+            "type": "x86-64-v2-AES",
+            "units": 0
+          }
+        ],
+        "memory": [
+          {
+            "dedicated": 4096,
+            "floating": 0,
+            "hugepages": "",
+            "keep_hugepages": false,
+            "shared": 0
+          }
+        ]
+      },
+      "after": {
+        "vm_id": 194,
+        "id": "194",
+        "node_name": "proxmox6",
+        "name": "p100t004-r02cdeeb6-mhl-file01",
+        "network_device": [
+          {
+            "bridge": "p100t004",
+            "disconnected": false,
+            "enabled": true,
+            "firewall": true,
+            "mac_address": "BC:24:11:44:92:5B",
+            "model": "e1000",
+            "mtu": 1450,
+            "queues": 0,
+            "rate_limit": 0,
+            "trunks": "",
+            "vlan_id": 0
+          }
+        ],
+        "clone": [
+          {
+            "datastore_id": "",
+            "full": false,
+            "node_name": "proxmox6",
+            "retries": 1,
+            "vm_id": 185
+          }
+        ],
+        "disk": [],
+        "cpu": [
+          {
+            "affinity": "",
+            "architecture": "",
+            "cores": 2,
+            "flags": [],
+            "hotplugged": 0,
+            "limit": 0,
+            "numa": false,
+            "sockets": 1,
+            "type": "x86-64-v2-AES",
+            "units": 0
+          }
+        ],
+        "memory": [
+          {
+            "dedicated": 4096,
+            "floating": 0,
+            "hugepages": "",
+            "keep_hugepages": false,
+            "shared": 0
+          }
+        ]
+      }
+    },
+    {
+      "address": "module.scenario_box[\"r0.1.2-mhl-file01-t005\"].proxmox_virtual_environment_vm.scenario",
+      "actions": [
+        "update"
+      ],
+      "changed_fields": [
+        "boot_order"
+      ],
+      "safe_differences": {
+        "boot_order": {
+          "before": [
+            "sata0",
+            "ide2"
+          ],
+          "after": [
+            "sata0"
+          ]
+        }
+      },
+      "before": {
+        "vm_id": 193,
+        "id": "193",
+        "node_name": "proxmox6",
+        "name": "p100t005-r02cdeeb6-mhl-file01",
+        "network_device": [
+          {
+            "bridge": "p100t005",
+            "disconnected": false,
+            "enabled": true,
+            "firewall": true,
+            "mac_address": "BC:24:11:CB:76:AB",
+            "model": "e1000",
+            "mtu": 1450,
+            "queues": 0,
+            "rate_limit": 0,
+            "trunks": "",
+            "vlan_id": 0
+          }
+        ],
+        "clone": [
+          {
+            "datastore_id": "",
+            "full": false,
+            "node_name": "proxmox6",
+            "retries": 1,
+            "vm_id": 185
+          }
+        ],
+        "disk": [],
+        "cpu": [
+          {
+            "affinity": "",
+            "architecture": "",
+            "cores": 2,
+            "flags": [],
+            "hotplugged": 0,
+            "limit": 0,
+            "numa": false,
+            "sockets": 1,
+            "type": "x86-64-v2-AES",
+            "units": 0
+          }
+        ],
+        "memory": [
+          {
+            "dedicated": 4096,
+            "floating": 0,
+            "hugepages": "",
+            "keep_hugepages": false,
+            "shared": 0
+          }
+        ]
+      },
+      "after": {
+        "vm_id": 193,
+        "id": "193",
+        "node_name": "proxmox6",
+        "name": "p100t005-r02cdeeb6-mhl-file01",
+        "network_device": [
+          {
+            "bridge": "p100t005",
+            "disconnected": false,
+            "enabled": true,
+            "firewall": true,
+            "mac_address": "BC:24:11:CB:76:AB",
+            "model": "e1000",
+            "mtu": 1450,
+            "queues": 0,
+            "rate_limit": 0,
+            "trunks": "",
+            "vlan_id": 0
+          }
+        ],
+        "clone": [
+          {
+            "datastore_id": "",
+            "full": false,
+            "node_name": "proxmox6",
+            "retries": 1,
+            "vm_id": 185
+          }
+        ],
+        "disk": [],
+        "cpu": [
+          {
+            "affinity": "",
+            "architecture": "",
+            "cores": 2,
+            "flags": [],
+            "hotplugged": 0,
+            "limit": 0,
+            "numa": false,
+            "sockets": 1,
+            "type": "x86-64-v2-AES",
+            "units": 0
+          }
+        ],
+        "memory": [
+          {
+            "dedicated": 4096,
+            "floating": 0,
+            "hugepages": "",
+            "keep_hugepages": false,
+            "shared": 0
+          }
+        ]
+      }
+    },
+    {
+      "address": "module.scenario_box[\"t001-assessor-win-j02\"].proxmox_virtual_environment_vm.scenario",
+      "actions": [
+        "create"
+      ],
+      "changed_fields": [
+        "acpi",
+        "boot_order",
+        "purge_on_destroy",
+        "amd_sev",
+        "disk",
+        "scsi_hardware",
+        "timeout_reboot",
+        "tags",
+        "name",
+        "migrate",
+        "network_device",
+        "virtiofs",
+        "node_name",
+        "numa",
+        "reboot",
+        "started",
+        "cpu",
+        "operating_system",
+        "timeout_create",
+        "delete_unreferenced_disks_on_destroy",
+        "efi_disk",
+        "timeout_clone",
+        "reboot_after_update",
+        "timeout_shutdown_vm",
+        "timeout_migrate",
+        "timeout_move_disk",
+        "serial_device",
+        "smbios",
+        "timeout_stop_vm",
+        "bios",
+        "tablet_device",
+        "usb",
+        "rng",
+        "tpm_state",
+        "machine",
+        "initialization",
+        "stop_on_destroy",
+        "description",
+        "timeout_start_vm",
+        "cdrom",
+        "clone",
+        "watchdog",
+        "keyboard_layout",
+        "template",
+        "hostpci",
+        "audio_device",
+        "pool_id",
+        "agent",
+        "startup",
+        "protection",
+        "memory",
+        "on_boot"
+      ],
+      "safe_differences": {
+        "boot_order": {
+          "before": null,
+          "after": [
+            "sata0"
+          ]
+        },
+        "tags": {
+          "before": null,
+          "after": [
+            "range-lan",
+            "scenario",
+            "p100",
+            "p100t001",
+            "terraform"
+          ]
+        },
+        "started": {
+          "before": null,
+          "after": true
+        },
+        "operating_system": {
+          "before": null,
+          "after": [
+            {
+              "type": "win11"
+            }
+          ]
+        },
+        "serial_device": {
+          "before": null,
+          "after": []
+        },
+        "bios": {
+          "before": null,
+          "after": "ovmf"
+        },
+        "tablet_device": {
+          "before": null,
+          "after": true
+        },
+        "machine": {
+          "before": null,
+          "after": "pc-q35-9.2+pve1"
+        },
+        "stop_on_destroy": {
+          "before": null,
+          "after": true
+        },
+        "description": {
+          "before": null,
+          "after": "Scenario VM managed by CRANGE Terraform"
+        },
+        "cdrom": {
+          "before": null,
+          "after": [
+            {
+              "enabled": false,
+              "file_id": "none",
+              "interface": "ide2"
+            }
+          ]
+        },
+        "keyboard_layout": {
+          "before": null,
+          "after": "en-us"
+        },
+        "agent": {
+          "before": null,
+          "after": [
+            {
+              "enabled": true,
+              "timeout": "5m",
+              "trim": false,
+              "type": "virtio",
+              "wait_for_ip": []
+            }
+          ]
+        },
+        "on_boot": {
+          "before": null,
+          "after": false
+        }
+      },
+      "before": {},
+      "after": {
+        "node_name": "proxmox6",
+        "name": "p100t001-assessor-win-j02",
+        "network_device": [
+          {
+            "bridge": "p100t001",
+            "disconnected": null,
+            "enabled": true,
+            "firewall": true,
+            "model": "e1000",
+            "mtu": 1450,
+            "queues": 0,
+            "rate_limit": 0,
+            "trunks": null,
+            "vlan_id": 0
+          }
+        ],
+        "clone": [
+          {
+            "datastore_id": null,
+            "full": false,
+            "node_name": "proxmox6",
+            "retries": 1,
+            "vm_id": 219
+          }
+        ],
+        "disk": [],
+        "cpu": [
+          {
+            "affinity": null,
+            "architecture": null,
+            "cores": 2,
+            "flags": null,
+            "hotplugged": 0,
+            "limit": 0,
+            "numa": false,
+            "sockets": 1,
+            "type": "x86-64-v2-AES"
+          }
+        ],
+        "memory": [
+          {
+            "dedicated": 4096,
+            "floating": 0,
+            "hugepages": null,
+            "keep_hugepages": false,
+            "shared": 0
+          }
+        ]
+      }
+    },
+    {
+      "address": "module.scenario_box[\"t001-assessor-win-j04\"].proxmox_virtual_environment_vm.scenario",
+      "actions": [
+        "create"
+      ],
+      "changed_fields": [
+        "acpi",
+        "boot_order",
+        "purge_on_destroy",
+        "amd_sev",
+        "disk",
+        "scsi_hardware",
+        "timeout_reboot",
+        "tags",
+        "name",
+        "migrate",
+        "network_device",
+        "virtiofs",
+        "node_name",
+        "numa",
+        "reboot",
+        "started",
+        "cpu",
+        "operating_system",
+        "timeout_create",
+        "delete_unreferenced_disks_on_destroy",
+        "efi_disk",
+        "timeout_clone",
+        "reboot_after_update",
+        "timeout_shutdown_vm",
+        "timeout_migrate",
+        "timeout_move_disk",
+        "serial_device",
+        "smbios",
+        "timeout_stop_vm",
+        "bios",
+        "tablet_device",
+        "usb",
+        "rng",
+        "tpm_state",
+        "machine",
+        "initialization",
+        "stop_on_destroy",
+        "description",
+        "timeout_start_vm",
+        "cdrom",
+        "clone",
+        "watchdog",
+        "keyboard_layout",
+        "template",
+        "hostpci",
+        "audio_device",
+        "pool_id",
+        "agent",
+        "startup",
+        "protection",
+        "memory",
+        "on_boot"
+      ],
+      "safe_differences": {
+        "boot_order": {
+          "before": null,
+          "after": [
+            "sata0"
+          ]
+        },
+        "tags": {
+          "before": null,
+          "after": [
+            "range-lan",
+            "scenario",
+            "p100",
+            "p100t001",
+            "terraform"
+          ]
+        },
+        "started": {
+          "before": null,
+          "after": true
+        },
+        "operating_system": {
+          "before": null,
+          "after": [
+            {
+              "type": "win11"
+            }
+          ]
+        },
+        "serial_device": {
+          "before": null,
+          "after": []
+        },
+        "bios": {
+          "before": null,
+          "after": "ovmf"
+        },
+        "tablet_device": {
+          "before": null,
+          "after": true
+        },
+        "machine": {
+          "before": null,
+          "after": "pc-q35-9.2+pve1"
+        },
+        "stop_on_destroy": {
+          "before": null,
+          "after": true
+        },
+        "description": {
+          "before": null,
+          "after": "Scenario VM managed by CRANGE Terraform"
+        },
+        "cdrom": {
+          "before": null,
+          "after": [
+            {
+              "enabled": false,
+              "file_id": "none",
+              "interface": "ide2"
+            }
+          ]
+        },
+        "keyboard_layout": {
+          "before": null,
+          "after": "en-us"
+        },
+        "agent": {
+          "before": null,
+          "after": [
+            {
+              "enabled": true,
+              "timeout": "5m",
+              "trim": false,
+              "type": "virtio",
+              "wait_for_ip": []
+            }
+          ]
+        },
+        "on_boot": {
+          "before": null,
+          "after": false
+        }
+      },
+      "before": {},
+      "after": {
+        "node_name": "proxmox6",
+        "name": "p100t001-assessor-win-j04",
+        "network_device": [
+          {
+            "bridge": "p100t001",
+            "disconnected": null,
+            "enabled": true,
+            "firewall": true,
+            "model": "e1000",
+            "mtu": 1450,
+            "queues": 0,
+            "rate_limit": 0,
+            "trunks": null,
+            "vlan_id": 0
+          }
+        ],
+        "clone": [
+          {
+            "datastore_id": null,
+            "full": false,
+            "node_name": "proxmox6",
+            "retries": 1,
+            "vm_id": 219
+          }
+        ],
+        "disk": [],
+        "cpu": [
+          {
+            "affinity": null,
+            "architecture": null,
+            "cores": 2,
+            "flags": null,
+            "hotplugged": 0,
+            "limit": 0,
+            "numa": false,
+            "sockets": 1,
+            "type": "x86-64-v2-AES"
+          }
+        ],
+        "memory": [
+          {
+            "dedicated": 4096,
+            "floating": 0,
+            "hugepages": null,
+            "keep_hugepages": false,
+            "shared": 0
+          }
+        ]
+      }
+    },
+    {
+      "address": "module.scenario_box[\"t002-assessor-win-j02\"].proxmox_virtual_environment_vm.scenario",
+      "actions": [
+        "create"
+      ],
+      "changed_fields": [
+        "acpi",
+        "boot_order",
+        "purge_on_destroy",
+        "amd_sev",
+        "disk",
+        "scsi_hardware",
+        "timeout_reboot",
+        "tags",
+        "name",
+        "migrate",
+        "network_device",
+        "virtiofs",
+        "node_name",
+        "numa",
+        "reboot",
+        "started",
+        "cpu",
+        "operating_system",
+        "timeout_create",
+        "delete_unreferenced_disks_on_destroy",
+        "efi_disk",
+        "timeout_clone",
+        "reboot_after_update",
+        "timeout_shutdown_vm",
+        "timeout_migrate",
+        "timeout_move_disk",
+        "serial_device",
+        "smbios",
+        "timeout_stop_vm",
+        "bios",
+        "tablet_device",
+        "usb",
+        "rng",
+        "tpm_state",
+        "machine",
+        "initialization",
+        "stop_on_destroy",
+        "description",
+        "timeout_start_vm",
+        "cdrom",
+        "clone",
+        "watchdog",
+        "keyboard_layout",
+        "template",
+        "hostpci",
+        "audio_device",
+        "pool_id",
+        "agent",
+        "startup",
+        "protection",
+        "memory",
+        "on_boot"
+      ],
+      "safe_differences": {
+        "boot_order": {
+          "before": null,
+          "after": [
+            "sata0"
+          ]
+        },
+        "tags": {
+          "before": null,
+          "after": [
+            "range-lan",
+            "scenario",
+            "p100",
+            "p100t002",
+            "terraform"
+          ]
+        },
+        "started": {
+          "before": null,
+          "after": true
+        },
+        "operating_system": {
+          "before": null,
+          "after": [
+            {
+              "type": "win11"
+            }
+          ]
+        },
+        "serial_device": {
+          "before": null,
+          "after": []
+        },
+        "bios": {
+          "before": null,
+          "after": "ovmf"
+        },
+        "tablet_device": {
+          "before": null,
+          "after": true
+        },
+        "machine": {
+          "before": null,
+          "after": "pc-q35-9.2+pve1"
+        },
+        "stop_on_destroy": {
+          "before": null,
+          "after": true
+        },
+        "description": {
+          "before": null,
+          "after": "Scenario VM managed by CRANGE Terraform"
+        },
+        "cdrom": {
+          "before": null,
+          "after": [
+            {
+              "enabled": false,
+              "file_id": "none",
+              "interface": "ide2"
+            }
+          ]
+        },
+        "keyboard_layout": {
+          "before": null,
+          "after": "en-us"
+        },
+        "agent": {
+          "before": null,
+          "after": [
+            {
+              "enabled": true,
+              "timeout": "5m",
+              "trim": false,
+              "type": "virtio",
+              "wait_for_ip": []
+            }
+          ]
+        },
+        "on_boot": {
+          "before": null,
+          "after": false
+        }
+      },
+      "before": {},
+      "after": {
+        "node_name": "proxmox6",
+        "name": "p100t002-assessor-win-j02",
+        "network_device": [
+          {
+            "bridge": "p100t002",
+            "disconnected": null,
+            "enabled": true,
+            "firewall": true,
+            "model": "e1000",
+            "mtu": 1450,
+            "queues": 0,
+            "rate_limit": 0,
+            "trunks": null,
+            "vlan_id": 0
+          }
+        ],
+        "clone": [
+          {
+            "datastore_id": null,
+            "full": false,
+            "node_name": "proxmox6",
+            "retries": 1,
+            "vm_id": 219
+          }
+        ],
+        "disk": [],
+        "cpu": [
+          {
+            "affinity": null,
+            "architecture": null,
+            "cores": 2,
+            "flags": null,
+            "hotplugged": 0,
+            "limit": 0,
+            "numa": false,
+            "sockets": 1,
+            "type": "x86-64-v2-AES"
+          }
+        ],
+        "memory": [
+          {
+            "dedicated": 4096,
+            "floating": 0,
+            "hugepages": null,
+            "keep_hugepages": false,
+            "shared": 0
+          }
+        ]
+      }
+    },
+    {
+      "address": "module.scenario_box[\"t002-assessor-win-j04\"].proxmox_virtual_environment_vm.scenario",
+      "actions": [
+        "create"
+      ],
+      "changed_fields": [
+        "acpi",
+        "boot_order",
+        "purge_on_destroy",
+        "amd_sev",
+        "disk",
+        "scsi_hardware",
+        "timeout_reboot",
+        "tags",
+        "name",
+        "migrate",
+        "network_device",
+        "virtiofs",
+        "node_name",
+        "numa",
+        "reboot",
+        "started",
+        "cpu",
+        "operating_system",
+        "timeout_create",
+        "delete_unreferenced_disks_on_destroy",
+        "efi_disk",
+        "timeout_clone",
+        "reboot_after_update",
+        "timeout_shutdown_vm",
+        "timeout_migrate",
+        "timeout_move_disk",
+        "serial_device",
+        "smbios",
+        "timeout_stop_vm",
+        "bios",
+        "tablet_device",
+        "usb",
+        "rng",
+        "tpm_state",
+        "machine",
+        "initialization",
+        "stop_on_destroy",
+        "description",
+        "timeout_start_vm",
+        "cdrom",
+        "clone",
+        "watchdog",
+        "keyboard_layout",
+        "template",
+        "hostpci",
+        "audio_device",
+        "pool_id",
+        "agent",
+        "startup",
+        "protection",
+        "memory",
+        "on_boot"
+      ],
+      "safe_differences": {
+        "boot_order": {
+          "before": null,
+          "after": [
+            "sata0"
+          ]
+        },
+        "tags": {
+          "before": null,
+          "after": [
+            "range-lan",
+            "scenario",
+            "p100",
+            "p100t002",
+            "terraform"
+          ]
+        },
+        "started": {
+          "before": null,
+          "after": true
+        },
+        "operating_system": {
+          "before": null,
+          "after": [
+            {
+              "type": "win11"
+            }
+          ]
+        },
+        "serial_device": {
+          "before": null,
+          "after": []
+        },
+        "bios": {
+          "before": null,
+          "after": "ovmf"
+        },
+        "tablet_device": {
+          "before": null,
+          "after": true
+        },
+        "machine": {
+          "before": null,
+          "after": "pc-q35-9.2+pve1"
+        },
+        "stop_on_destroy": {
+          "before": null,
+          "after": true
+        },
+        "description": {
+          "before": null,
+          "after": "Scenario VM managed by CRANGE Terraform"
+        },
+        "cdrom": {
+          "before": null,
+          "after": [
+            {
+              "enabled": false,
+              "file_id": "none",
+              "interface": "ide2"
+            }
+          ]
+        },
+        "keyboard_layout": {
+          "before": null,
+          "after": "en-us"
+        },
+        "agent": {
+          "before": null,
+          "after": [
+            {
+              "enabled": true,
+              "timeout": "5m",
+              "trim": false,
+              "type": "virtio",
+              "wait_for_ip": []
+            }
+          ]
+        },
+        "on_boot": {
+          "before": null,
+          "after": false
+        }
+      },
+      "before": {},
+      "after": {
+        "node_name": "proxmox6",
+        "name": "p100t002-assessor-win-j04",
+        "network_device": [
+          {
+            "bridge": "p100t002",
+            "disconnected": null,
+            "enabled": true,
+            "firewall": true,
+            "model": "e1000",
+            "mtu": 1450,
+            "queues": 0,
+            "rate_limit": 0,
+            "trunks": null,
+            "vlan_id": 0
+          }
+        ],
+        "clone": [
+          {
+            "datastore_id": null,
+            "full": false,
+            "node_name": "proxmox6",
+            "retries": 1,
+            "vm_id": 219
+          }
+        ],
+        "disk": [],
+        "cpu": [
+          {
+            "affinity": null,
+            "architecture": null,
+            "cores": 2,
+            "flags": null,
+            "hotplugged": 0,
+            "limit": 0,
+            "numa": false,
+            "sockets": 1,
+            "type": "x86-64-v2-AES"
+          }
+        ],
+        "memory": [
+          {
+            "dedicated": 4096,
+            "floating": 0,
+            "hugepages": null,
+            "keep_hugepages": false,
+            "shared": 0
+          }
+        ]
+      }
+    },
+    {
+      "address": "module.scenario_box[\"t003-assessor-win-j02\"].proxmox_virtual_environment_vm.scenario",
+      "actions": [
+        "create"
+      ],
+      "changed_fields": [
+        "acpi",
+        "boot_order",
+        "purge_on_destroy",
+        "amd_sev",
+        "disk",
+        "scsi_hardware",
+        "timeout_reboot",
+        "tags",
+        "name",
+        "migrate",
+        "network_device",
+        "virtiofs",
+        "node_name",
+        "numa",
+        "reboot",
+        "started",
+        "cpu",
+        "operating_system",
+        "timeout_create",
+        "delete_unreferenced_disks_on_destroy",
+        "efi_disk",
+        "timeout_clone",
+        "reboot_after_update",
+        "timeout_shutdown_vm",
+        "timeout_migrate",
+        "timeout_move_disk",
+        "serial_device",
+        "smbios",
+        "timeout_stop_vm",
+        "bios",
+        "tablet_device",
+        "usb",
+        "rng",
+        "tpm_state",
+        "machine",
+        "initialization",
+        "stop_on_destroy",
+        "description",
+        "timeout_start_vm",
+        "cdrom",
+        "clone",
+        "watchdog",
+        "keyboard_layout",
+        "template",
+        "hostpci",
+        "audio_device",
+        "pool_id",
+        "agent",
+        "startup",
+        "protection",
+        "memory",
+        "on_boot"
+      ],
+      "safe_differences": {
+        "boot_order": {
+          "before": null,
+          "after": [
+            "sata0"
+          ]
+        },
+        "tags": {
+          "before": null,
+          "after": [
+            "range-lan",
+            "scenario",
+            "p100",
+            "p100t003",
+            "terraform"
+          ]
+        },
+        "started": {
+          "before": null,
+          "after": true
+        },
+        "operating_system": {
+          "before": null,
+          "after": [
+            {
+              "type": "win11"
+            }
+          ]
+        },
+        "serial_device": {
+          "before": null,
+          "after": []
+        },
+        "bios": {
+          "before": null,
+          "after": "ovmf"
+        },
+        "tablet_device": {
+          "before": null,
+          "after": true
+        },
+        "machine": {
+          "before": null,
+          "after": "pc-q35-9.2+pve1"
+        },
+        "stop_on_destroy": {
+          "before": null,
+          "after": true
+        },
+        "description": {
+          "before": null,
+          "after": "Scenario VM managed by CRANGE Terraform"
+        },
+        "cdrom": {
+          "before": null,
+          "after": [
+            {
+              "enabled": false,
+              "file_id": "none",
+              "interface": "ide2"
+            }
+          ]
+        },
+        "keyboard_layout": {
+          "before": null,
+          "after": "en-us"
+        },
+        "agent": {
+          "before": null,
+          "after": [
+            {
+              "enabled": true,
+              "timeout": "5m",
+              "trim": false,
+              "type": "virtio",
+              "wait_for_ip": []
+            }
+          ]
+        },
+        "on_boot": {
+          "before": null,
+          "after": false
+        }
+      },
+      "before": {},
+      "after": {
+        "node_name": "proxmox6",
+        "name": "p100t003-assessor-win-j02",
+        "network_device": [
+          {
+            "bridge": "p100t003",
+            "disconnected": null,
+            "enabled": true,
+            "firewall": true,
+            "model": "e1000",
+            "mtu": 1450,
+            "queues": 0,
+            "rate_limit": 0,
+            "trunks": null,
+            "vlan_id": 0
+          }
+        ],
+        "clone": [
+          {
+            "datastore_id": null,
+            "full": false,
+            "node_name": "proxmox6",
+            "retries": 1,
+            "vm_id": 219
+          }
+        ],
+        "disk": [],
+        "cpu": [
+          {
+            "affinity": null,
+            "architecture": null,
+            "cores": 2,
+            "flags": null,
+            "hotplugged": 0,
+            "limit": 0,
+            "numa": false,
+            "sockets": 1,
+            "type": "x86-64-v2-AES"
+          }
+        ],
+        "memory": [
+          {
+            "dedicated": 4096,
+            "floating": 0,
+            "hugepages": null,
+            "keep_hugepages": false,
+            "shared": 0
+          }
+        ]
+      }
+    },
+    {
+      "address": "module.scenario_box[\"t003-assessor-win-j04\"].proxmox_virtual_environment_vm.scenario",
+      "actions": [
+        "create"
+      ],
+      "changed_fields": [
+        "acpi",
+        "boot_order",
+        "purge_on_destroy",
+        "amd_sev",
+        "disk",
+        "scsi_hardware",
+        "timeout_reboot",
+        "tags",
+        "name",
+        "migrate",
+        "network_device",
+        "virtiofs",
+        "node_name",
+        "numa",
+        "reboot",
+        "started",
+        "cpu",
+        "operating_system",
+        "timeout_create",
+        "delete_unreferenced_disks_on_destroy",
+        "efi_disk",
+        "timeout_clone",
+        "reboot_after_update",
+        "timeout_shutdown_vm",
+        "timeout_migrate",
+        "timeout_move_disk",
+        "serial_device",
+        "smbios",
+        "timeout_stop_vm",
+        "bios",
+        "tablet_device",
+        "usb",
+        "rng",
+        "tpm_state",
+        "machine",
+        "initialization",
+        "stop_on_destroy",
+        "description",
+        "timeout_start_vm",
+        "cdrom",
+        "clone",
+        "watchdog",
+        "keyboard_layout",
+        "template",
+        "hostpci",
+        "audio_device",
+        "pool_id",
+        "agent",
+        "startup",
+        "protection",
+        "memory",
+        "on_boot"
+      ],
+      "safe_differences": {
+        "boot_order": {
+          "before": null,
+          "after": [
+            "sata0"
+          ]
+        },
+        "tags": {
+          "before": null,
+          "after": [
+            "range-lan",
+            "scenario",
+            "p100",
+            "p100t003",
+            "terraform"
+          ]
+        },
+        "started": {
+          "before": null,
+          "after": true
+        },
+        "operating_system": {
+          "before": null,
+          "after": [
+            {
+              "type": "win11"
+            }
+          ]
+        },
+        "serial_device": {
+          "before": null,
+          "after": []
+        },
+        "bios": {
+          "before": null,
+          "after": "ovmf"
+        },
+        "tablet_device": {
+          "before": null,
+          "after": true
+        },
+        "machine": {
+          "before": null,
+          "after": "pc-q35-9.2+pve1"
+        },
+        "stop_on_destroy": {
+          "before": null,
+          "after": true
+        },
+        "description": {
+          "before": null,
+          "after": "Scenario VM managed by CRANGE Terraform"
+        },
+        "cdrom": {
+          "before": null,
+          "after": [
+            {
+              "enabled": false,
+              "file_id": "none",
+              "interface": "ide2"
+            }
+          ]
+        },
+        "keyboard_layout": {
+          "before": null,
+          "after": "en-us"
+        },
+        "agent": {
+          "before": null,
+          "after": [
+            {
+              "enabled": true,
+              "timeout": "5m",
+              "trim": false,
+              "type": "virtio",
+              "wait_for_ip": []
+            }
+          ]
+        },
+        "on_boot": {
+          "before": null,
+          "after": false
+        }
+      },
+      "before": {},
+      "after": {
+        "node_name": "proxmox6",
+        "name": "p100t003-assessor-win-j04",
+        "network_device": [
+          {
+            "bridge": "p100t003",
+            "disconnected": null,
+            "enabled": true,
+            "firewall": true,
+            "model": "e1000",
+            "mtu": 1450,
+            "queues": 0,
+            "rate_limit": 0,
+            "trunks": null,
+            "vlan_id": 0
+          }
+        ],
+        "clone": [
+          {
+            "datastore_id": null,
+            "full": false,
+            "node_name": "proxmox6",
+            "retries": 1,
+            "vm_id": 219
+          }
+        ],
+        "disk": [],
+        "cpu": [
+          {
+            "affinity": null,
+            "architecture": null,
+            "cores": 2,
+            "flags": null,
+            "hotplugged": 0,
+            "limit": 0,
+            "numa": false,
+            "sockets": 1,
+            "type": "x86-64-v2-AES"
+          }
+        ],
+        "memory": [
+          {
+            "dedicated": 4096,
+            "floating": 0,
+            "hugepages": null,
+            "keep_hugepages": false,
+            "shared": 0
+          }
+        ]
+      }
+    },
+    {
+      "address": "module.scenario_box[\"t004-assessor-win-j02\"].proxmox_virtual_environment_vm.scenario",
+      "actions": [
+        "create"
+      ],
+      "changed_fields": [
+        "acpi",
+        "boot_order",
+        "purge_on_destroy",
+        "amd_sev",
+        "disk",
+        "scsi_hardware",
+        "timeout_reboot",
+        "tags",
+        "name",
+        "migrate",
+        "network_device",
+        "virtiofs",
+        "node_name",
+        "numa",
+        "reboot",
+        "started",
+        "cpu",
+        "operating_system",
+        "timeout_create",
+        "delete_unreferenced_disks_on_destroy",
+        "efi_disk",
+        "timeout_clone",
+        "reboot_after_update",
+        "timeout_shutdown_vm",
+        "timeout_migrate",
+        "timeout_move_disk",
+        "serial_device",
+        "smbios",
+        "timeout_stop_vm",
+        "bios",
+        "tablet_device",
+        "usb",
+        "rng",
+        "tpm_state",
+        "machine",
+        "initialization",
+        "stop_on_destroy",
+        "description",
+        "timeout_start_vm",
+        "cdrom",
+        "clone",
+        "watchdog",
+        "keyboard_layout",
+        "template",
+        "hostpci",
+        "audio_device",
+        "pool_id",
+        "agent",
+        "startup",
+        "protection",
+        "memory",
+        "on_boot"
+      ],
+      "safe_differences": {
+        "boot_order": {
+          "before": null,
+          "after": [
+            "sata0"
+          ]
+        },
+        "tags": {
+          "before": null,
+          "after": [
+            "range-lan",
+            "scenario",
+            "p100",
+            "p100t004",
+            "terraform"
+          ]
+        },
+        "started": {
+          "before": null,
+          "after": true
+        },
+        "operating_system": {
+          "before": null,
+          "after": [
+            {
+              "type": "win11"
+            }
+          ]
+        },
+        "serial_device": {
+          "before": null,
+          "after": []
+        },
+        "bios": {
+          "before": null,
+          "after": "ovmf"
+        },
+        "tablet_device": {
+          "before": null,
+          "after": true
+        },
+        "machine": {
+          "before": null,
+          "after": "pc-q35-9.2+pve1"
+        },
+        "stop_on_destroy": {
+          "before": null,
+          "after": true
+        },
+        "description": {
+          "before": null,
+          "after": "Scenario VM managed by CRANGE Terraform"
+        },
+        "cdrom": {
+          "before": null,
+          "after": [
+            {
+              "enabled": false,
+              "file_id": "none",
+              "interface": "ide2"
+            }
+          ]
+        },
+        "keyboard_layout": {
+          "before": null,
+          "after": "en-us"
+        },
+        "agent": {
+          "before": null,
+          "after": [
+            {
+              "enabled": true,
+              "timeout": "5m",
+              "trim": false,
+              "type": "virtio",
+              "wait_for_ip": []
+            }
+          ]
+        },
+        "on_boot": {
+          "before": null,
+          "after": false
+        }
+      },
+      "before": {},
+      "after": {
+        "node_name": "proxmox6",
+        "name": "p100t004-assessor-win-j02",
+        "network_device": [
+          {
+            "bridge": "p100t004",
+            "disconnected": null,
+            "enabled": true,
+            "firewall": true,
+            "model": "e1000",
+            "mtu": 1450,
+            "queues": 0,
+            "rate_limit": 0,
+            "trunks": null,
+            "vlan_id": 0
+          }
+        ],
+        "clone": [
+          {
+            "datastore_id": null,
+            "full": false,
+            "node_name": "proxmox6",
+            "retries": 1,
+            "vm_id": 219
+          }
+        ],
+        "disk": [],
+        "cpu": [
+          {
+            "affinity": null,
+            "architecture": null,
+            "cores": 2,
+            "flags": null,
+            "hotplugged": 0,
+            "limit": 0,
+            "numa": false,
+            "sockets": 1,
+            "type": "x86-64-v2-AES"
+          }
+        ],
+        "memory": [
+          {
+            "dedicated": 4096,
+            "floating": 0,
+            "hugepages": null,
+            "keep_hugepages": false,
+            "shared": 0
+          }
+        ]
+      }
+    },
+    {
+      "address": "module.scenario_box[\"t004-assessor-win-j04\"].proxmox_virtual_environment_vm.scenario",
+      "actions": [
+        "create"
+      ],
+      "changed_fields": [
+        "acpi",
+        "boot_order",
+        "purge_on_destroy",
+        "amd_sev",
+        "disk",
+        "scsi_hardware",
+        "timeout_reboot",
+        "tags",
+        "name",
+        "migrate",
+        "network_device",
+        "virtiofs",
+        "node_name",
+        "numa",
+        "reboot",
+        "started",
+        "cpu",
+        "operating_system",
+        "timeout_create",
+        "delete_unreferenced_disks_on_destroy",
+        "efi_disk",
+        "timeout_clone",
+        "reboot_after_update",
+        "timeout_shutdown_vm",
+        "timeout_migrate",
+        "timeout_move_disk",
+        "serial_device",
+        "smbios",
+        "timeout_stop_vm",
+        "bios",
+        "tablet_device",
+        "usb",
+        "rng",
+        "tpm_state",
+        "machine",
+        "initialization",
+        "stop_on_destroy",
+        "description",
+        "timeout_start_vm",
+        "cdrom",
+        "clone",
+        "watchdog",
+        "keyboard_layout",
+        "template",
+        "hostpci",
+        "audio_device",
+        "pool_id",
+        "agent",
+        "startup",
+        "protection",
+        "memory",
+        "on_boot"
+      ],
+      "safe_differences": {
+        "boot_order": {
+          "before": null,
+          "after": [
+            "sata0"
+          ]
+        },
+        "tags": {
+          "before": null,
+          "after": [
+            "range-lan",
+            "scenario",
+            "p100",
+            "p100t004",
+            "terraform"
+          ]
+        },
+        "started": {
+          "before": null,
+          "after": true
+        },
+        "operating_system": {
+          "before": null,
+          "after": [
+            {
+              "type": "win11"
+            }
+          ]
+        },
+        "serial_device": {
+          "before": null,
+          "after": []
+        },
+        "bios": {
+          "before": null,
+          "after": "ovmf"
+        },
+        "tablet_device": {
+          "before": null,
+          "after": true
+        },
+        "machine": {
+          "before": null,
+          "after": "pc-q35-9.2+pve1"
+        },
+        "stop_on_destroy": {
+          "before": null,
+          "after": true
+        },
+        "description": {
+          "before": null,
+          "after": "Scenario VM managed by CRANGE Terraform"
+        },
+        "cdrom": {
+          "before": null,
+          "after": [
+            {
+              "enabled": false,
+              "file_id": "none",
+              "interface": "ide2"
+            }
+          ]
+        },
+        "keyboard_layout": {
+          "before": null,
+          "after": "en-us"
+        },
+        "agent": {
+          "before": null,
+          "after": [
+            {
+              "enabled": true,
+              "timeout": "5m",
+              "trim": false,
+              "type": "virtio",
+              "wait_for_ip": []
+            }
+          ]
+        },
+        "on_boot": {
+          "before": null,
+          "after": false
+        }
+      },
+      "before": {},
+      "after": {
+        "node_name": "proxmox6",
+        "name": "p100t004-assessor-win-j04",
+        "network_device": [
+          {
+            "bridge": "p100t004",
+            "disconnected": null,
+            "enabled": true,
+            "firewall": true,
+            "model": "e1000",
+            "mtu": 1450,
+            "queues": 0,
+            "rate_limit": 0,
+            "trunks": null,
+            "vlan_id": 0
+          }
+        ],
+        "clone": [
+          {
+            "datastore_id": null,
+            "full": false,
+            "node_name": "proxmox6",
+            "retries": 1,
+            "vm_id": 219
+          }
+        ],
+        "disk": [],
+        "cpu": [
+          {
+            "affinity": null,
+            "architecture": null,
+            "cores": 2,
+            "flags": null,
+            "hotplugged": 0,
+            "limit": 0,
+            "numa": false,
+            "sockets": 1,
+            "type": "x86-64-v2-AES"
+          }
+        ],
+        "memory": [
+          {
+            "dedicated": 4096,
+            "floating": 0,
+            "hugepages": null,
+            "keep_hugepages": false,
+            "shared": 0
+          }
+        ]
+      }
+    },
+    {
+      "address": "module.scenario_box[\"t005-assessor-win-j02\"].proxmox_virtual_environment_vm.scenario",
+      "actions": [
+        "create"
+      ],
+      "changed_fields": [
+        "acpi",
+        "boot_order",
+        "purge_on_destroy",
+        "amd_sev",
+        "disk",
+        "scsi_hardware",
+        "timeout_reboot",
+        "tags",
+        "name",
+        "migrate",
+        "network_device",
+        "virtiofs",
+        "node_name",
+        "numa",
+        "reboot",
+        "started",
+        "cpu",
+        "operating_system",
+        "timeout_create",
+        "delete_unreferenced_disks_on_destroy",
+        "efi_disk",
+        "timeout_clone",
+        "reboot_after_update",
+        "timeout_shutdown_vm",
+        "timeout_migrate",
+        "timeout_move_disk",
+        "serial_device",
+        "smbios",
+        "timeout_stop_vm",
+        "bios",
+        "tablet_device",
+        "usb",
+        "rng",
+        "tpm_state",
+        "machine",
+        "initialization",
+        "stop_on_destroy",
+        "description",
+        "timeout_start_vm",
+        "cdrom",
+        "clone",
+        "watchdog",
+        "keyboard_layout",
+        "template",
+        "hostpci",
+        "audio_device",
+        "pool_id",
+        "agent",
+        "startup",
+        "protection",
+        "memory",
+        "on_boot"
+      ],
+      "safe_differences": {
+        "boot_order": {
+          "before": null,
+          "after": [
+            "sata0"
+          ]
+        },
+        "tags": {
+          "before": null,
+          "after": [
+            "range-lan",
+            "scenario",
+            "p100",
+            "p100t005",
+            "terraform"
+          ]
+        },
+        "started": {
+          "before": null,
+          "after": true
+        },
+        "operating_system": {
+          "before": null,
+          "after": [
+            {
+              "type": "win11"
+            }
+          ]
+        },
+        "serial_device": {
+          "before": null,
+          "after": []
+        },
+        "bios": {
+          "before": null,
+          "after": "ovmf"
+        },
+        "tablet_device": {
+          "before": null,
+          "after": true
+        },
+        "machine": {
+          "before": null,
+          "after": "pc-q35-9.2+pve1"
+        },
+        "stop_on_destroy": {
+          "before": null,
+          "after": true
+        },
+        "description": {
+          "before": null,
+          "after": "Scenario VM managed by CRANGE Terraform"
+        },
+        "cdrom": {
+          "before": null,
+          "after": [
+            {
+              "enabled": false,
+              "file_id": "none",
+              "interface": "ide2"
+            }
+          ]
+        },
+        "keyboard_layout": {
+          "before": null,
+          "after": "en-us"
+        },
+        "agent": {
+          "before": null,
+          "after": [
+            {
+              "enabled": true,
+              "timeout": "5m",
+              "trim": false,
+              "type": "virtio",
+              "wait_for_ip": []
+            }
+          ]
+        },
+        "on_boot": {
+          "before": null,
+          "after": false
+        }
+      },
+      "before": {},
+      "after": {
+        "node_name": "proxmox6",
+        "name": "p100t005-assessor-win-j02",
+        "network_device": [
+          {
+            "bridge": "p100t005",
+            "disconnected": null,
+            "enabled": true,
+            "firewall": true,
+            "model": "e1000",
+            "mtu": 1450,
+            "queues": 0,
+            "rate_limit": 0,
+            "trunks": null,
+            "vlan_id": 0
+          }
+        ],
+        "clone": [
+          {
+            "datastore_id": null,
+            "full": false,
+            "node_name": "proxmox6",
+            "retries": 1,
+            "vm_id": 219
+          }
+        ],
+        "disk": [],
+        "cpu": [
+          {
+            "affinity": null,
+            "architecture": null,
+            "cores": 2,
+            "flags": null,
+            "hotplugged": 0,
+            "limit": 0,
+            "numa": false,
+            "sockets": 1,
+            "type": "x86-64-v2-AES"
+          }
+        ],
+        "memory": [
+          {
+            "dedicated": 4096,
+            "floating": 0,
+            "hugepages": null,
+            "keep_hugepages": false,
+            "shared": 0
+          }
+        ]
+      }
+    },
+    {
+      "address": "module.scenario_box[\"t005-assessor-win-j04\"].proxmox_virtual_environment_vm.scenario",
+      "actions": [
+        "create"
+      ],
+      "changed_fields": [
+        "acpi",
+        "boot_order",
+        "purge_on_destroy",
+        "amd_sev",
+        "disk",
+        "scsi_hardware",
+        "timeout_reboot",
+        "tags",
+        "name",
+        "migrate",
+        "network_device",
+        "virtiofs",
+        "node_name",
+        "numa",
+        "reboot",
+        "started",
+        "cpu",
+        "operating_system",
+        "timeout_create",
+        "delete_unreferenced_disks_on_destroy",
+        "efi_disk",
+        "timeout_clone",
+        "reboot_after_update",
+        "timeout_shutdown_vm",
+        "timeout_migrate",
+        "timeout_move_disk",
+        "serial_device",
+        "smbios",
+        "timeout_stop_vm",
+        "bios",
+        "tablet_device",
+        "usb",
+        "rng",
+        "tpm_state",
+        "machine",
+        "initialization",
+        "stop_on_destroy",
+        "description",
+        "timeout_start_vm",
+        "cdrom",
+        "clone",
+        "watchdog",
+        "keyboard_layout",
+        "template",
+        "hostpci",
+        "audio_device",
+        "pool_id",
+        "agent",
+        "startup",
+        "protection",
+        "memory",
+        "on_boot"
+      ],
+      "safe_differences": {
+        "boot_order": {
+          "before": null,
+          "after": [
+            "sata0"
+          ]
+        },
+        "tags": {
+          "before": null,
+          "after": [
+            "range-lan",
+            "scenario",
+            "p100",
+            "p100t005",
+            "terraform"
+          ]
+        },
+        "started": {
+          "before": null,
+          "after": true
+        },
+        "operating_system": {
+          "before": null,
+          "after": [
+            {
+              "type": "win11"
+            }
+          ]
+        },
+        "serial_device": {
+          "before": null,
+          "after": []
+        },
+        "bios": {
+          "before": null,
+          "after": "ovmf"
+        },
+        "tablet_device": {
+          "before": null,
+          "after": true
+        },
+        "machine": {
+          "before": null,
+          "after": "pc-q35-9.2+pve1"
+        },
+        "stop_on_destroy": {
+          "before": null,
+          "after": true
+        },
+        "description": {
+          "before": null,
+          "after": "Scenario VM managed by CRANGE Terraform"
+        },
+        "cdrom": {
+          "before": null,
+          "after": [
+            {
+              "enabled": false,
+              "file_id": "none",
+              "interface": "ide2"
+            }
+          ]
+        },
+        "keyboard_layout": {
+          "before": null,
+          "after": "en-us"
+        },
+        "agent": {
+          "before": null,
+          "after": [
+            {
+              "enabled": true,
+              "timeout": "5m",
+              "trim": false,
+              "type": "virtio",
+              "wait_for_ip": []
+            }
+          ]
+        },
+        "on_boot": {
+          "before": null,
+          "after": false
+        }
+      },
+      "before": {},
+      "after": {
+        "node_name": "proxmox6",
+        "name": "p100t005-assessor-win-j04",
+        "network_device": [
+          {
+            "bridge": "p100t005",
+            "disconnected": null,
+            "enabled": true,
+            "firewall": true,
+            "model": "e1000",
+            "mtu": 1450,
+            "queues": 0,
+            "rate_limit": 0,
+            "trunks": null,
+            "vlan_id": 0
+          }
+        ],
+        "clone": [
+          {
+            "datastore_id": null,
+            "full": false,
+            "node_name": "proxmox6",
+            "retries": 1,
+            "vm_id": 219
+          }
+        ],
+        "disk": [],
+        "cpu": [
+          {
+            "affinity": null,
+            "architecture": null,
+            "cores": 2,
+            "flags": null,
+            "hotplugged": 0,
+            "limit": 0,
+            "numa": false,
+            "sockets": 1,
+            "type": "x86-64-v2-AES"
+          }
+        ],
+        "memory": [
+          {
+            "dedicated": 4096,
+            "floating": 0,
+            "hugepages": null,
+            "keep_hugepages": false,
+            "shared": 0
+          }
+        ]
+      }
+    }
+  ]
+}

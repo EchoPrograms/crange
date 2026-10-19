@@ -2,7 +2,7 @@
 - name: Validate assigned database address
   ansible.builtin.assert:
     that:
-      - mhl_network_id | int in [1, 2, 3, 4, 5, 254]
+      - (mhl_network_id | int in [1, 2, 3, 4, 5, 254]) or ((mhl_test_scope | default(false) | bool) and (1 <= mhl_network_id | int <= 253))
       - ansible_host == '10.100.' ~ (mhl_network_id | string) ~ '.30'
       - mhl_db_runtime_password is defined
       - mhl_db_runtime_password is match('^[A-Za-z0-9_-]{20,128}$')
@@ -10,7 +10,7 @@
 
 - name: Install PostgreSQL and Python driver
   ansible.builtin.apt:
-    name: [postgresql, python3-psycopg2]
+    name: [postgresql, python3-psycopg2, sudo]
     state: present
     update_cache: true
     cache_valid_time: 3600
@@ -52,6 +52,23 @@
     name: postgresql
     enabled: true
     state: started
+
+- name: Apply pending PostgreSQL configuration before database setup
+  ansible.builtin.meta: flush_handlers
+
+- name: Read the active PostgreSQL listen address
+  community.postgresql.postgresql_query:
+    db: postgres
+    query: SHOW listen_addresses
+  become_user: postgres
+  register: mhl_active_listen
+  changed_when: false
+
+- name: Activate configuration left pending by an interrupted prior run
+  ansible.builtin.service:
+    name: postgresql
+    state: restarted
+  when: mhl_active_listen.query_result[0].listen_addresses != mhl_db_ip
 
 - name: Create runtime database role with deliberately excessive CREATEDB privilege
   community.postgresql.postgresql_user:

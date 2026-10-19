@@ -10,6 +10,7 @@ variable "resolved_placements" {
     verified_local_cache = optional(bool, false)
     disk_gb              = optional(number)
     image_id             = optional(string, "")
+    machine              = optional(string)
   }))
   default = {}
   validation {

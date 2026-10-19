@@ -2,11 +2,31 @@
   "guacamoleVersion": "1.6.0",
   "name": "CRANGE interface",
   "namespace": "crange-theme",
-  "css": ["theme.css"],
-  "js": ["native-inventory.js", "ui.js"],
+  "css": [
+    "theme.css",
+    "workspace.css"
+  ],
+  "js": [
+    "auth-launch.js",
+    "native-inventory.js",
+    "ui.js",
+    "workspace.js"
+  ],
   "resources": {
-    "assets/remote-access.svg": "image/svg+xml"
+    "assets/remote-access.svg": "image/svg+xml",
+    "assets/fonts/IBMPlexMono-Regular.woff2": "font/woff2",
+    "assets/remote-access-192.png": "image/png",
+    "assets/fonts/IBMPlexSans-Regular.woff2": "font/woff2",
+    "assets/fonts/IBMPlexSans-Medium.woff2": "font/woff2",
+    "assets/fonts/IBMPlexSans-SemiBold.woff2": "font/woff2",
+    "assets/fonts/IBMPlexSans-Bold.woff2": "font/woff2",
+    "assets/os/linux.svg": "image/svg+xml",
+    "assets/os/freebsd.svg": "image/svg+xml"
   },
-  "authProviders": ["org.crange.guac.CrangeBridgeProvider"],
-  "translations": ["translations/en.json"]
+  "authProviders": [
+    "org.crange.guac.CrangeBridgeProvider"
+  ],
+  "translations": [
+    "translations/en.json"
+  ]
 }

@@ -2,7 +2,7 @@
   "schema_version": 1,
   "project_id": 100,
   "project_name": "Meridian Harbor Logistics",
-  "status": "partially_declared_waiting_for_router_acceptance_and_windows_image",
+  "status": "staging_configured_preparing_corrected_release_0.1.2",
   "domain": "mhl.test",
   "team_networks": {
     "staging": {
@@ -26,9 +26,8 @@
       "hostname": "MHL-DC01",
       "ip_last_octet": 10,
       "os": "Windows Server 2025 Desktop Experience",
-      "status": "pending_image_publication",
-      "required_image": null,
-      "blocker": "Windows source VM 115 has not completed the Windows-specific immutable publication and fresh-clone identity checks."
+      "status": "staging_deployed_configured",
+      "required_image": "mhl-windows-server-2025-base-p100-v1"
     },
     {
       "key": "mhl-file01",
@@ -36,9 +35,8 @@
       "hostname": "MHL-FS01",
       "ip_last_octet": 20,
       "os": "Windows Server 2025 Desktop Experience",
-      "status": "pending_image_publication",
-      "required_image": null,
-      "blocker": "Windows source VM 115 has not completed the Windows-specific immutable publication and fresh-clone identity checks."
+      "status": "staging_deployed_configured",
+      "required_image": "mhl-windows-server-2025-base-p100-v1"
     },
     {
       "key": "mhl-db01",
@@ -46,10 +44,9 @@
       "hostname": "MHL-DB01",
       "ip_last_octet": 30,
       "os": "Debian 12 LXC",
-      "status": "declared_not_applied",
+      "status": "staging_deployed_configured",
       "logical_image_id": "debian-12-router-v1",
       "archive": "crange-library:vztmpl/debian-12-standard_12.12-1_amd64.tar.zst",
-      "blocker": "The CT is declared in Team 0 desired state. Deployment remains pending exact router/network acceptance; no plan or apply has been run.",
       "template_alias": "mhl-debian12-stock",
       "health_checks": [
         {
@@ -64,7 +61,7 @@
       "hostname": "MHL-APP01",
       "ip_last_octet": 40,
       "os": "Debian 12 LXC",
-      "status": "declared_not_applied",
+      "status": "staging_deployed_configured",
       "logical_image_id": "debian-12-router-v1",
       "archive": "crange-library:vztmpl/debian-12-standard_12.12-1_amd64.tar.zst",
       "health_checks": [
@@ -73,7 +70,6 @@
           "timeout": 5
         }
       ],
-      "blocker": "The CT is declared in Team 0 desired state. Deployment remains pending exact router/network acceptance; no plan or apply has been run.",
       "template_alias": "mhl-debian12-stock"
     },
     {
@@ -82,16 +78,29 @@
       "hostname": "MHL-CI01",
       "ip_last_octet": 50,
       "os": "Debian 12 LXC",
-      "status": "declared_not_applied",
+      "status": "staging_deployed_configured",
       "logical_image_id": "debian-12-router-v1",
       "archive": "crange-library:vztmpl/debian-12-standard_12.12-1_amd64.tar.zst",
       "health_checks": [
         {
           "type": "ping",
           "timeout": 5
+        },
+        {
+          "type": "http",
+          "port": 80,
+          "path": "/",
+          "status": 200,
+          "timeout": 10
+        },
+        {
+          "type": "http",
+          "port": 80,
+          "path": "/artifacts/warehouse-release.env",
+          "status": 200,
+          "timeout": 10
         }
       ],
-      "blocker": "The CT is declared in Team 0 desired state. Deployment remains pending exact router/network acceptance; no plan or apply has been run.",
       "template_alias": "mhl-debian12-stock"
     },
     {
@@ -100,10 +109,9 @@
       "hostname": "MHL-BKP01",
       "ip_last_octet": 60,
       "os": "Debian 12 LXC",
-      "status": "declared_not_applied",
+      "status": "staging_deployed_configured",
       "logical_image_id": "debian-12-router-v1",
       "archive": "crange-library:vztmpl/debian-12-standard_12.12-1_amd64.tar.zst",
-      "blocker": "The CT is declared in Team 0 desired state. Deployment remains pending exact router/network acceptance; no plan or apply has been run.",
       "template_alias": "mhl-debian12-stock",
       "health_checks": [
         {
@@ -136,8 +144,8 @@
       "services": [
         "rdp"
       ],
-      "status": "pending_image_publication",
-      "image_id": null
+      "status": "approved_base_ready_not_declared",
+      "image_id": "mhl-windows-server-2025-base-p100-v1"
     },
     {
       "team_id": 1,
@@ -161,8 +169,8 @@
       "services": [
         "rdp"
       ],
-      "status": "pending_image_publication",
-      "image_id": null
+      "status": "approved_base_ready_not_declared",
+      "image_id": "mhl-windows-server-2025-base-p100-v1"
     },
     {
       "team_id": 2,
@@ -186,8 +194,8 @@
       "services": [
         "rdp"
       ],
-      "status": "pending_image_publication",
-      "image_id": null
+      "status": "approved_base_ready_not_declared",
+      "image_id": "mhl-windows-server-2025-base-p100-v1"
     },
     {
       "team_id": 2,
@@ -211,8 +219,8 @@
       "services": [
         "rdp"
       ],
-      "status": "pending_image_publication",
-      "image_id": null
+      "status": "approved_base_ready_not_declared",
+      "image_id": "mhl-windows-server-2025-base-p100-v1"
     },
     {
       "team_id": 3,
@@ -236,8 +244,8 @@
       "services": [
         "rdp"
       ],
-      "status": "pending_image_publication",
-      "image_id": null
+      "status": "approved_base_ready_not_declared",
+      "image_id": "mhl-windows-server-2025-base-p100-v1"
     },
     {
       "team_id": 3,
@@ -261,8 +269,8 @@
       "services": [
         "rdp"
       ],
-      "status": "pending_image_publication",
-      "image_id": null
+      "status": "approved_base_ready_not_declared",
+      "image_id": "mhl-windows-server-2025-base-p100-v1"
     },
     {
       "team_id": 4,
@@ -286,8 +294,8 @@
       "services": [
         "rdp"
       ],
-      "status": "pending_image_publication",
-      "image_id": null
+      "status": "approved_base_ready_not_declared",
+      "image_id": "mhl-windows-server-2025-base-p100-v1"
     },
     {
       "team_id": 4,
@@ -311,8 +319,8 @@
       "services": [
         "rdp"
       ],
-      "status": "pending_image_publication",
-      "image_id": null
+      "status": "approved_base_ready_not_declared",
+      "image_id": "mhl-windows-server-2025-base-p100-v1"
     },
     {
       "team_id": 5,
@@ -336,8 +344,8 @@
       "services": [
         "rdp"
       ],
-      "status": "pending_image_publication",
-      "image_id": null
+      "status": "approved_base_ready_not_declared",
+      "image_id": "mhl-windows-server-2025-base-p100-v1"
     },
     {
       "team_id": 5,
@@ -361,8 +369,8 @@
       "services": [
         "rdp"
       ],
-      "status": "pending_image_publication",
-      "image_id": null
+      "status": "approved_base_ready_not_declared",
+      "image_id": "mhl-windows-server-2025-base-p100-v1"
     }
   ],
   "assessor_users": [
@@ -570,5 +578,6 @@
       }
     ],
     "verification": "All ten accounts were confirmed in the Guacamole user API with zero connection grants and self-password UPDATE disabled."
-  }
+  },
+  "updated_at": "2026-10-14"
 }

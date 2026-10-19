@@ -63,7 +63,7 @@ def proxmox_console_url(origin, vmid):
 def box_status(data, *, auth, root):
     """Called only after the Unix socket verifies the web service's peer UID."""
     from crange_guac_bridge import _project_rows
-    from crange_guac_boxes import resource_key, resolve
+    from crange_guac_boxes import resource_key
     from crange_guac_users import valid_username
     project = data.get('project')
     if isinstance(project, bool) or not isinstance(project, int) or not 1 <= project <= 255:
@@ -72,9 +72,31 @@ def box_status(data, *, auth, root):
     key = resource_key(data.get('resource_key'))
     if not any(row['resource_key'] == key for row in _project_rows(auth, root, project, username)):
         raise TicketError('Box access denied.')
-    _path, _cfg, _box, api, kind, node, vmid, _address = resolve(project, key)
-    state = (api.container_status if kind == 'container' else api.status)(node, vmid)
-    return {'resource_key': key, 'state': state}
+    rows = _project_rows(auth, root, project, username, include_state=True)
+    row = next(row for row in rows if row['resource_key'] == key)
+    return {k:row.get(k) for k in ('resource_key','state','power_error','observed_at')}
+
+
+
+def console_ticket(data, *, auth, root, secret_hex):
+    from crange_guac_bridge import _project_rows
+    from crange_guac_boxes import resolve
+    from crange_guac_ticket import encrypt_ticket
+    from crange_console import launch
+    from urllib.parse import urlencode
+    import base64
+    project,username,key=data['project'],data.get('username'),data.get('resource_key')
+    rows=_project_rows(auth,root,project,username)
+    if not any(row['resource_key']==key and row.get('console_available') for row in rows):
+        raise TicketError('Administrator console access denied.')
+    _path,_cfg,_box,api,kind,node,vmid,_address=resolve(project,key)
+    connection=launch(api,node,vmid,kind=kind)
+    payload={'username':username,'expires':int((time.time()+45)*1000),
+             'connections':{'Console':{'protocol':connection['protocol'],'parameters':connection['parameters']}}}
+    token=encrypt_ticket(payload,secret_hex)
+    origin=os.environ.get('CRANGE_GUAC_PUBLIC_URL','https://crguac.brogano.dev').rstrip('/')
+    identifier=base64.b64encode(b'Console\x00c\x00json').decode()
+    return {'url':origin+'/#/client/'+identifier+'?'+urlencode({'data':token,'token':''})}
 
 
 def native_inventory(username, data_source):
@@ -117,15 +139,17 @@ def native_inventory(username, data_source):
 
     from crange import ProxmoxAPI
     api = ProxmoxAPI()
+    # This is an interactive read, not a long-running infrastructure job.
+    api.request_timeout, api.read_attempts = 2, 1
     by_address = _live_native_guest_index(api)
     for row in rows:
         matches = by_address.get(row['hostname'], [])
         if len(matches) == 1:
             guest = matches[0]
             prefix = 'qemu' if guest['kind'] == 'qemu' else 'lxc'
-            status = (api.request('GET', f"/nodes/{guest['node']}/{prefix}/{guest['vmid']}/status/current") or {}).get('status')
+            status = guest.get('state', 'unknown')
             row.update({'guest_type': 'VM' if guest['kind'] == 'qemu' else 'Container',
-                        'state': status if status in ('running', 'stopped') else 'unknown',
+                        'state': status, 'guest_os': guest.get('guest_os', ''),
                         'guest_name': guest['guest_name']})
             row['guest_matched'] = True
         else:
@@ -141,14 +165,19 @@ def _live_native_guest_index(api):
     with _native_guest_cache_lock:
         if _native_guest_cache['expires'] > now:
             return _native_guest_cache['addresses']
+        online = {item['node'] for item in (api.request('GET', '/nodes') or []) if item.get('status') == 'online'}
         resources = api.request('GET', '/cluster/resources', {'type': 'vm'}) or []
         records = []
         for resource in resources:
             node, vmid, kind = resource.get('node'), int(resource.get('vmid', 0)), resource.get('type')
-            if kind not in ('qemu', 'lxc') or not node or not vmid:
+            if kind not in ('qemu', 'lxc') or node not in online or not vmid or int(resource.get('template', 0)) == 1:
                 continue
             prefix = 'qemu' if kind == 'qemu' else 'lxc'
-            config = api.request('GET', f'/nodes/{node}/{prefix}/{vmid}/config') or {}
+            try:
+                config = api.request('GET', f'/nodes/{node}/{prefix}/{vmid}/config') or {}
+            except Exception:
+                # A guest can disappear, or a node fail, after the cluster list.
+                continue
             if int(config.get('template', 0)) == 1:
                 continue
             guest_name = str(config.get('name' if kind == 'qemu' else 'hostname') or resource.get('name') or '')
@@ -168,13 +197,14 @@ def _live_native_guest_index(api):
                 for key, value in config.items():
                     if key.startswith('ipconfig') and isinstance(value, str):
                         addresses.update(re.findall(r'(?:^|,)ip=([0-9.]+)(?:/|,|$)', value))
-            records.append((node, vmid, kind, guest_name, addresses))
-        for node, vmid, kind, _guest_name, addresses in records:
-            if kind == 'qemu':
+            state = resource.get('status', 'unknown')
+            state = state if state in ('running', 'stopped') else 'unknown'
+            ostype = str(config.get('ostype', '')).lower()
+            guest_os = 'linux' if kind == 'lxc' or ostype.startswith(('l2', 'l6')) else 'windows' if ostype.startswith('win') or ostype in ('wxp', 'w2k', 'w2k8', 'wvista') else 'bsd' if 'bsd' in ostype else ''
+            records.append((node, vmid, kind, guest_name, addresses, state, guest_os, config.get('agent')))
+        for node, vmid, kind, _guest_name, addresses, state, _guest_os, agent_enabled in records:
+            if kind == 'qemu' and state == 'running' and agent_enabled and not addresses:
                 try:
-                    status = (api.request('GET', f'/nodes/{node}/qemu/{vmid}/status/current') or {}).get('status')
-                    if status != 'running':
-                        continue
                     agent = api.request('GET', f'/nodes/{node}/qemu/{vmid}/agent/network-get-interfaces') or {}
                     for iface in agent.get('result', []):
                         for address in iface.get('ip-addresses', []):
@@ -184,11 +214,11 @@ def _live_native_guest_index(api):
                 except Exception:
                     pass
         index = {}
-        for node, vmid, kind, guest_name, addresses in records:
+        for node, vmid, kind, guest_name, addresses, state, guest_os, _agent in records:
             for address in addresses:
                 index.setdefault(address, []).append({
-                    'kind': kind, 'node': node, 'vmid': vmid, 'guest_name': guest_name})
-        _native_guest_cache.update({'expires': now + 15.0, 'addresses': index})
+                    'kind': kind, 'node': node, 'vmid': vmid, 'guest_name': guest_name, 'state': state, 'guest_os': guest_os})
+        _native_guest_cache.update({'expires': time.monotonic() + 15.0, 'addresses': index})
         return index
 
 
@@ -232,16 +262,45 @@ def serve():
                     reply = {'connections': native_inventory(data.get('username'), data.get('data_source'))}
                     self.wfile.write(json.dumps(reply, separators=(',', ':')).encode() + b'\n')
                     return
+                if operation in ('guac-power-status','cluster-status'):
+                    from crange_live_status import observe
+                    if operation == 'cluster-status':
+                        auth = AuthStore(auth_path)
+                        session = auth.session(data.get('session'))
+                        if not session or not session['admin']:
+                            raise TicketError('Administrator access required.')
+                        observed = observe()
+                        reply = {k:v for k,v in observed.items() if k!='resources'}
+                    else:
+                        from crange import ENVS
+                        from crange_guac_bridge import _project_rows
+                        from crange_guac_users import valid_username
+                        from crange_live_status import box_states
+                        username = valid_username(data.get('username')); auth = AuthStore(auth_path)
+                        rows=[]
+                        for path in sorted(ENVS.glob('project-[0-9][0-9][0-9]')):
+                            if (repo_root/'guacamole/access'/f'{path.name}.applied.json').is_file():
+                                try:
+                                    rows.extend(_project_rows(auth,repo_root,int(path.name[-3:]),username))
+                                except (OSError, ValueError, TicketError):
+                                    continue  # One unreadable project must not hide all authorized status.
+                        reply = {'boxes':[{k:row.get(k) for k in ('project','resource_key','state','power_error','observed_at')} for row in box_states(rows)]}
+                    self.wfile.write(json.dumps(reply,separators=(',',':')).encode()+b'\n')
+                    return
                 project_id = data.get('project')
                 if isinstance(project_id, bool) or not isinstance(project_id, int) or not 1 <= project_id <= 255:
                     raise TicketError('Invalid project.')
                 auth = AuthStore(auth_path)
+                if operation=='guac-console-ticket':
+                    reply=console_ticket(data,auth=auth,root=repo_root,secret_hex=secret)
+                    self.wfile.write(json.dumps(reply,separators=(',',':')).encode()+b'\n')
+                    return
                 if operation in ('guac-box-status', 'guac-box-list'):
                     if operation == 'guac-box-list':
                         from crange_guac_bridge import _project_rows
                         from crange_guac_users import valid_username
                         username = valid_username(data.get('username'))
-                        reply = {'boxes': _project_rows(auth, repo_root, project_id, username)}
+                        reply = {'boxes': _project_rows(auth, repo_root, project_id, username, include_state=True)}
                     else:
                         reply = box_status(data, auth=auth, root=repo_root)
                     self.wfile.write(json.dumps(reply, separators=(',', ':')).encode() + b'\n')
@@ -260,8 +319,8 @@ def serve():
                 if operation == 'template-options':
                     session = auth.session(session_token)
                     if not session or not session['admin']:raise TicketError('Administrator access required.')
-                    from crange_templates import options
-                    reply = options()
+                    from crange_template_inventory import snapshot
+                    reply = snapshot(force=data.get('refresh') is True)
                     from crange_template_media import pending
                     reply['uploads'] = pending(session['username'])
                     reply['console_base'] = public_proxmox_origin()

@@ -1,0 +1,59 @@
+{
+  "project": 100,
+  "users": [
+    {
+      "login": "p100-t001u01",
+      "actual_native_password_login_passed": true,
+      "self_password_update_not_granted": true
+    },
+    {
+      "login": "p100-t001u02",
+      "actual_native_password_login_passed": true,
+      "self_password_update_not_granted": true
+    },
+    {
+      "login": "p100-t002u01",
+      "actual_native_password_login_passed": true,
+      "self_password_update_not_granted": true
+    },
+    {
+      "login": "p100-t002u02",
+      "actual_native_password_login_passed": true,
+      "self_password_update_not_granted": true
+    },
+    {
+      "login": "p100-t003u01",
+      "actual_native_password_login_passed": true,
+      "self_password_update_not_granted": true
+    },
+    {
+      "login": "p100-t003u02",
+      "actual_native_password_login_passed": true,
+      "self_password_update_not_granted": true
+    },
+    {
+      "login": "p100-t004u01",
+      "actual_native_password_login_passed": true,
+      "self_password_update_not_granted": true
+    },
+    {
+      "login": "p100-t004u02",
+      "actual_native_password_login_passed": true,
+      "self_password_update_not_granted": true
+    },
+    {
+      "login": "p100-t005u01",
+      "actual_native_password_login_passed": true,
+      "self_password_update_not_granted": true
+    },
+    {
+      "login": "p100-t005u02",
+      "actual_native_password_login_passed": true,
+      "self_password_update_not_granted": true
+    }
+  ],
+  "all_ten_native_password_logins_passed": true,
+  "test_sessions_revoked": true,
+  "no_password_or_token_values_recorded": true,
+  "effective_workstation_and_desktop_acceptance_pending": true
+}

@@ -1,0 +1,29 @@
+{
+  "observed_at": "2026-10-18T18:40:00Z",
+  "node": "proxmox6",
+  "controller": "HPE Smart Array P420i, embedded slot 0",
+  "firmware": "8.00",
+  "read_only_command": "controller all show config detail",
+  "tool_source": "https://downloads.linux.hpe.com/SDR/repo/mcp/debian/pool/non-free/ssacli-6.15-11.0_amd64.deb",
+  "tool_package_sha256": "9c296720f36be148316690de8b45c542a3c54f87e6fc32d2a93d1d4351aee2b5",
+  "package_installed": false,
+  "temporary_extraction_removed": true,
+  "reported": {
+    "controller_status": "OK",
+    "cache_status": "Permanently Disabled",
+    "cache_status_details": "Cache disabled; backup power source failed to charge to an acceptable level",
+    "cache_disable_reason": "Permanent disable condition. The posted write cache has been disabled because the backup power source attached to the flash-backed write cache module has failed to charge.",
+    "cache_backup_power_source": "Capacitors",
+    "battery_capacitor_count": 1,
+    "battery_capacitor_status": "Failed (Replace Batteries)",
+    "drive_write_cache": "Disabled",
+    "no_battery_write_cache": "Disabled",
+    "logical_drive_caching": "Disabled on both observed logical drives",
+    "all_eight_physical_drives": "OK",
+    "logical_drive_unrecoverable_media_errors": "None"
+  },
+  "configuration_changes": false,
+  "unsafe_write_cache_override": false,
+  "required_hardware_remediation": "Replace failed controller cache backup capacitor/power module; verify protected cache health afterward.",
+  "evidence_recorded_at": "2026-10-18T18:46:21.030318+00:00"
+}

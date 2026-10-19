@@ -1,0 +1,308 @@
+{
+  "date": "2026-10-19",
+  "scope": "UI only; no guest infrastructure changes",
+  "deployed": {
+    "controller": true,
+    "guacamole": true,
+    "guacamole_jar_sha256": "d8589f9ced954cfbe3ff8179adeabf8775ad416607c921387590ef9299d9342c"
+  },
+  "browser": {
+    "deployed": true,
+    "dashboard": {
+      "font": "\"IBM Plex Sans\", \"Helvetica Neue\", Arial, sans-serif",
+      "fontSize": "13px",
+      "fieldFont": "\"IBM Plex Sans\", \"Helvetica Neue\", Arial, sans-serif",
+      "pickerInSidebar": true,
+      "guacInHeader": true,
+      "bodyOverflow": false,
+      "bodyWidth": 1440,
+      "loadedFonts": [
+        {
+          "family": "IBM Plex Sans",
+          "weight": "400"
+        },
+        {
+          "family": "IBM Plex Sans",
+          "weight": "500"
+        },
+        {
+          "family": "IBM Plex Sans",
+          "weight": "600"
+        },
+        {
+          "family": "IBM Plex Sans",
+          "weight": "700"
+        }
+      ],
+      "addressColor": "rgb(165, 203, 210)",
+      "formTitle": "Create VM",
+      "escapeClosed": true,
+      "mobileOverflow": false
+    },
+    "guacamole": {
+      "font": "\"IBM Plex Sans\", \"Helvetica Neue\", Arial, sans-serif",
+      "fontSize": "13px",
+      "rows": 36,
+      "icons": [
+        {
+          "rel": "apple-touch-icon",
+          "href": "http://127.0.0.1:28180/app/ext/crange-theme/assets/remote-access-192.png?v=2",
+          "sizes": "192x192"
+        },
+        {
+          "rel": "icon",
+          "href": "http://127.0.0.1:28180/app/ext/crange-theme/assets/remote-access.svg?v=2",
+          "sizes": "any"
+        }
+      ],
+      "loadedFonts": [
+        {
+          "family": "IBM Plex Sans",
+          "weight": "400"
+        },
+        {
+          "family": "IBM Plex Sans",
+          "weight": "600"
+        },
+        {
+          "family": "IBM Plex Sans",
+          "weight": "700"
+        }
+      ],
+      "statusColor": "rgb(139, 214, 160)",
+      "addressColor": "rgb(165, 203, 210)",
+      "protocol": {
+        "background": "rgb(237, 237, 237)",
+        "outline": "rgb(237, 237, 237)",
+        "icon": "rgb(36, 80, 59)"
+      },
+      "overflow": false,
+      "filteredRows": 1,
+      "preferenceGroups": [
+        "Appearance",
+        "Session",
+        "Account"
+      ],
+      "mobileOverflow": false
+    },
+    "errors": []
+  },
+  "additional_checks": {
+    "server_rows": 36,
+    "native_advanced_controls": true,
+    "escape_closes_form": true,
+    "mobile_horizontal_overflow": {
+      "controller": false,
+      "guacamole": false
+    },
+    "font_delivery_sha256_verified": true,
+    "guest_power_or_password_actions_executed": false
+  },
+  "documentation": "../interface-audit-2026-10-19.md",
+  "isolated_functional_check": {
+    "isolatedFixture": true,
+    "productionWrites": 0,
+    "checks": [
+      {
+        "view": "overview",
+        "heading": "Overview",
+        "alert": ""
+      },
+      {
+        "view": "projects",
+        "heading": "Projects",
+        "alert": ""
+      },
+      {
+        "view": "project-overview",
+        "heading": "Meridian Lab (p100)",
+        "alert": ""
+      },
+      {
+        "view": "teams",
+        "heading": "Teams",
+        "alert": ""
+      },
+      {
+        "view": "scenario",
+        "heading": "Scenario",
+        "alert": ""
+      },
+      {
+        "view": "project-users",
+        "heading": "Users",
+        "alert": ""
+      },
+      {
+        "view": "users",
+        "heading": "CRANGE Users",
+        "alert": ""
+      },
+      {
+        "view": "jobs",
+        "heading": "Jobs",
+        "alert": ""
+      },
+      {
+        "view": "cluster",
+        "heading": "Cluster",
+        "alert": ""
+      },
+      {
+        "view": "templates",
+        "heading": "Templates",
+        "alert": ""
+      },
+      {
+        "createProject": {
+          "project": 102,
+          "operation": "project-init",
+          "options": {}
+        }
+      },
+      {
+        "rename": {
+          "project": 100,
+          "display_name": "Renamed lab"
+        },
+        "title": "Renamed lab (p100)"
+      },
+      {
+        "initialUsers": "\tUsername\tAccount\tAssigned jump boxes\tPassword reset\n\tfixture-a\tEnabled\t0\tNot allowed"
+      },
+      {
+        "switchedUsers": "\tUsername\tAccount\tAssigned jump boxes\tPassword reset\n\tfixture-b\tEnabled\t0\tNot allowed"
+      },
+      {
+        "racedUsers": "\tUsername\tAccount\tAssigned jump boxes\tPassword reset\n\tfixture-b\tEnabled\t0\tNot allowed"
+      },
+      {
+        "vmForm": [
+          {
+            "name": "name",
+            "value": "web-01",
+            "type": "text",
+            "hidden": false
+          },
+          {
+            "name": "network",
+            "value": "",
+            "type": "select-one",
+            "hidden": false
+          },
+          {
+            "name": "ip",
+            "value": "2",
+            "type": "number",
+            "hidden": false
+          },
+          {
+            "name": "template",
+            "value": "approved-base",
+            "type": "select-one",
+            "hidden": false
+          },
+          {
+            "name": "node",
+            "value": "auto",
+            "type": "hidden",
+            "hidden": true
+          },
+          {
+            "name": "preferred_node",
+            "value": "",
+            "type": "select-one",
+            "hidden": false
+          },
+          {
+            "name": "cores",
+            "value": "2",
+            "type": "number",
+            "hidden": false
+          },
+          {
+            "name": "memory",
+            "value": "2048",
+            "type": "number",
+            "hidden": false
+          },
+          {
+            "name": "guac_protocols",
+            "value": "ssh",
+            "type": "select-multiple",
+            "hidden": false
+          }
+        ]
+      },
+      {
+        "invalidHealth": "Health checks must be valid JSON."
+      },
+      {
+        "vmWrite": {
+          "project": 100,
+          "operation": "scenario-add",
+          "options": {
+            "name": "fixture-vm",
+            "network": "",
+            "team": 0,
+            "ip": 2,
+            "template": "approved-base",
+            "node": "auto",
+            "preferred_node": "",
+            "cores": 2,
+            "memory": 2048,
+            "guac_protocols": [
+              "ssh",
+              "vnc"
+            ],
+            "health": [
+              {
+                "type": "tcp",
+                "port": 80
+              }
+            ]
+          }
+        },
+        "message": ""
+      },
+      {
+        "jobPage": "60 completed jobs \u00b7 Page 1 of 3\nProject filter\nAll projects\nRenamed lab\nAnother project with a considerably longer display name\nJobs per page\n10\n25\n50\n100\nFirst\nPrevious\nNext\nLast"
+      },
+      {
+        "mobileOverflow": false,
+        "pickerInSidebar": 1,
+        "guacInHeader": 1
+      },
+      {
+        "emptyProjects": "No projects available"
+      },
+      {
+        "failure": "Could not load the workspace: Fixture service unavailable."
+      },
+      {
+        "participantPicker": true,
+        "participantAdminNav": false,
+        "participantProjectNav": false
+      }
+    ],
+    "errors": [],
+    "writes": 3
+  },
+  "semantic_contrast": {
+    "body": 16.81,
+    "secondary": 8.21,
+    "address": 10.59,
+    "healthy": 10.72,
+    "warning": 10.72,
+    "error": 8.28,
+    "info": 8.88,
+    "SSH icon": 7.85,
+    "RDP icon": 7.19,
+    "VNC icon": 6.42
+  },
+  "limits": [
+    "No infrastructure writes or guest power/password changes were tested against live resources.",
+    "Guacamole still displayed its existing native-connection verification warning while its 36 managed server entries and protocol buttons remained available.",
+    "A live template-catalog read exceeded the 20-second UI-audit request budget; template-view coverage used an isolated API fixture."
+  ]
+}

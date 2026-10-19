@@ -1,0 +1,14 @@
+{
+  "scenario_vm_container_icons": 6,
+  "staging_team_vm_container_icons": 6,
+  "team_1_jumpbox_icons": 2,
+  "remote_access_hidden_in_more_menu": false,
+  "monitor_icon": true,
+  "opens_existing_settings_dialog": true,
+  "mutating_requests": [],
+  "javascript_errors": [],
+  "live_assets": true,
+  "verified_at": "2026-10-16T22:52:45.064181+00:00",
+  "app_sha256": "7f010b3a9dc31e14e0c20cf781bba1cf0b3ff1c4ff9cee5421852e82334d42fa",
+  "worker_pid_unchanged": true
+}

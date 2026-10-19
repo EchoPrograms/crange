@@ -1,0 +1,21 @@
+{
+  "cache_job": "cache-92286976fec94a8da363baebe8b5adaf",
+  "dashboard_job": "609d1dcbced24ccbb72ec633535ef1a3",
+  "state": "ready",
+  "template_id": 162,
+  "probe_id": 160,
+  "probe_absent": true,
+  "all_provider_tasks_terminal": true,
+  "pin_absent": true,
+  "reservation_state": "released",
+  "published_replicas": [
+    {
+      "node": "proxmox5",
+      "template_id": 162,
+      "state": "ready",
+      "clone_modes_verified": [
+        "linked"
+      ]
+    }
+  ]
+}

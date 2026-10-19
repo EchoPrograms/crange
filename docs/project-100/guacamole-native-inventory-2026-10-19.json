@@ -1,0 +1,38 @@
+{
+  "date": "2026-10-19",
+  "scope": "Guacamole display and read-only inventory; no guest configuration changes",
+  "jar_sha256": "0dfa12f2ab672a888aeffc3a7075ca4fe9081b5209f66ead663b14ddc599aa8d",
+  "native_inventory": {
+    "authenticated_bridge_http": 200,
+    "permitted_connections": 36,
+    "guest_matches": 33,
+    "cold_seconds": 3.06,
+    "warm_seconds": 0.13,
+    "offline_node": "proxmox1",
+    "offline_node_does_not_abort_inventory": true
+  },
+  "ui": {
+    "server_name_px": 14,
+    "metadata_px": 13,
+    "connection_icon_px": 16,
+    "os_icon_px": 19,
+    "desktop_button_px": 32,
+    "alignment": "center",
+    "protocol_icon_color": "inherits neutral button text",
+    "os_sources": [
+      "approved template profile",
+      "applied guest metadata",
+      "verified Proxmox ostype"
+    ],
+    "mobile_overflow": false
+  },
+  "tests": {
+    "native_inventory": 5,
+    "proxmox_api_retry": 13,
+    "guac_bridge": 10,
+    "frontend": [
+      "test_guac_ui.cjs",
+      "test_guac_workspace.cjs"
+    ]
+  }
+}

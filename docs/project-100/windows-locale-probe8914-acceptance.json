@@ -1,0 +1,159 @@
+{
+  "state": "two-independent-unattended-probes-ready",
+  "observed_at": "2026-10-08T20:30:34Z",
+  "source": {
+    "vmid": 8912,
+    "state": "stopped",
+    "never_booted_sealed_candidate": true,
+    "config_sha256": "5e9fdb9337ec631b74100dc1c1f47ffdfb02f8873b32ee6119b49bc7cef27e9d",
+    "source_identity": "intentionally absent; never-booted source has no observed MachineGuid or local machine SID"
+  },
+  "first_probe": {
+    "vmid": 8913,
+    "clone_upid": "UPID:proxmox4:001A58EE:1C39549A:6AC7EFDB:qmclone:8912:root@pam:",
+    "source_config_sha256": "5e9fdb9337ec631b74100dc1c1f47ffdfb02f8873b32ee6119b49bc7cef27e9d",
+    "state": "unattended-windows-ready",
+    "manual_interventions": [],
+    "identity": {
+      "os_caption": "Microsoft Windows Server 2025 Standard Evaluation",
+      "installation_type": "Server",
+      "os_version": "10.0.26100",
+      "os_build": "26100",
+      "computer_name": "MERIDIA-3FHD0CT",
+      "part_of_domain": false,
+      "machine_guid": "bc7e40b7-630a-4bdd-aed6-6657e4f25cdc",
+      "local_administrator_sid": "S-1-5-21-3977005292-1299864674-2150539454-500",
+      "machine_sid": "S-1-5-21-3977005292-1299864674-2150539454",
+      "image_state": "IMAGE_STATE_COMPLETE",
+      "oobe_in_progress": 0,
+      "system_setup_in_progress": 0,
+      "setup_type": 0,
+      "qemu_guest_agent": true,
+      "qemu_guest_agent_automatic": true,
+      "term_service_running": true,
+      "term_service_automatic": true,
+      "winrm_service_running": true,
+      "winrm_service_automatic": true,
+      "rdp_allowed_sources": [
+        "10.60.0.20"
+      ],
+      "os_family": "windows"
+    },
+    "collector_guest_pid": 3728,
+    "collector_exitcode": 0
+  },
+  "second_probe": {
+    "vmid": 8914,
+    "clone_upid": "UPID:proxmox4:001AAD9A:1C3C3419:6AC7F736:qmclone:8912:root@pam:",
+    "clone_task": {
+      "status": "stopped",
+      "exitstatus": "OK",
+      "task_id": "8912"
+    },
+    "clone_completed": true,
+    "source_config_unchanged": true,
+    "isolation_before_boot_verified": true,
+    "manual_interventions": [],
+    "booted": true,
+    "guest_id": 8914,
+    "live_state": "running",
+    "live_probe_config": {
+      "name": "crange-win-locale-proof-8914",
+      "pool": "crange-probes",
+      "description": "Unattended corrected-sealed8912 independent clone proof",
+      "agent": "1",
+      "boot": "order=sata0",
+      "cores": 4,
+      "memory_mib": 4096,
+      "net0": "e1000=BC:24:11:3A:C4:7E,bridge=crprobe1450,firewall=1,link_down=1",
+      "onboot": 0,
+      "sata0": "local-lvm:vm-8914-disk-1.raw,size=64G",
+      "smbios1": "uuid=b667586e-69d3-4503-95ba-3b981d1b3a41",
+      "tags": "crange-capture-windows-server2025-locale-20261008;crange-image;p100",
+      "vmgenid": "d1d60070-9d74-4e93-83c8-c6748b36b3e4"
+    },
+    "collector_guest_pid": 1372,
+    "collector_script_sha256": "7420b4c308a5bc807950105ebbb4233f95a692b2a2640e5271879f44571a9b31",
+    "collector_launch_count": 2,
+    "collector_terminal_response_observed": true,
+    "identity": {
+      "os_caption": "Microsoft Windows Server 2025 Standard Evaluation",
+      "installation_type": "Server",
+      "os_version": "10.0.26100",
+      "os_build": "26100",
+      "computer_name": "MERIDIA-7RS398T",
+      "part_of_domain": false,
+      "machine_guid": "97165798-6664-4262-83a9-47087ba1658f",
+      "local_administrator_sid": "S-1-5-21-1988556285-2669735155-2149193717-500",
+      "machine_sid": "S-1-5-21-1988556285-2669735155-2149193717",
+      "image_state": "IMAGE_STATE_COMPLETE",
+      "oobe_in_progress": 0,
+      "system_setup_in_progress": 0,
+      "setup_type": 0,
+      "qemu_guest_agent": true,
+      "qemu_guest_agent_automatic": true,
+      "term_service_running": true,
+      "term_service_automatic": true,
+      "winrm_service_running": true,
+      "winrm_service_automatic": true,
+      "rdp_allowed_sources": [
+        "10.60.0.20"
+      ],
+      "os_family": "windows"
+    },
+    "identity_status": "raw terminal QGA response saved to the protected P4 result file before parsing; scripts/crange_catalog.py source identity validation passed on the workspace copy",
+    "state": "unattended-windows-ready",
+    "collector_exitcode": 0,
+    "collector_result_file": "/var/lib/crange-template-builds/windows-locale-probe8914-qga-result.json",
+    "collector_result_persisted_before_validation": true,
+    "collector_launches": [
+      {
+        "guest_pid": 5072,
+        "script_sha256": "7420b4c308a5bc807950105ebbb4233f95a692b2a2640e5271879f44571a9b31",
+        "terminal_response_observed": true,
+        "result_saved": false,
+        "reason": "The host-side persistence step failed importing crange_catalog; same PID became unavailable."
+      },
+      {
+        "guest_pid": 1372,
+        "script_sha256": "7420b4c308a5bc807950105ebbb4233f95a692b2a2640e5271879f44571a9b31",
+        "terminal_response_observed": true,
+        "result_saved": true,
+        "exitcode": 0,
+        "recovery_authorization": "root authorized second read-only fixed collector after PID 5072 was confirmed terminal and unavailable"
+      }
+    ],
+    "collector_result_sha256": "cbf92fb28a34cd48fe74ea07091b0bf1ac6e8f28daab38fdd366fd9d19b2dc48",
+    "collector_result_permissions": "0600"
+  },
+  "comparison": {
+    "first_probe_identity_observed": true,
+    "second_probe_identity_observed": true,
+    "distinct_machine_guid_proven": true,
+    "distinct_machine_sid_proven": true,
+    "distinct_local_administrator_sid_proven": true,
+    "same_os_caption": true,
+    "same_os_build": true,
+    "both_desktop_experience": true,
+    "both_image_state_complete": true,
+    "all_setup_fields_zero": true,
+    "both_workgroup": true,
+    "both_qga_termservice_winrm_running_automatic": true,
+    "publication_ready": false,
+    "publication_blocker": "Existing guarded publication contract requires captured, config-bound source_identity; the never-booted sealed source has no actual historical MachineGuid or SID."
+  },
+  "provenance": {
+    "candidate_preparation": "docs/project-100/windows-locale-candidate-seal.json",
+    "durable_second_probe_journal": "/var/lib/crange-template-builds/windows-locale-probe8914.json",
+    "durable_journal_state": "unattended-windows-ready",
+    "durable_collector_guest_pid": 1372,
+    "durable_journal_supervisor_pid": 1748517,
+    "supervisor_live_state": "not running at handoff; terminal task status independently verified from Proxmox as OK",
+    "source_configuration_binding": "candidate_config_sha256 in acceptance journal and seal is 5e9fdb9337ec631b74100dc1c1f47ffdfb02f8873b32ee6119b49bc7cef27e9d",
+    "unattended_manual_intervention": "none recorded for either clone",
+    "durable_qga_result_file": "/var/lib/crange-template-builds/windows-locale-probe8914-qga-result.json",
+    "durable_qga_result_sha256": "cbf92fb28a34cd48fe74ea07091b0bf1ac6e8f28daab38fdd366fd9d19b2dc48",
+    "durable_qga_result_permissions": "0600",
+    "local_validation": "scripts/crange_catalog.validate_source_identity passed for both probe identities"
+  }
+}

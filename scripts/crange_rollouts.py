@@ -5,6 +5,7 @@ record separate events so a declared release is never reported as healthy.
 """
 import hashlib
 import json
+import json
 from copy import deepcopy
 from datetime import datetime, timezone
 
@@ -216,3 +217,41 @@ def plan_blockers(detail, cfg, teams):
         if not allowed:
             blockers.append(address)
     return sorted(set(blockers))
+
+
+def review_projection(cfg, teams):
+    """Include only recorded selected-team releases in placement preparation."""
+    selected = list(map(str, teams))
+    if (not selected or len(selected) != len(set(selected)) or
+            any(team not in set(map(str, cfg.get('team_ids', []))) for team in selected)):
+        raise ValueError('Choose configured ordinary teams without duplicates.')
+    result = deepcopy(cfg)
+    result['jump_boxes'] = {}
+    for field in FIELDS:
+        result[field] = {}
+    for team in selected:
+        record = cfg.get('release_rollouts', {}).get(team)
+        if not record:
+            raise ValueError(f'Team {team} has no declared release.')
+        verify_owned(cfg, team, record['desired'])
+        for field in FIELDS:
+            result[field].update(deepcopy(record['desired']['resources'][field]))
+    return result
+
+
+def review_targets(cfg, teams):
+    """Target recorded old and new release resources, including removals."""
+    review_projection(cfg, teams)  # Validate current ownership before targeting.
+    targets = {'proxmox_sdn_applier.apply', 'proxmox_sdn_applier.finalizer',
+               'terraform_data.sdn_revision'}
+    modules = {'scenario_boxes': 'scenario_box', 'scenario_containers': 'scenario_container',
+               'custom_networks': 'custom_router'}
+    for team in map(str, teams):
+        record = cfg['release_rollouts'][team]
+        for phase in ('applied', 'desired'):
+            for field, rows in record.get(phase, {}).get('resources', {}).items():
+                for key in rows:
+                    targets.add(f'module.{modules[field]}[{json.dumps(key)}]')
+                    if field == 'custom_networks':
+                        targets.add(f'proxmox_sdn_vnet.custom[{json.dumps(key)}]')
+    return sorted(targets)

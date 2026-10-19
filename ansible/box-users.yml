@@ -41,6 +41,21 @@
       no_log: true
       when: account_action in ['create', 'password']
 
+    - name: Ensure sudo is available before granting privileges
+      ansible.builtin.package:
+        name: sudo
+        state: present
+      when: account_action == 'grant-sudo'
+
+    - name: Ensure the managed sudo policy directory exists
+      ansible.builtin.file:
+        path: /etc/sudoers.d
+        state: directory
+        owner: root
+        group: root
+        mode: '0750'
+      when: account_action == 'grant-sudo'
+
     - name: Grant sudo through a managed policy
       ansible.builtin.copy:
         dest: '/etc/sudoers.d/crange-account-{{ account_name }}'

@@ -1,0 +1,21 @@
+{
+  "exact_dashboard_api_request": {
+    "project": 100,
+    "operation": "apply",
+    "options": {
+      "plan_id": "5613c70c92cea61d9bf5675253ed618d",
+      "allow_destroy": false,
+      "allow_replace": false
+    }
+  },
+  "job_id": "8fafed50dda9423b949aea82964f3a13",
+  "status_last_observed": "failed",
+  "infrastructure_completion_not_yet_accepted": true,
+  "guest_configuration_and_desktop_acceptance_pending": true,
+  "failure": "Terraform apply subprocess reached its 1800-second timeout.",
+  "created_workstations_observed": 7,
+  "created_windows": 7,
+  "created_linux": 0,
+  "active_provider_tasks_observed": [],
+  "fresh_review_required_before_retry": true
+}

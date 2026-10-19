@@ -29,6 +29,10 @@ class DistributionError(ValueError):
     pass
 
 
+class GuestAgentPermissionError(DistributionError):
+    """A QEMU Guest Agent request was explicitly rejected with HTTP 403."""
+
+
 def artifact_checksum(path: Path) -> str:
     digest = hashlib.sha256()
     with path.open('rb') as stream:
@@ -111,6 +115,12 @@ class _JournaledProbeAPI:
             if task.get('upid') == upid: task['state'] = 'confirmed-terminal'
         self.journal(dict(self.record))
 
+    def record_evidence(self, evidence):
+        """Persist protected verifier evidence before a caller parses it."""
+        rows = self.record.setdefault('verification_evidence', [])
+        rows.append(evidence)
+        self.journal(dict(self.record))
+
 
 class ReplicaWorker:
     """Journal reservations before submission; retain partial jobs on timeout.
@@ -119,7 +129,8 @@ class ReplicaWorker:
     must run reviewed disposable-clone readiness and identity checks and return
     {passed: true, identity_unique: true, ...}. It cannot be supplied by GUI input.
     """
-    def __init__(self, api, journal, verify, *, approved_storage, tested_paths=(), allocation_lock=None, hash_volume=None, reservation_validator=None, backing_verifier=None):
+    def __init__(self, api, journal, verify, *, approved_storage, tested_paths=(), allocation_lock=None, hash_volume=None, reservation_validator=None, backing_verifier=None, linked_storages=(), probe_candidate=None):
+        self.probe_candidate = probe_candidate
         self.backing_verifier = backing_verifier
         self.api, self.journal, self.verify = api, journal, verify
         self.allocation_lock = allocation_lock
@@ -128,11 +139,13 @@ class ReplicaWorker:
         self._active_record = None
         self.approved_storage = set(approved_storage)
         self.tested_paths = set(tested_paths)
+        self.linked_storages = {(n,s) for n,s in self.approved_storage if s=="local-lvm"} | (set(linked_storages) & self.approved_storage)
 
     def _config(self, node, kind, vmid):
         return self.api.request('GET', f'/nodes/{node}/{kind}/{vmid}/config')
 
     def _task(self, node, method, path, fields):
+        print(f'Submitting cache operation: {method} {path}', flush=True)
         result = self.api.request(method, path, fields)
         if self._active_record is not None:
             self._active_record.setdefault('provider_tasks', []).append({'node': node, 'upid': result, 'state': 'running'})
@@ -171,7 +184,7 @@ class ReplicaWorker:
             return catalog
         if clone_mode not in ('linked', 'full'):
             raise DistributionError('Invalid clone verification mode.')
-        if clone_mode == 'linked' and (datastore_id != 'local-lvm' or
+        if clone_mode == 'linked' and ((node, datastore_id) not in self.linked_storages or
                 f'local-linked-{image["kind"]}' not in self.tested_paths):
             raise DistributionError('Local linked clone capability has not passed acceptance.')
         if archive:
@@ -187,6 +200,7 @@ class ReplicaWorker:
                 raise DistributionError('Invalid captured backup volume.')
             if f'{image["kind"]}-archive-restore' not in self.tested_paths:
                 raise DistributionError('Target-local archive restore has not passed acceptance.')
+            print(f'Verifying immutable archive checksum from {node} before cache allocation.', flush=True)
             if self.hash_volume is None or self.hash_volume(node, archive['volume_id']) != image['artifact_sha256']:
                 raise DistributionError('Target-accessible central artifact checksum verification failed.')
             source = {'tags': 'crange-image'}
@@ -204,7 +218,8 @@ class ReplicaWorker:
             if source_node != node:
                 raise DistributionError('Cross-node cache fill requires a verified central complete backup; no source-local temporary copy.')
         capacity = required_capacity(image, clone_mode=clone_mode,
-                                     source_config=None if archive else source)
+                                     source_config=None if archive else source,
+                                     probe_candidate=self.probe_candidate)
         if (self.reservation_validator is None or
                 not self.reservation_validator(reservation, node, datastore_id, capacity)):
             raise DistributionError('A valid shared-ledger cache preparation reservation is required.')
@@ -213,6 +228,8 @@ class ReplicaWorker:
                       source_node=source_node, source_id=source_id,
                       artifact_sha256=image['artifact_sha256'], reservation=reservation,
                       created_at=datetime.now(timezone.utc).timestamp())
+        if self.probe_candidate:
+            record['probe_candidate'] = dict(self.probe_candidate)
         vmid = int(self.api.request('GET', '/cluster/nextid'))
         owned_tags = cache_tags(source, vmid)
         record['template_id'] = vmid
@@ -246,7 +263,9 @@ class ReplicaWorker:
                 self._task(node, 'POST', f'/nodes/{node}/{kind}/{vmid}/template', {})
         else:
             import time
-            upid = self.api.request('POST', f'/nodes/{node}/lxc/{vmid}/template', {})
+            current = self._config(node, kind, vmid)
+            upid = (self.api.request('POST', f'/nodes/{node}/lxc/{vmid}/template', {})
+                    if int(current.get('template', 0)) != 1 else None)
             if upid is not None:
                 record.setdefault('provider_tasks', []).append({'node': node, 'upid': upid, 'state': 'running'})
                 self.journal(dict(record))
@@ -267,7 +286,8 @@ class ReplicaWorker:
         validate_catalog(catalog)
         image = catalog['images'][image_id]
         kind = 'qemu' if image['kind'] == 'vm' else 'lxc'
-        if (record.get('state') != 'converting-template' or record.get('image_id') != image_id or
+        if (record.get('state') not in ('converting-template', 'verifying') or
+                record.get('image_id') != image_id or
                 record.get('kind') != kind or clone_mode not in ('linked', 'full')):
             raise DistributionError('Cache journal is not an eligible restored-template resume.')
         node, datastore_id, job_id, vmid = (record.get('node'), record.get('datastore_id'),
@@ -290,21 +310,36 @@ class ReplicaWorker:
             raise DistributionError('Replica conversion did not produce a template.')
         if kind == 'lxc' and clone_mode == 'linked' and self.backing_verifier is None:
             raise DistributionError('Linked CT cache publication requires physical backing verification.')
-        probe_id = int(self.api.request('GET', '/cluster/nextid'))
-        record.update(state='verifying', probe_id=probe_id, probe_pool=PROBE_POOL)
-        self.journal(dict(record))
-        self._task(node, 'POST', f'/nodes/{node}/{kind}/{vmid}/clone',
-                   {'newid': probe_id, 'full': int(clone_mode == 'full'),
-                    **({'storage': datastore_id} if clone_mode == 'full' else {}),
-                    'pool': PROBE_POOL, 'description': f'CRANGE verification {job_id}',
-                    'name' if kind == 'qemu' else 'hostname': f'crange-probe-{probe_id}'})
+        if record.get('state')=='verifying':
+            probe_id=record.get('probe_id')
+            if type(probe_id) is not int or probe_id==vmid:
+                raise DistributionError('Retained probe identity is incomplete.')
+            config=self._config(node,kind,probe_id)
+            status=self.api.request('GET',f'/nodes/{node}/{kind}/{probe_id}/status/current')
+            if not cache_owned(config,probe_id,job_id) or config.get('lock') or status.get('status')!='stopped':
+                raise DistributionError('Retained probe is not the exact stopped owned clone.')
+        else:
+            probe_id = int(self.api.request('GET', '/cluster/nextid'))
+            record.update(state='verifying', probe_id=probe_id, probe_pool=PROBE_POOL)
+            self.journal(dict(record))
+            self._task(node, 'POST', f'/nodes/{node}/{kind}/{vmid}/clone',
+                       {'newid': probe_id, 'full': int(clone_mode == 'full'),
+                        **({'storage': datastore_id} if clone_mode == 'full' else {}),
+                        'pool': PROBE_POOL, 'description': f'CRANGE verification {job_id}',
+                        'name' if kind == 'qemu' else 'hostname': f'crange-probe-{probe_id}'})
         probe_config = {'tags': cache_tags({}, probe_id),
                         'description': f'CRANGE verification {job_id}'}
-        if image.get('probe_resources'):
-            profile = image['probe_resources']
+        candidate = validate_probe_candidate(image, record.get('probe_candidate'))
+        if candidate or image.get('probe_resources'):
+            profile = candidate or image['probe_resources']
             probe_config.update(memory=profile['memory_mb'], cores=profile['cpu_cores'])
             if kind == 'qemu':
                 probe_config['sockets'] = 1
+                # A fixed verification size can be below the source's minimum
+                # balloon size. Keep this disposable guest at its admitted RAM.
+                probe_config['balloon'] = 0
+                if config.get('vcpus') is not None:
+                    probe_config['vcpus'] = min(int(config['vcpus']), profile['cpu_cores'])
             record['probe_resources'] = dict(profile)
             self.journal(dict(record))
         self.api.request('PUT', f'/nodes/{node}/{kind}/{probe_id}/config', probe_config)
@@ -314,6 +349,7 @@ class ReplicaWorker:
                 raise DistributionError('Linked CT cache clone backing relation is unverified.')
             record['linked_backing'] = proof
             self.journal(dict(record))
+        print(f'Verifying disposable {kind} clone {probe_id} on {node}; the cache template remains stopped.', flush=True)
         result = self.verify(_JournaledProbeAPI(self.api, record, self.journal), node, kind, probe_id)
         if not isinstance(result, dict) or result.get('passed') is not True or result.get('identity_unique') is not True:
             record['state'] = 'failed-verification'
@@ -327,10 +363,50 @@ class ReplicaWorker:
                        state='ready', artifact_sha256=image['artifact_sha256'],
                        verified_at=datetime.now(timezone.utc).isoformat(),
                        verification=result, job_id=job_id, clone_modes=[clone_mode], clone_modes_verified=[clone_mode], cache_local=True)
+        if datastore_id != 'local-lvm' and (node,datastore_id) in self.linked_storages:
+            replica['storage_verification']={'node':node,'datastore_id':datastore_id,
+                                             'local':True,'snapshots_verified':True}
         updated = publish_replica(catalog, image_id, replica)
+        if candidate:
+            # This candidate becomes approved only after actual readiness,
+            # independent guest identity and confirmed disposable-probe deletion.
+            updated['images'][image_id]['probe_resources'] = {
+                **candidate, 'verified': True,
+                'evidence': f'Fresh isolated clone boot, unique identity and cleanup: {job_id}; '
+                            f'archive {image["artifact_sha256"]} on {node}/{datastore_id}'}
         record['state'] = 'ready'
         self.journal(dict(record))
         return updated
+
+
+def reserve_probe_storage(ledger, *, datastore_id, auto_storage=False, **scope):
+    """Reserve a full VM probe on preferred or another approved local store."""
+    from crange_placement import PlacementError
+    if not auto_storage:
+        return ledger.reserve_source_probe(datastore_id=datastore_id, **scope)
+    if scope.get('kind') != 'vm' or scope.get('clone_mode') != 'full':
+        raise PlacementError('Automatic probe storage requires a full VM copy.')
+    node, policy, inventory = scope['node_name'], scope['policy'], scope['inventory']
+    approved = set(map(tuple, policy.get('approved_storage', [])))
+    if (node, datastore_id) not in approved:
+        raise PlacementError('Preferred probe storage is not approved.')
+    stores = inventory.get('nodes', {}).get(node, {}).get('storages', {})
+    candidates = [datastore_id] + sorted(storage for storage, details in stores.items()
+        if storage != datastore_id and (node, storage) in approved and
+        storage in policy.get('allowed_storages', []) and details.get('shared') is False)
+    failures = {}
+    for storage in candidates:
+        try:
+            return ledger.reserve_source_probe(datastore_id=storage, **scope)
+        except PlacementError as error:
+            # Node, quota, identity and existing-allocation errors must never be
+            # bypassed by choosing another disk. Failed reservations roll back.
+            reason = str(error)
+            if not (reason.startswith('source-probe has insufficient disk_gb headroom') or
+                    reason.startswith('source-probe datastore or guest capability unavailable')):
+                raise
+            failures[storage] = reason
+    raise PlacementError('No approved local probe datastore has headroom: ' + json.dumps(failures, sort_keys=True))
 
 
 class SourceProbeWorker:
@@ -465,7 +541,7 @@ class SourceProbeWorker:
         marker = f'crange-job-{job_id}'
         if (int(probe.get('template', 0)) == 1 or
                 probe.get('name' if kind == 'qemu' else 'hostname') != f'crange-source-probe-{vmid}' or
-                probe.get('description') != f'CRANGE source verification {job_id}' or
+                str(probe.get('description','')).rstrip('\r\n') != f'CRANGE source verification {job_id}' or
                 'crange-image' not in str(probe.get('tags', '')).split(';') or
                 self.api.request('GET', probe_path + '/status/current').get('status') != 'stopped'):
             raise DistributionError('Existing source-probe guest identity or stopped state is not exact.')
@@ -553,7 +629,7 @@ def reconcile_source_probe(api, journal, ledger, job_id):
     source_ref = f'source:{node}:{kind}:{source_id}'
     if (record.get('job_id') != job_id or record.get('state') not in ('allocated', 'reconciled-absent') or
             record.get('provider_tasks') or record.get('upid') or
-            node not in {f'proxmox{i}' for i in range(1, 6)} or record.get('source_node') != node or
+            node not in {f'proxmox{i}' for i in range(1, 7)} or record.get('source_node') != node or
             type(probe_id) is not int or not 20000 <= probe_id < 20100 or type(source_id) is not int or
             saved.get('owner') != 'cli' or saved.get('state') not in ('running', 'released') or
             saved.get('allocations') != [reservation] or not isinstance(reservation, dict) or
@@ -597,6 +673,12 @@ def _source_guest_type(capture):
 
 
 def _source_capture_profile(capture):
+    if isinstance(capture, dict) and capture.get('provenance_type') == 'sealed-windows-source-v1':
+        from crange_catalog import validate_sealed_windows_capture
+        validate_sealed_windows_capture(capture)
+        if capture.get('state') != 'sealed-source-captured':
+            raise DistributionError('Sealed Windows source record has an invalid capture state.')
+        return 'windows'
     identity = capture.get('source_identity', {}) if isinstance(capture, dict) else {}
     if identity.get('os_family') == 'windows':
         if (capture.get('os_family') != 'windows' or 'init_system' in capture or
@@ -608,6 +690,24 @@ def _source_capture_profile(capture):
     if init_system not in ('systemd', 'openrc') or capture.get('readiness') != expected:
         raise DistributionError('Identity record is not bound to a supported guest capture profile.')
     return init_system
+
+
+def _require_worker_sealed_record(record, supplied_path):
+    """Require sealed evidence arguments to name the exact protected worker journal."""
+    from crange_catalog import validate_sealed_windows_capture
+    from crange_scheduling import DATA
+    validate_sealed_windows_capture(record)
+    expected = Path(DATA) / 'source-journal' / 'p100-sealed-windows-8912.json'
+    path = Path(supplied_path)
+    try:
+        st = expected.lstat()
+        supplied = path.resolve(strict=True)
+        trusted = json.loads(expected.read_text())
+    except (OSError, ValueError) as exc:
+        raise DistributionError('Fixed worker-journaled P100 sealed source proof is required.') from exc
+    if (path.is_symlink() or supplied != expected.resolve() or not stat.S_ISREG(st.st_mode) or
+            stat.S_IMODE(st.st_mode) != 0o600 or trusted != record):
+        raise DistributionError('Sealed source proof does not match the protected worker journal.')
 
 
 def _source_capacity(config, kind):
@@ -675,16 +775,19 @@ def shared_reservation_validator(ledger, job_id, allocation, image_id, artifact_
 
 class FileJournal:
     """Controller-owned durable journal and cooperative allocation lock."""
-    _INITIAL_STATES = {'identity-captured', 'exporting', 'allocated', 'evicting'}
-    _MUTABLE_FIELDS = {'state', 'provider_tasks', 'upid', 'eviction'}
+    _INITIAL_STATES = {'identity-captured', 'sealed-source-captured', 'exporting', 'allocated', 'evicting'}
+    _MUTABLE_FIELDS = {'state', 'provider_tasks', 'upid', 'eviction', 'verification_evidence', 'cleanup_progress'}
     _TRANSITIONS = {
         'identity-captured': {'identity-captured'},
+        'sealed-source-captured': {'sealed-source-captured'},
         'exporting': {'exporting', 'exported'},
         'exported': {'exported'},
         'allocated': {'allocated', 'converting-template', 'verifying', 'reconciled-absent', 'cancelled-uncertain'},
         'converting-template': {'converting-template', 'verifying', 'failed-verification', 'cancelled-uncertain'},
-        'verifying': {'verifying', 'ready', 'source-probed', 'failed-verification', 'cancelled-uncertain'},
-        'failed-verification': {'failed-verification'},
+        'replacing-probe': {'replacing-probe','verifying'},
+        'verifying': {'replacing-probe', 'verifying', 'ready', 'source-probed', 'failed-verification', 'cancelled-uncertain', 'cleaned-owned'},
+        'failed-verification': {'failed-verification', 'cleaned-owned'},
+        'cleaned-owned': {'cleaned-owned'},
         'source-probed': {'source-probed'},
         'ready': {'ready', 'evicted'},
         'evicting': {'evicting', 'evicted', 'cancelled-uncertain'},
@@ -704,6 +807,17 @@ class FileJournal:
         old_state, new_state = previous.get('state'), incoming.get('state')
         if new_state not in cls._TRANSITIONS.get(old_state, set()):
             raise DistributionError('Journal state transition is not permitted.')
+        if old_state == 'verifying' and new_state == 'replacing-probe':
+            replacement=incoming.get('probe_replacement',{})
+            if (previous.get('kind')!='qemu' or previous.get('probe_replacement') or
+                    type(previous.get('probe_id')) is not int or
+                    set(replacement)!={'probe_id','requested_at','reason'} or
+                    replacement.get('probe_id')!=previous['probe_id'] or
+                    replacement.get('reason')!='guest-agent-verification-failed' or
+                    not isinstance(replacement.get('requested_at'),str) or
+                    not any(row.get('type') in ('qga-timeout','qga-exec-error')
+                            for row in previous.get('verification_evidence',[]))):
+                raise DistributionError('Probe replacement requires exact failed verification and a single immutable attempt.')
         for key, value in previous.items():
             if key in cls._MUTABLE_FIELDS:
                 continue
@@ -734,6 +848,23 @@ class FileJournal:
                        'confirmed-terminal': {'confirmed-terminal'}}
             if new_task.get('state') not in allowed.get(old_task.get('state'), set()):
                 raise DistributionError('Journal provider task state cannot move backwards.')
+        old_evidence = previous.get('verification_evidence', [])
+        new_evidence = incoming.get('verification_evidence', [])
+        if (not isinstance(old_evidence, list) or not isinstance(new_evidence, list) or
+                len(new_evidence) < len(old_evidence) or new_evidence[:len(old_evidence)] != old_evidence or
+                any(not isinstance(item, dict) or item.get('type') not in {
+                    'qga-exec', 'qga-exec-error', 'qga-status', 'qga-status-error', 'qga-timeout'}
+                    for item in new_evidence)):
+            raise DistributionError('Protected verification evidence must remain append-only.')
+        old_progress = previous.get('cleanup_progress', [])
+        new_progress = incoming.get('cleanup_progress', [])
+        if (not isinstance(old_progress, list) or not isinstance(new_progress, list) or
+                len(new_progress) < len(old_progress) or new_progress[:len(old_progress)] != old_progress or
+                any(not isinstance(item, dict) or type(item.get('vmid')) is not int or
+                    item.get('absent') is not True or item.get('inventory_complete') is not True or
+                    not re.fullmatch(r'[a-f0-9]{64}', str(item.get('cluster_guest_inventory_sha256', '')))
+                    for item in new_progress)):
+            raise DistributionError('Owned cache cleanup progress must remain append-only and evidenced.')
         if new_state == 'exported':
             if (not incoming.get('volume_id') or
                     not re.fullmatch(r'[a-zA-Z0-9_.-]+:backup/vzdump-(?:qemu|lxc)-[a-zA-Z0-9_.-]+',
@@ -761,6 +892,18 @@ class FileJournal:
                     not isinstance(evidence, dict) or evidence.get('passed') is not True or
                     evidence.get('identity_unique') is not True):
                 raise DistributionError('Source-probed state requires verified identity and terminal provider tasks.')
+        if new_state == 'cleaned-owned':
+            evidence = incoming.get('cleanup_evidence')
+            if (not isinstance(evidence, dict) or evidence.get('verified') is not True or
+                    evidence.get('node') != incoming.get('node') or
+                    evidence.get('template_id') != incoming.get('template_id') or
+                    evidence.get('probe_id') != incoming.get('probe_id') or
+                    evidence.get('inventory_complete') is not True or
+                    evidence.get('both_guests_absent') is not True or
+                    evidence.get('provider_tasks_terminal') is not True or
+                    not re.fullmatch(r'[a-f0-9]{64}', str(evidence.get('cluster_guest_inventory_sha256', ''))) or
+                    any(task.get('state') != 'confirmed-terminal' for task in new_tasks)):
+                raise DistributionError('Owned cache cleanup requires terminal tasks and complete absence evidence.')
         if 'eviction' in previous and incoming.get('eviction') != previous['eviction']:
             raise DistributionError('Journal eviction receipt cannot be changed.')
 
@@ -844,17 +987,60 @@ def _source_config_identity(config, vmid):
     return hashlib.sha256(json.dumps(stable, sort_keys=True, separators=(',', ':')).encode()).hexdigest()
 
 
+def _sealed_windows_source_volumes(config):
+    """Normalize only 8912's two exact managed raw volumes across PVE template conversion."""
+    expected = {'crange-library:8912/vm-8912-disk-0.raw',
+                'crange-library:8912/vm-8912-disk-1.raw'}
+    normalized = set()
+    volume_pattern = re.compile(r'crange-library:8912/(?:vm|base)-8912-disk-([01])\.raw')
+    for key in ('sata0', 'sata1', 'scsi0', 'scsi1', 'virtio0', 'virtio1', 'efidisk0'):
+        value = config.get(key)
+        if not isinstance(value, str):
+            continue
+        volume = value.split(',', 1)[0]
+        match = volume_pattern.fullmatch(volume)
+        if match:
+            normalized.add(f'crange-library:8912/vm-8912-disk-{match.group(1)}.raw')
+    return normalized == expected
+
+
 def _fixed_guest_read(api, node, guest_type, vmid, command, ct_exec, timeout):
     if guest_type == 'lxc':
         if ct_exec is None: raise DistributionError('Fixed CT exec adapter is unavailable.')
         return ct_exec(node, vmid, command).strip()
     import time
-    response = api.request('POST', f'/nodes/{node}/qemu/{vmid}/agent/exec', {'command': command})
     deadline = time.monotonic() + timeout
+    # These commands are fixed read-only collectors. Agent exec can briefly
+    # fail with 500 during boot even after get-osinfo succeeds. A bounded retry
+    # is safe here; mutating guest initialization uses its separate PID journal.
+    while True:
+        try:
+            response = api.request('POST', f'/nodes/{node}/qemu/{vmid}/agent/exec', {'command': command})
+            break
+        except RuntimeError as error:
+            if getattr(error.__cause__, 'code', None) != 500 or time.monotonic() >= deadline:
+                raise
+            time.sleep(2)
     while time.monotonic() < deadline:
         result = api.request('GET', f'/nodes/{node}/qemu/{vmid}/agent/exec-status', {'pid': int(response['pid'])})
         if result.get('exited'):
-            if int(result.get('exitcode', -1)) != 0: raise DistributionError('Source identity command failed.')
+            if int(result.get('exitcode', -1)) != 0:
+                # Identify the fixed collector without copying guest output or
+                # command arguments (which may contain identity data) into jobs.
+                collector = Path(command[0]).name
+                detail = ''
+                if command == ['/usr/bin/systemctl', 'is-system-running']:
+                    collector += ' is-system-running'
+                    state = str(result.get('out-data', '')).strip()
+                    if state in {'initializing', 'starting', 'running', 'degraded',
+                                 'maintenance', 'stopping', 'offline', 'unknown'}:
+                        detail = f'; state: {state}'
+                error = DistributionError(
+                    f'Source identity collector {collector} failed '
+                    f'(exit {int(result.get("exitcode", -1))}{detail}).')
+                if command == ['/usr/bin/systemctl', 'is-system-running'] and detail:
+                    error.collector_state = state
+                raise error
             return str(result.get('out-data', '')).strip()
         time.sleep(1)
     raise DistributionError('Source identity guest-agent check timed out.')
@@ -874,9 +1060,49 @@ def _guest_readiness(read, init_system):
     raise DistributionError('OpenRC readiness command failed.') from failure
 
 
+def normalize_isolated_network_wait(api, node, kind, vmid, bridge):
+    """Clear only a known offline wait failure on an owned disposable VM.
+
+    This does not mask/disable a service or permit general degraded readiness.
+    The caller must subsequently observe normal readiness and collect identity.
+    """
+    if kind != 'qemu':
+        return None
+    _require_probe_pool(api, node, kind, vmid)
+    base = f'/nodes/{node}/{kind}/{vmid}'
+    config = api.request('GET', base + '/config')
+    _owned(config)
+    nics = [str(value).split(',') for key, value in config.items()
+            if re.fullmatch(r'net[0-9]+', key)]
+    if (not nics or int(config.get('template', 0)) or
+            any(f'bridge={bridge}' not in nic or 'link_down=1' not in nic for nic in nics) or
+            api.request('GET', base + '/status/current').get('status') != 'running'):
+        raise DistributionError('Offline readiness repair requires an owned running disconnected probe.')
+    command = ['/usr/bin/systemctl', '--failed', '--no-pager', '--no-legend']
+    output = _fixed_guest_read(api, node, kind, vmid, command, None, 30)
+    rows = [line.strip() for line in output.splitlines() if line.strip()]
+    unit = 'systemd-networkd-wait-online.service'
+    if len(rows) != 1 or not re.fullmatch(
+            rf'(?:\S+\s+)?{re.escape(unit)}\s+loaded\s+failed\s+failed(?:\s+.*)?', rows[0]):
+        return None
+    response = api.request('POST', base + '/agent/exec', {
+        'command': ['/usr/bin/systemctl', 'reset-failed', unit]})
+    import time
+    deadline = time.monotonic() + 30
+    while time.monotonic() < deadline:
+        result = api.request('GET', base + '/agent/exec-status', {'pid': int(response['pid'])})
+        if result.get('exited'):
+            if int(result.get('exitcode', -1)) != 0:
+                raise DistributionError('Offline network-wait status reset failed.')
+            return {'unit': unit, 'action': 'reset-failed', 'bridge': bridge,
+                    'all_nics_disconnected': True, 'services_disabled': False}
+        time.sleep(1)
+    raise DistributionError('Offline network-wait status reset observation timed out.')
+
+
 def _windows_guest_identity(read):
     """Collect fixed Windows identity/readiness fields through QEMU Guest Agent."""
-    script = r"""$ErrorActionPreference='Stop';$os=Get-CimInstance Win32_OperatingSystem;$cs=Get-CimInstance Win32_ComputerSystem;$admin=Get-CimInstance Win32_UserAccount|Where-Object {$_.LocalAccount -and $_.Name -eq 'Administrator'}|Select-Object -First 1;$guid=(Get-ItemProperty 'HKLM:\SOFTWARE\Microsoft\Cryptography').MachineGuid;$imageState=(Get-ItemProperty 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Setup\State').ImageState;$ga=Get-Service QEMU-GA;$term=Get-Service TermService;$winrm=Get-Service WinRM;$rdp=@(Get-NetFirewallRule -DisplayGroup 'Remote Desktop' -Enabled True|Get-NetFirewallAddressFilter|Select-Object -ExpandProperty RemoteAddress -Unique);[ordered]@{os_caption=$os.Caption;os_version=$os.Version;os_build=[string]$os.BuildNumber;computer_name=$cs.Name;part_of_domain=[bool]$cs.PartOfDomain;machine_guid=$guid;local_administrator_sid=$admin.SID;machine_sid=($admin.SID -replace '-500$','');image_state=$imageState;qemu_guest_agent=($ga.Status -eq 'Running');term_service_running=($term.Status -eq 'Running');winrm_service_running=($winrm.Status -eq 'Running');rdp_allowed_sources=$rdp}|ConvertTo-Json -Compress"""
+    script = r"""$ErrorActionPreference='Stop';$os=Get-CimInstance Win32_OperatingSystem;$cs=Get-CimInstance Win32_ComputerSystem;$admin=Get-CimInstance Win32_UserAccount|Where-Object {$_.LocalAccount -and $_.Name -eq 'Administrator'}|Select-Object -First 1;$guid=(Get-ItemProperty 'HKLM:\SOFTWARE\Microsoft\Cryptography').MachineGuid;$imageState=(Get-ItemProperty 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Setup\State').ImageState;$setup=Get-ItemProperty 'HKLM:\SYSTEM\Setup';$install=(Get-ItemProperty 'HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion').InstallationType;$ga=Get-Service QEMU-GA;$term=Get-Service TermService;$winrm=Get-Service WinRM;$rdp=@(Get-NetFirewallRule -DisplayGroup 'Remote Desktop' -Enabled True|Get-NetFirewallAddressFilter|Select-Object -ExpandProperty RemoteAddress -Unique);[ordered]@{os_caption=$os.Caption;installation_type=$install;os_version=$os.Version;os_build=[string]$os.BuildNumber;computer_name=$cs.Name;part_of_domain=[bool]$cs.PartOfDomain;machine_guid=$guid;local_administrator_sid=$admin.SID;machine_sid=($admin.SID -replace '-500$','');image_state=$imageState;oobe_in_progress=$setup.OOBEInProgress;system_setup_in_progress=$setup.SystemSetupInProgress;setup_type=$setup.SetupType;qemu_guest_agent=($ga.Status -eq 'Running');qemu_guest_agent_automatic=($ga.StartType -eq 'Automatic');term_service_running=($term.Status -eq 'Running');term_service_automatic=($term.StartType -eq 'Automatic');winrm_service_running=($winrm.Status -eq 'Running');winrm_service_automatic=($winrm.StartType -eq 'Automatic');rdp_allowed_sources=$rdp}|ConvertTo-Json -Compress"""
     raw = read([r'C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe',
                 '-NoProfile', '-NonInteractive', '-Command', script])
     try:
@@ -891,7 +1117,7 @@ def _windows_guest_identity(read):
     return identity
 
 
-def capture_source_identity(api, *, node, kind, vmid, job_id, journal, ct_exec=None, timeout=60, init_system='systemd'):
+def capture_source_identity(api, *, node, kind, vmid, job_id, journal, ct_exec=None, timeout=60, init_system='systemd', snapshot_project=None):
     """Read fixed identity commands before reviewed stop/template conversion.
 
     This never starts, stops or reconfigures a guest and cannot boot a template.
@@ -912,7 +1138,12 @@ def capture_source_identity(api, *, node, kind, vmid, job_id, journal, ct_exec=N
         raise DistributionError('Identity capture requires an owned running guest before template conversion.')
     read = lambda command: _fixed_guest_read(api, node, guest_type, vmid, command, ct_exec, timeout)
     if init_system == 'windows':
-        identity = _windows_guest_identity(read)
+        if snapshot_project is not None:
+            if type(snapshot_project) is not int or not 1<=snapshot_project<=255 or f'p{snapshot_project:03d}' not in str(config.get('tags','')).split(';'):
+                raise DistributionError('Scenario snapshot project does not match the owned capture tags.')
+            from crange_windows_snapshot import collect
+            identity=collect(read,config.get('vmgenid'),snapshot_project)
+        else: identity = _windows_guest_identity(read)
         readiness = 'windows-ready'
     else:
         readiness = _guest_readiness(read, init_system)
@@ -935,6 +1166,52 @@ def capture_source_identity(api, *, node, kind, vmid, job_id, journal, ct_exec=N
     return record
 
 
+def _readonly_template_backup_repair(api, *, node, vmid, job_id, upid, status, config):
+    """Prove this exact terminal SATA/IDE template failure has a host-side fix."""
+    fields = upid.split(':') if isinstance(upid, str) else []
+    if (not re.fullmatch(r'capture-p[0-9]+-[a-f0-9]{12}-export', job_id)
+            or len(fields) < 9 or fields[0] != 'UPID' or fields[1] != node
+            or fields[5:7] != ['vzdump', str(vmid)]
+            or any(not re.fullmatch('[a-fA-F0-9]+', value) for value in fields[2:5])
+            or status.get('upid') != upid or status.get('node') != node
+            or status.get('type') != 'vzdump' or str(status.get('id')) != str(vmid)
+            or status.get('status') != 'stopped' or status.get('exitstatus') != 'job errors'
+            or int(config.get('template', 0)) != 1 or config.get('lock')):
+        raise DistributionError('Failed template export requires manual reconciliation.')
+    disks = [str(value).split(',')[0] for key, value in config.items()
+             if re.fullmatch(r'(sata|ide)[0-9]+', key)
+             and re.search(r':base-' + str(vmid) + r'-disk-[0-9]+$', str(value).split(',')[0])]
+    if not disks:
+        raise DistributionError('Failed export is not the reviewed read-only template case.')
+    log_path = f'/nodes/{node}/tasks/{urllib.parse.quote(upid, safe="")}/log'
+    lines = []
+    for offset in range(0, 1000, 50):
+        page = api.request('GET', log_path, {'start': offset, 'limit': 50})
+        if not isinstance(page, list):
+            raise DistributionError('Failed export task log is unavailable.')
+        lines.extend(str(row.get('t', '')) for row in page)
+        if len(page) < 50:
+            break
+    text = '\n'.join(lines)
+    if (not all(marker in text for marker in (
+            'starting kvm to execute backup task', 'The device is not writable: Permission denied',
+            f'Backup of VM {vmid} failed', f'CRANGE export {job_id}'))
+            or not any("'" + disk + "'" in text for disk in disks)):
+        raise DistributionError('Failed export does not match the reviewed template backup regression.')
+    packages = api.request('GET', f'/nodes/{node}/apt/versions')
+    matches = [row for row in packages if row.get('Package') == 'qemu-server'] if isinstance(packages, list) else []
+    if len(matches) != 1 or matches[0].get('CurrentState') != 'Installed':
+        raise DistributionError('Template backup package is not confirmed fully installed.')
+    # PVE reports the available candidate as Version, and installed as OldVersion.
+    # An available update is not evidence that the broken package was repaired.
+    version = matches[0].get('OldVersion', matches[0].get('Version', ''))
+    measured = re.fullmatch(r'([0-9]+)\.([0-9]+)\.([0-9]+)(?:[+~-].*)?', str(version))
+    if not measured or tuple(map(int, measured.groups())) < (9, 0, 18):
+        raise DistributionError('Prepare native template backups on this node before retrying export.')
+    return {'reason': 'readonly-template-backup-package-repaired', 'node': node,
+            'qemu_server_version': version, 'failed_upid': upid}
+
+
 def export_image(api, *, node, kind, vmid, storage, job_id, journal,
                  hash_volume, approved_backup_storage, identity_record=None):
     """Export an owned stopped guest/template via vzdump, including config.
@@ -942,6 +1219,7 @@ def export_image(api, *, node, kind, vmid, storage, job_id, journal,
     hash_volume(node, volume_id) is a trusted fixed transport adapter, never a
     user-provided command. Returns the actual SHA256 of the exported file.
     """
+    approved_backup_storage = tuple(approved_backup_storage)
     if (node, storage) not in set(approved_backup_storage) or kind not in ('vm', 'container'):
         raise DistributionError('Unapproved backup destination or image kind.')
     if not re.fullmatch(r'[a-zA-Z0-9-]{1,64}', job_id):
@@ -967,22 +1245,48 @@ def export_image(api, *, node, kind, vmid, storage, job_id, journal,
                     raise DistributionError('Captured CT has an excluded/external mount.')
         if any(str(k).startswith(('lxc.mount', 'dev')) for k in config):
             raise DistributionError('Captured CT external mounts/devices are unsupported.')
-    from crange_catalog import validate_source_identity
+    from crange_catalog import validate_source_identity, validate_sealed_windows_capture
     identity_record = identity_record if isinstance(identity_record, dict) else {}
-    windows_capture = identity_record.get('source_identity', {}).get('os_family') == 'windows'
-    profile_valid = (
-        identity_record.get('os_family') == 'windows' and
-        'init_system' not in identity_record and identity_record.get('readiness') == 'windows-ready'
-        if windows_capture else
-        identity_record.get('init_system') in ('systemd', 'openrc') and
-        identity_record.get('readiness') == ('running' if identity_record.get('init_system') == 'systemd' else 'default')
-    )
+    sealed_capture = identity_record.get('provenance_type') == 'sealed-windows-source-v1'
+    windows_capture = sealed_capture or identity_record.get('source_identity', {}).get('os_family') == 'windows'
+    if sealed_capture:
+        validate_sealed_windows_capture(identity_record)
+        from crange_scheduling import DATA
+        trusted_record = Path(DATA) / 'source-journal' / 'p100-sealed-windows-8912.json'
+        try:
+            record_stat = trusted_record.lstat()
+            trusted = json.loads(trusted_record.read_text())
+        except (OSError, ValueError) as exc:
+            raise DistributionError('Fixed worker-journaled P100 sealed source proof is required.') from exc
+        if (trusted_record.is_symlink() or not stat.S_ISREG(record_stat.st_mode) or
+                stat.S_IMODE(record_stat.st_mode) != 0o600 or trusted != identity_record):
+            raise DistributionError('Sealed source proof does not match the protected worker journal.')
+        expected_tags = {'crange-image', 'crange-capture-windows-server2025-locale-20261008',
+                         'mhl-windows-sealed-locale'}
+        if (node != 'proxmox4' or int(vmid) != 8912 or
+                set(str(config.get('tags', '')).split(';')) != expected_tags or
+                not _sealed_windows_source_volumes(config) or
+                identity_record.get('source_config_sha256') != _source_config_identity(config, vmid) or
+                status.get('status') != 'stopped'):
+            raise DistributionError('Fresh sealed Windows source freeze does not match the reviewed P100 candidate.')
+        profile_valid = identity_record.get('source_state') == 'stopped-never-booted'
+    else:
+        profile_valid = (
+            identity_record.get('os_family') == 'windows' and
+            'init_system' not in identity_record and identity_record.get('readiness') == 'windows-ready'
+            if windows_capture else
+            identity_record.get('init_system') in ('systemd', 'openrc') and
+            identity_record.get('readiness') == ('running' if identity_record.get('init_system') == 'systemd' else 'default')
+        )
     if (identity_record.get('state') != 'identity-captured'
+            and not sealed_capture
             or (identity_record.get('node'), identity_record.get('kind'), identity_record.get('source_id')) != (node, kind, vmid)
             or identity_record.get('source_config_sha256') != _source_config_identity(config, vmid)
             or not profile_valid):
         raise DistributionError('Matching worker-captured source identity is required before export.')
-    validate_source_identity(identity_record.get('source_identity'))
+    if not sealed_capture:
+        from crange_windows_snapshot import validate_captured_identity
+        validate_captured_identity(identity_record.get('source_identity'))
     content_path = f'/nodes/{node}/storage/{storage}/content'
     journal_dir = getattr(journal, 'directory', None)
     if not isinstance(journal_dir, (str, Path)):
@@ -995,11 +1299,12 @@ def export_image(api, *, node, kind, vmid, storage, job_id, journal,
         expected = {
             'job_id': job_id, 'node': node, 'kind': kind, 'source_id': vmid,
             'storage': storage, 'disk_gb': disk_gb,
-            'source_identity': dict(identity_record['source_identity']),
             'identity_capture': dict(identity_record),
             'memory_mb': int(config.get('memory', 0)),
             'cpu_cores': int(config.get('cores', 0)),
         }
+        if not sealed_capture:
+            expected['source_identity'] = dict(identity_record['source_identity'])
         if not windows_capture:
             expected['init_system'] = identity_record['init_system']
         else:
@@ -1015,6 +1320,68 @@ def export_image(api, *, node, kind, vmid, storage, job_id, journal,
             # Recovery after a worker interruption is bound to the already
             # submitted backup task. Never submit a second vzdump for this job.
             status = api.request('GET', f'/nodes/{node}/tasks/{urllib.parse.quote(prior["upid"], safe="")}/status')
+            if status.get('status') == 'running':
+                print('Resuming observation of the existing export task; no new backup submitted.', flush=True)
+                api.task(node, prior['upid'], timeout=1800)
+                status = api.request('GET', f'/nodes/{node}/tasks/{urllib.parse.quote(prior["upid"], safe="")}/status')
+            if (kind == 'vm' and status.get('status') == 'stopped' and
+                    status.get('exitstatus') == 'unexpected status' and
+                    re.fullmatch(r'capture-p[0-9]+-[a-f0-9]{12}-export', job_id)):
+                # A host reboot may leave an owned stopped template backup-locked.
+                # The root relay independently verifies boot epoch, exact terminal
+                # task, pool, tags, config hash and absence of active guest backups.
+                contents = api.request('GET', content_path)
+                before = set(prior.get('content_before', []))
+                if any(x.get('content') == 'backup' and str(x.get('vmid')) == str(vmid)
+                       and x.get('volid') not in before for x in contents):
+                    raise DistributionError('Interrupted export has a registered archive; retain for review.')
+                suffix = __import__('hashlib').sha256(prior['upid'].encode()).hexdigest()[:12]
+                history = prior_path.with_name(prior_path.stem+'-failed-'+suffix+'.json')
+                if history.exists(): raise DistributionError('Interrupted export history already exists; retain for review.')
+                proof = recover_interrupted_export_lock(node, vmid, job_id, prior['upid'], config)
+                prior.update(recovery=proof)
+                journal(prior)
+                prior_path.rename(history)
+                print('Interrupted export confirmed terminal after host reboot; preserving partial files and retrying the same immutable template.', flush=True)
+                return export_image(api,node=node,kind=kind,vmid=vmid,storage=storage,job_id=job_id,
+                    journal=journal,hash_volume=hash_volume,approved_backup_storage=approved_backup_storage,
+                    identity_record=identity_record)
+            if (status.get('status')=='stopped' and str(status.get('exitstatus','')).startswith('403 Permission check failed')
+                    and 'VM.Backup' in str(status.get('exitstatus',''))):
+                # This explicit permission failure is terminal, not an observation
+                # timeout. Retry only if it produced no new archive for this guest.
+                contents=api.request('GET',content_path)
+                prior_contents=set(prior.get('content_before',[]))
+                if any(item.get('content')=='backup' and str(item.get('vmid'))==str(vmid)
+                       and item.get('volid') not in prior_contents for item in contents):
+                    raise DistributionError('Failed export left an archive; reconcile it before retry.')
+                suffix=__import__('hashlib').sha256(prior['upid'].encode()).hexdigest()[:12]
+                history=prior_path.with_name(prior_path.stem+'-failed-'+suffix+'.json')
+                if history.exists():raise DistributionError('Failed export history already exists; reconcile before retry.')
+                prior_path.rename(history)
+                print('Prior export permission failure is confirmed terminal with no new archive; retrying after permission repair.',flush=True)
+                return export_image(api,node=node,kind=kind,vmid=vmid,storage=storage,job_id=job_id,
+                    journal=journal,hash_volume=hash_volume,approved_backup_storage=approved_backup_storage,
+                    identity_record=identity_record)
+            if kind == 'vm' and status.get('status') == 'stopped' and status.get('exitstatus') == 'job errors':
+                proof = _readonly_template_backup_repair(api, node=node, vmid=vmid, job_id=job_id,
+                    upid=prior['upid'], status=status, config=config)
+                contents = api.request('GET', content_path)
+                before = set(prior.get('content_before', []))
+                if any(item.get('content') == 'backup' and str(item.get('vmid')) == str(vmid)
+                       and item.get('volid') not in before for item in contents):
+                    raise DistributionError('Failed template export left an archive; retain it for review.')
+                suffix = __import__('hashlib').sha256(prior['upid'].encode()).hexdigest()[:12]
+                history = prior_path.with_name(prior_path.stem+'-failed-'+suffix+'.json')
+                if history.exists():
+                    raise DistributionError('Failed template export history already exists; retain for review.')
+                prior['recovery'] = proof
+                journal(prior)
+                prior_path.rename(history)
+                print('Read-only template backup regression repaired; preserving failed task history and retrying the same immutable template.', flush=True)
+                return export_image(api,node=node,kind=kind,vmid=vmid,storage=storage,job_id=job_id,
+                    journal=journal,hash_volume=hash_volume,approved_backup_storage=approved_backup_storage,
+                    identity_record=identity_record)
             if status.get('status') != 'stopped' or status.get('exitstatus') != 'OK':
                 raise DistributionError('Prior export task is not confirmed successful; retain it for reconciliation.')
             log_path = f'/nodes/{node}/tasks/{urllib.parse.quote(prior["upid"], safe="")}/log'
@@ -1039,7 +1406,8 @@ def export_image(api, *, node, kind, vmid, storage, job_id, journal,
                 raise DistributionError('Successful export task log does not identify exactly one completed archive.')
             archive_path = archive_paths.pop()
             filename = archive_path[len(expected_prefix):]
-            if not re.fullmatch(rf'vzdump-{"qemu" if kind == "vm" else "lxc"}-{int(vmid)}-[0-9_-]{{10,24}}\.vma\.zst', filename):
+            extension = 'vma' if kind == 'vm' else 'tar'
+            if not re.fullmatch(rf'vzdump-{"qemu" if kind == "vm" else "lxc"}-{int(vmid)}-[0-9_-]{{10,24}}\.{extension}\.zst', filename):
                 raise DistributionError('Export task archive name does not match the exact source guest.')
             volume_id = f'{storage}:backup/{filename}'
             digest = hash_volume(node, volume_id)
@@ -1055,8 +1423,10 @@ def export_image(api, *, node, kind, vmid, storage, job_id, journal,
     record = dict(job_id=job_id, node=node, kind=kind, source_id=vmid,
                   storage=storage, state='exporting', disk_gb=disk_gb,
                   content_before=sorted(before),
-                  source_identity=dict(identity_record['source_identity']), identity_capture=dict(identity_record),
+                  identity_capture=dict(identity_record),
                   memory_mb=int(config.get('memory', 0)), cpu_cores=int(config.get('cores', 0)))
+    if not sealed_capture:
+        record['source_identity'] = dict(identity_record['source_identity'])
     if windows_capture:
         record['os_family'] = 'windows'
     else:
@@ -1080,6 +1450,28 @@ def export_image(api, *, node, kind, vmid, storage, job_id, journal,
                   verified=True, complete_capture=True)
     journal(record)
     return record
+
+
+def recover_interrupted_export_lock(node, vmid, job_id, upid, config):
+    import socket
+    slug = job_id.rsplit('-',2)[1]
+    request = {'command':'capture-export-unlock','node':node,'vmid':vmid,
+               'marker':'crange-capture-'+slug,'upid':upid,
+               'config_sha256':_source_config_identity(config,vmid)}
+    with socket.socket(socket.AF_UNIX,socket.SOCK_STREAM) as client:
+        client.settimeout(65);client.connect('/run/crange-ct-read/socket')
+        client.sendall(json.dumps(request).encode()+b'\n');raw=b''
+        while not raw.endswith(b'\n') and len(raw)<8192:
+            part=client.recv(8192-len(raw))
+            if not part:break
+            raw+=part
+    response=json.loads(raw)
+    proof=json.loads(response['value']) if set(response)=={'value'} and isinstance(response['value'],str) else {}
+    if (proof.get('state')!='unlocked' or proof.get('upid')!=upid or proof.get('vmid')!=vmid or
+            proof.get('node')!=node or proof.get('config_sha256')!=request['config_sha256'] or
+            proof.get('partial_files_preserved') is not True):
+        raise DistributionError('Fixed interrupted export recovery was rejected.')
+    return proof
 
 
 class SSHVolumeHasher:
@@ -1130,20 +1522,35 @@ def publish_exported_image(catalog, image_id, export, *, architecture,
     if (export.get('state') != 'exported' or not export.get('complete_capture') or
             verification.get('passed') is not True or not verification.get('evidence')):
         raise DistributionError('Complete export and source verification evidence required.')
-    from crange_catalog import validate_source_identity
-    validate_source_identity(export.get('source_identity'))
+    from crange_catalog import validate_source_identity, validate_sealed_windows_capture
     capture = export.get('identity_capture', {})
-    windows_capture = export['source_identity'].get('os_family') == 'windows'
-    profile_valid = (
-        capture.get('os_family') == 'windows' and 'init_system' not in capture
-        and 'init_system' not in export and capture.get('readiness') == 'windows-ready'
-        if windows_capture else
-        capture.get('init_system') in ('systemd', 'openrc')
-        and export.get('init_system') == capture.get('init_system')
-        and capture.get('readiness') == ('running' if capture.get('init_system') == 'systemd' else 'default')
-    )
-    if (capture.get('state') != 'identity-captured' or not capture.get('job_id')
-            or capture.get('source_identity') != export['source_identity']
+    sealed_capture = capture.get('provenance_type') == 'sealed-windows-source-v1'
+    windows_capture = sealed_capture or export.get('source_identity', {}).get('os_family') == 'windows'
+    if sealed_capture:
+        validate_sealed_windows_capture(capture)
+        from crange_catalog import SEALED_WINDOWS_IMAGE_ID
+        if image_id != SEALED_WINDOWS_IMAGE_ID:
+            raise DistributionError('The sealed Project 100 Windows source has one fixed immutable image ID.')
+        if normalize_projects(approved_projects) != [100]:
+            raise DistributionError('The sealed P100 Windows source can be approved only for Project 100.')
+        profile_valid = capture.get('source_identity') is None and 'source_identity' not in export
+        expected_verification = sealed_windows_verification(capture)
+        if verification != expected_verification:
+            raise DistributionError('Sealed Windows publication requires the fixed protected two-clone verification record.')
+    else:
+        from crange_windows_snapshot import validate_captured_identity
+        validate_captured_identity(export.get('source_identity'))
+        profile_valid = (
+            capture.get('os_family') == 'windows' and 'init_system' not in capture
+            and 'init_system' not in export and capture.get('readiness') == 'windows-ready'
+            if windows_capture else
+            capture.get('init_system') in ('systemd', 'openrc')
+            and export.get('init_system') == capture.get('init_system')
+            and capture.get('readiness') == ('running' if capture.get('init_system') == 'systemd' else 'default')
+        )
+    if ((capture.get('state') != 'identity-captured' and not sealed_capture) or
+            (not capture.get('job_id') and not sealed_capture)
+            or (not sealed_capture and capture.get('source_identity') != export.get('source_identity'))
             or not profile_valid
             or (capture.get('node'), capture.get('kind'), capture.get('source_id')) != (export['node'], export['kind'], export['source_id'])
             or not re.fullmatch(r'[a-f0-9]{64}', capture.get('source_config_sha256', ''))):
@@ -1155,7 +1562,7 @@ def publish_exported_image(catalog, image_id, export, *, architecture,
     definition = {
         'kind': export['kind'], 'architecture': architecture, 'disk_gb': disk_gb,
         'memory_mb': export.get('memory_mb'), 'cpu_cores': export.get('cpu_cores'),
-        'source_identity': dict(export['source_identity']), 'identity_capture': dict(capture),
+        'identity_capture': dict(capture),
         'artifact_sha256': export['artifact_sha256'],
         'artifact': {'volume_id': export['volume_id'], 'node': export['node'],
                      'format': 'vzdump', 'complete_capture': True, 'source_id': export['source_id']},
@@ -1168,9 +1575,45 @@ def publish_exported_image(catalog, image_id, export, *, architecture,
                       'verification': verification}]}
     if windows_capture:
         definition['os_family'] = 'windows'
+        if sealed_capture:
+            definition['display_name'] = 'Windows Server 2025 Desktop Experience'
+            definition['windows_profile'] = 'mhl-server2025-desktop-experience'
     else:
         definition['init_system'] = capture['init_system']
+    if not sealed_capture:
+        definition['source_identity'] = dict(export['source_identity'])
     return publish_image(catalog, image_id, definition)
+
+
+def sealed_windows_verification(capture):
+    """Derive publication evidence from the protected, validated clone proof."""
+    from crange_catalog import validate_sealed_windows_capture
+    validate_sealed_windows_capture(capture)
+    return {'passed': True, 'evidence': {
+        'type': 'sealed-windows-independent-clone-proof',
+        'protected_bundle_sha256': capture['protected_bundle_sha256'],
+        'probe_vmids': [probe['vmid'] for probe in capture['probes']],
+        'machine_guids': [probe['identity']['machine_guid'] for probe in capture['probes']],
+        'machine_sids': [probe['identity']['machine_sid'] for probe in capture['probes']],
+        'readiness': 'unattended-windows-ready',
+        'profile': 'Windows Server 2025 Desktop Experience'}}
+
+
+def disconnected_container_nic(value,index,bridge):
+    """Keep a captured bind address without a gateway or physical connectivity."""
+    import ipaddress
+    fields=dict(part.split('=',1) for part in str(value).split(',') if '=' in part)
+    address=fields.get('ip','manual')
+    if address not in ('manual','dhcp'):
+        try:
+            parsed=ipaddress.IPv4Interface(address)
+        except ValueError:
+            raise DistributionError('Captured container address is invalid.') from None
+        if not any(parsed.ip in ipaddress.IPv4Network(net) for net in ('10.0.0.0/8','172.16.0.0/12','192.168.0.0/16')):
+            raise DistributionError('Captured container address must be private.')
+        address=str(parsed)
+    else:address='manual'
+    return f'name=eth{index},bridge={bridge},ip={address},ip6=manual,link_down=1,type=veth'
 
 
 class ProbeVerifier:
@@ -1181,13 +1624,20 @@ class ProbeVerifier:
     Linux guests use machine-id and Ed25519 host keys. CT exec remains fixed.
     """
     def __init__(self, isolated_bridge, approved_bridges, source_identity,
-                 *, ct_exec=None, timeout=180, init_system="systemd"):
+                 *, ct_exec=None, timeout=None, init_system="systemd"):
         if isolated_bridge not in approved_bridges or not re.fullmatch(r'[a-zA-Z0-9_-]{1,15}', isolated_bridge):
             raise DistributionError('Probe bridge is not approved.')
-        windows_source = source_identity.get('os_family') == 'windows'
+        sealed_windows = (isinstance(source_identity, dict) and
+                          source_identity.get('provenance_type') == 'sealed-windows-source-v1')
+        windows_source = sealed_windows or source_identity.get('os_family') == 'windows'
         if windows_source:
-            from crange_catalog import validate_source_identity
-            validate_source_identity(source_identity)
+            if sealed_windows:
+                from crange_catalog import validate_sealed_windows_capture
+                validate_sealed_windows_capture(source_identity)
+            else:
+                from crange_catalog import validate_source_identity
+                from crange_windows_snapshot import validate_captured_identity
+                validate_captured_identity(source_identity)
             if init_system != 'windows':
                 raise DistributionError('Windows source requires the Windows guest profile.')
         elif not source_identity.get('machine_id') or not source_identity.get('ssh_host_key'):
@@ -1196,7 +1646,11 @@ class ProbeVerifier:
             raise DistributionError('Unsupported reviewed guest readiness profile.')
         self.init_system = init_system
         self.bridge, self.source = isolated_bridge, source_identity
-        self.ct_exec, self.timeout = ct_exec, timeout
+        self.sealed_windows = sealed_windows
+        # Windows restore boots can include filesystem/AD recovery before QGA starts.
+        # Keep the wait bounded without shortening those boots to Linux's limit.
+        self.ct_exec = ct_exec
+        self.timeout = (600 if init_system == 'windows' else 180) if timeout is None else timeout
 
     def __call__(self, api, node, kind, vmid):
         import time
@@ -1210,8 +1664,29 @@ class ProbeVerifier:
                 model_mac = str(config[key]).split(',')[0]
                 fields[key] = f'{model_mac},bridge={self.bridge},link_down=1'
             else:
-                fields[key] = f'name=eth{key[3:]},bridge={self.bridge},ip=manual,ip6=manual,link_down=1,type=veth'
+                fields[key] = disconnected_container_nic(config[key],key[3:],self.bridge)
         fields['onboot'] = 0
+        if kind == 'qemu':
+            # Restored immutable archives may pin a newer source-node QEMU.
+            # Normalize only the isolated disposable probe, never its parent.
+            model = str(config.get('machine', '')).split(',')[0].removeprefix('type=')
+            version = re.fullmatch(r'pc-(?:q35|i440fx)-([0-9]+)\.([0-9]+)(?:\+pve[0-9]+)?', model)
+            if version and tuple(map(int, version.groups())) > (9, 2):
+                from crange_capture import _portable_capture_machine
+                fields['machine'] = _portable_capture_machine(api, node, config)
+        if kind=='qemu' and self.source.get('identity_mode')=='windows-scenario-snapshot-v1':
+            from crange_capture import private_bridge_request
+            markers=[tag for tag in str(config.get('tags','')).split(';') if tag.startswith('crange-job-')]
+            if len(markers)==1:
+                private_bridge_request(node,vmid=vmid,marker=markers[0])
+            else:
+                record=getattr(api,'record',None)
+                if (not isinstance(record,dict) or record.get('probe_id')!=vmid or
+                        record.get('node')!=node or not cache_owned(config,vmid,record.get('job_id'))):
+                    raise DistributionError('Windows snapshot probe requires its exact journal-bound ownership marker.')
+                private_bridge_request(node,vmid=vmid,marker=f'crange-cache-{vmid}',cache_job_id=record['job_id'])
+            fields={key:value.replace('link_down=1','link_down=0') if re.fullmatch(r'net[0-9]+',key) else value
+                    for key,value in fields.items()}
         api.request('PUT', f'/nodes/{node}/{kind}/{vmid}/config', fields)
         start_requested = False
         try:
@@ -1234,48 +1709,110 @@ class ProbeVerifier:
                 if self.ct_exec is None:
                     raise DistributionError('Fixed CT exec adapter is unavailable.')
                 return self.ct_exec(node, vmid, command).strip()
-            response = api.request('POST', f'/nodes/{node}/qemu/{vmid}/agent/exec',
-                                   {'command': command})
+            endpoint = f'/nodes/{node}/qemu/{vmid}/agent/exec'
+            started = time.time()
+            try:
+                response = api.request('POST', endpoint, {'command': command})
+            except Exception as exc:
+                if hasattr(api, 'record_evidence'):
+                    api.record_evidence({'type': 'qga-exec-error', 'path': endpoint,
+                        'command': command, 'error_type': type(exc).__name__,
+                        'error': str(exc)[:2048], 'observed_at': datetime.now(timezone.utc).isoformat()})
+                if getattr(exc, 'code', None) == 403 or 'HTTP 403' in str(exc):
+                    raise GuestAgentPermissionError('QEMU Guest Agent explicitly denied the fixed identity check (HTTP 403).') from exc
+                raise
+            if hasattr(api, 'record_evidence'):
+                api.record_evidence({'type': 'qga-exec', 'path': endpoint,
+                    'command': command, 'response': response,
+                    'observed_at': datetime.now(timezone.utc).isoformat()})
             pid = int(response['pid'])
             deadline = time.monotonic() + self.timeout
+            last_checkpoint = 0.0
             while time.monotonic() < deadline:
-                result = api.request('GET', f'/nodes/{node}/qemu/{vmid}/agent/exec-status', {'pid': pid})
+                status_path = f'/nodes/{node}/qemu/{vmid}/agent/exec-status'
+                try:
+                    result = api.request('GET', status_path, {'pid': pid})
+                except Exception as exc:
+                    if hasattr(api, 'record_evidence'):
+                        api.record_evidence({'type': 'qga-status-error', 'path': status_path,
+                            'pid': pid, 'error_type': type(exc).__name__, 'error': str(exc)[:2048],
+                            'elapsed_seconds': round(time.time() - started, 2),
+                            'observed_at': datetime.now(timezone.utc).isoformat()})
+                    if getattr(exc, 'code', None) == 403 or 'HTTP 403' in str(exc):
+                        raise GuestAgentPermissionError('QEMU Guest Agent explicitly denied the fixed identity check (HTTP 403).') from exc
+                    raise
+                if (hasattr(api, 'record_evidence') and
+                        (result.get('exited') or time.monotonic() - last_checkpoint >= 15)):
+                    api.record_evidence({'type': 'qga-status', 'path': status_path,
+                        'pid': pid, 'response': result,
+                        'elapsed_seconds': round(time.time() - started, 2),
+                        'observed_at': datetime.now(timezone.utc).isoformat()})
+                    last_checkpoint = time.monotonic()
                 if result.get('exited'):
                     if int(result.get('exitcode', -1)) != 0:
-                        raise DistributionError('Probe identity/readiness command failed.')
+                        error = DistributionError('Probe identity/readiness command failed.')
+                        if (command == ['/usr/bin/systemctl', 'is-system-running'] and
+                                str(result.get('out-data', '')).strip() == 'degraded'):
+                            error.collector_state = 'degraded'
+                        raise error
                     return str(result.get('out-data', '')).strip()
                 time.sleep(1)
+            if hasattr(api, 'record_evidence'):
+                api.record_evidence({'type': 'qga-timeout', 'path': status_path,
+                    'pid': pid, 'timeout_seconds': self.timeout,
+                    'elapsed_seconds': round(time.time() - started, 2),
+                    'observed_at': datetime.now(timezone.utc).isoformat()})
             raise DistributionError('Probe guest-agent check timed out.')
         if self.init_system == 'windows':
             deadline = time.monotonic() + self.timeout
             identity = None
             while time.monotonic() < deadline:
                 try:
-                    identity = _windows_guest_identity(read)
+                    if self.source.get('identity_mode')=='windows-scenario-snapshot-v1':
+                        from crange_windows_snapshot import collect
+                        live=api.request('GET',f'/nodes/{node}/{kind}/{vmid}/config')
+                        identity=collect(read,live.get('vmgenid'),self.source['snapshot_project_id'])
+                    else: identity = _windows_guest_identity(read)
                     break
+                except GuestAgentPermissionError:
+                    raise
                 except Exception:
                     # QEMU Agent availability may precede Windows service readiness.
                     pass
                 time.sleep(2)
             if identity is None:
                 raise DistributionError('Disposable Windows clone did not become ready.')
-            unique = (identity['machine_guid'] != self.source['machine_guid'] and
-                      identity['machine_sid'] != self.source['machine_sid'] and
-                      identity['local_administrator_sid'] != self.source['local_administrator_sid'] and
-                      identity['os_caption'] == self.source['os_caption'] and
-                      identity['os_build'] == self.source['os_build'])
+            if self.source.get('identity_mode')=='windows-scenario-snapshot-v1':
+                from crange_windows_snapshot import verify_clone
+                result=verify_clone(self.source,identity)
+                return {'passed':result['passed'],'identity_unique':result['instance_generation_unique'],
+                        'evidence':{'type':'windows-scenario-restore','identity':identity,'isolated_bridge':self.bridge,
+                                    'service_identity_preserved':True}}
+            if self.sealed_windows:
+                unique = all(identity[field] not in {probe['identity'][field] for probe in self.source['probes']}
+                             for field in ('machine_guid', 'machine_sid', 'local_administrator_sid'))
+                reference = self.source['probes'][0]['identity']
+            else:
+                unique = (identity['machine_guid'] != self.source['machine_guid'] and
+                          identity['machine_sid'] != self.source['machine_sid'] and
+                          identity['local_administrator_sid'] != self.source['local_administrator_sid'])
+                reference = self.source
+            unique = (unique and identity['os_caption'] == reference['os_caption'] and
+                      identity['os_build'] == reference['os_build'])
             return {'passed': unique, 'identity_unique': unique,
                     'evidence': {'readiness': 'windows-ready', 'identity': identity,
                                  'isolated_bridge': self.bridge}}
         deadline = time.monotonic() + self.timeout
         readiness = ''
+        offline_preparation = None
         while time.monotonic() < deadline:
             try:
                 readiness = _guest_readiness(read, self.init_system)
                 if readiness == ('running' if self.init_system == 'systemd' else 'default'): break
-            except Exception:
+            except Exception as error:
                 # Guest-agent initialization may lag behind host task completion.
-                pass
+                if getattr(error, 'collector_state', None) == 'degraded':
+                    offline_preparation = normalize_isolated_network_wait(api, node, kind, vmid, self.bridge)
             time.sleep(2)
         if readiness != ('running' if self.init_system == 'systemd' else 'default'):
             raise DistributionError('Disposable clone did not become ready.')
@@ -1286,15 +1823,42 @@ class ProbeVerifier:
         unique = (valid_id and machine_id != self.source['machine_id'] and
                   key_identity(ssh_host_key) != key_identity(self.source['ssh_host_key']) and
                   ssh_host_key.startswith('ssh-ed25519 '))
-        return {'passed': unique, 'identity_unique': unique,
-                'evidence': {'readiness': readiness, 'machine_id': machine_id,
-                             'ssh_host_key': ssh_host_key, 'isolated_bridge': self.bridge}}
+        evidence = {'readiness': readiness, 'machine_id': machine_id,
+                    'ssh_host_key': ssh_host_key, 'isolated_bridge': self.bridge}
+        if offline_preparation:
+            evidence['offline_network_readiness'] = offline_preparation
+        return {'passed': unique, 'identity_unique': unique, 'evidence': evidence}
+
+
+def owned_container_marker(config):
+    tags=str(config.get('tags','')).split(';')
+    jobs=[t for t in tags if re.fullmatch(r'crange-job-[a-zA-Z0-9-]{1,64}',t)]
+    captures=[t for t in tags if re.fullmatch(r'crange-capture-[a-f0-9]{12}',t)]
+    compact=[t for t in tags if re.fullmatch(r'crange-cache-[0-9]+',t)]
+    if not jobs and not captures and len(compact)==1:
+        return compact[0]
+    if len(jobs)>1 or len(captures)>1 or not (jobs or captures):
+        raise DistributionError('Owned container lacks one current worker marker.')
+    return jobs[0] if jobs else captures[0]
 
 
 class UnixContainerBackingVerifier:
+    def __init__(self, api=None): self.api=api
     def __call__(self, node, source_id, probe_id):
         import socket
         request = {'node': node, 'vmid': probe_id, 'source_id': source_id, 'command': 'linked-backing'}
+        if self.api is not None:
+            markers=[]
+            for vmid in (probe_id,source_id):
+                config=self.api.request('GET',f'/nodes/{node}/lxc/{vmid}/config')
+                markers.append(owned_container_marker(config))
+            request.update(command='owned-linked-backing',marker=markers[0],source_marker=markers[1])
+            if markers[0].startswith('crange-cache-'):
+                probe=self.api.request('GET',f'/nodes/{node}/lxc/{probe_id}/config')
+                description=str(probe.get('description','')).rstrip('\r\n')
+                match=re.fullmatch(r'CRANGE verification (cache-[a-f0-9]{32})',description)
+                if not match:raise DistributionError('Compact probe lacks its exact hidden job identity.')
+                request['cache_job_id']=match[1]
         with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as client:
             client.settimeout(65); client.connect('/run/crange-ct-read/socket')
             client.sendall(json.dumps(request).encode() + b'\n')
@@ -1313,10 +1877,12 @@ class UnixContainerBackingVerifier:
 
 class SSHContainerExec:
     """Only the verifier's three fixed readonly commands are executable."""
-    def __init__(self, run=None): self.run = run or subprocess.run
+    def __init__(self, run=None, api=None): self.run, self.api = run or subprocess.run, api
 
     def __call__(self, node, vmid, command):
         allowed = [['/usr/bin/systemctl', 'is-system-running'], ['/bin/rc-status', '--runlevel'],
+                   ['/usr/bin/systemctl', '--failed', '--no-pager', '--no-legend'],
+                   ['/usr/bin/systemctl', 'status', 'postgresql@15-main.service', '--no-pager', '--lines=15'],
                    ['/sbin/rc-status', '--runlevel'],
                    ['/bin/cat', '/etc/machine-id'],
                    ['/bin/cat', '/etc/ssh/ssh_host_ed25519_key.pub']]
@@ -1326,8 +1892,15 @@ class SSHContainerExec:
         if relay.exists():
             import socket
             from crange_ct_read_relay import COMMANDS
-            request = {'node': node, 'vmid': int(vmid),
-                       'command': next(key for key, value in COMMANDS.items() if value == command)}
+            read = next(key for key, value in COMMANDS.items() if value == command)
+            request = {'node': node, 'vmid': int(vmid), 'command': read}
+            if self.api is not None:
+                config = self.api.request('GET', f'/nodes/{node}/lxc/{int(vmid)}/config')
+                request.update(command='owned-image-read', read=read, marker=owned_container_marker(config))
+                if request['marker'].startswith('crange-cache-'):
+                    match=re.fullmatch(r'CRANGE verification (cache-[a-f0-9]{32})',str(config.get('description','')).rstrip('\r\n'))
+                    if not match:raise DistributionError('Compact probe lacks its exact hidden job identity.')
+                    request['cache_job_id']=match[1]
             with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as client:
                 client.settimeout(65); client.connect(str(relay))
                 client.sendall(json.dumps(request).encode() + b'\n')
@@ -1346,6 +1919,26 @@ class SSHContainerExec:
                           shlex.join(['pct', 'exec', str(int(vmid)), '--'] + command)],
                          check=True, capture_output=True, text=True, timeout=60)
         return result.stdout
+
+
+def generalize_capture_container(node, vmid, marker):
+    """Ask the authenticated root relay to clear identity only in a capture clone."""
+    import socket
+    value = {'node': node, 'vmid': vmid, 'command': 'capture-container-generalize', 'marker': marker}
+    with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as client:
+        client.settimeout(65); client.connect('/run/crange-ct-read/socket')
+        client.sendall(json.dumps(value).encode()+b'\n')
+        data=b''
+        while not data.endswith(b'\n') and len(data)<=8192:
+            chunk=client.recv(8193-len(data))
+            if not chunk: break
+            data+=chunk
+    if len(data)>8192 or not data.endswith(b'\n'):
+        raise DistributionError('Container generalization relay response is invalid.')
+    result=json.loads(data)
+    if set(result)!={'value'} or not isinstance(result['value'],str):
+        raise DistributionError('Container generalization relay refused the capture scope.')
+    return json.loads(result['value'])
 
 
 def catalog_transaction(path, update):
@@ -1390,6 +1983,10 @@ def main(argv=None):
                         help='Administrator policy including approved_storage/backup_storage/tested_paths')
     commands = parser.add_subparsers(dest='action', required=True)
     commands.add_parser('inventory')
+    commands.add_parser('capture-sealed-windows-p100',
+                        help='Read fixed root-private P100 evidence and revalidate the stopped source/probes')
+    commands.add_parser('template-sealed-windows-p100',
+                        help='Convert only the fixed, journaled P100 sealed Windows source to a template')
     capture = commands.add_parser('identity-capture')
     capture.add_argument('--node', required=True)
     capture.add_argument('--kind', choices=['vm', 'container'], required=True)
@@ -1405,7 +2002,8 @@ def main(argv=None):
     export.add_argument('--identity-record', type=Path, required=True)
     publish = commands.add_parser('publish')
     publish.add_argument('--export-record', type=Path, required=True)
-    publish.add_argument('--verification', type=Path, required=True)
+    publish.add_argument('--verification', type=Path,
+                         help='Normal source verification record; sealed P100 derives this from protected proof.')
     publish.add_argument('--image-id', required=True)
     publish.add_argument('--architecture', default='amd64')
     publish.add_argument('--source-revision', required=True)
@@ -1433,6 +2031,7 @@ def main(argv=None):
     source_probe.add_argument('--source-id', type=int, required=True)
     source_probe.add_argument('--identity-record', type=Path, required=True)
     source_probe.add_argument('--clone-mode', choices=['full', 'linked'], default='full')
+    source_probe.add_argument('--auto-storage', action='store_true', help='Prefer the selected datastore; allow another approved local full-VM probe destination')
     reconcile_probe = commands.add_parser('source-probe-reconcile')
     reconcile_probe.add_argument('--job-id', required=True)
     resume_probe = commands.add_parser('source-probe-resume')
@@ -1447,10 +2046,20 @@ def main(argv=None):
     journal = FileJournal(args.journal_dir)
     if args.action == 'inventory':
         print(json.dumps(discover(api, policy.get('placement', DEFAULT_POLICY)), indent=2))
+    elif args.action == 'capture-sealed-windows-p100':
+        from crange_capture import capture_sealed_windows_source
+        with node_locks(['proxmox4'], library=True), journal.allocation_lock():
+            record = capture_sealed_windows_source(api, journal)
+        print(json.dumps(record, indent=2))
+    elif args.action == 'template-sealed-windows-p100':
+        from crange_capture import convert_sealed_windows_p100
+        with node_locks(['proxmox4'], library=True), journal.allocation_lock():
+            record = convert_sealed_windows_p100(api, journal)
+        print(json.dumps(record, indent=2))
     elif args.action == 'identity-capture':
         with node_locks([args.node]), journal.allocation_lock():
             record = capture_source_identity(api, node=args.node, kind=args.kind, vmid=args.source_id,
-                job_id=args.job_id, journal=journal, ct_exec=SSHContainerExec(), init_system=args.init_system)
+                job_id=args.job_id, journal=journal, ct_exec=SSHContainerExec(api=api), init_system=args.init_system)
         print(json.dumps(record, indent=2))
     elif args.action == 'export':
         with node_locks([args.node], library=True), journal.allocation_lock():
@@ -1462,7 +2071,15 @@ def main(argv=None):
         print(json.dumps(record, indent=2))
     elif args.action == 'publish':
         export_record = json.loads(args.export_record.read_text())
-        verification = json.loads(args.verification.read_text())
+        capture = export_record.get('identity_capture', {})
+        if capture.get('provenance_type') == 'sealed-windows-source-v1':
+            if args.verification is not None:
+                raise DistributionError('Sealed P100 verification is derived from protected clone proof, not a supplied file.')
+            verification = sealed_windows_verification(capture)
+        elif args.verification is not None:
+            verification = json.loads(args.verification.read_text())
+        else:
+            raise DistributionError('Normal publication requires a reviewed verification record.')
         catalog_transaction(args.catalog, lambda catalog: publish_exported_image(
             catalog, args.image_id, export_record, architecture=args.architecture,
             source_revision=args.source_revision, approved_projects=_project_approval_scope(args),
@@ -1501,17 +2118,24 @@ def main(argv=None):
             raise DistributionError('Probe bridge is not approved by administrator policy.')
         from crange_placement import PlacementError, ReservationLedger
         import crange_scheduling as scheduling
-        from crange_catalog import validate_source_identity
         capture = json.loads(args.identity_record.read_text())
-        validate_source_identity(capture.get('source_identity'))
+        if capture.get('provenance_type') == 'sealed-windows-source-v1':
+            _require_worker_sealed_record(capture, args.identity_record)
+        else:
+            from crange_catalog import validate_source_identity
+            from crange_windows_snapshot import validate_captured_identity
+            validate_captured_identity(capture.get('source_identity'))
         kind = _source_guest_type(capture)
         profile = _source_capture_profile(capture)
-        if ((capture.get('state'), capture.get('node'), capture.get('kind'), capture.get('source_id')) !=
-                ('identity-captured', args.source_node, 'vm' if kind == 'qemu' else 'container', args.source_id) or
+        valid_states = ('sealed-source-captured', 'identity-captured') if capture.get('provenance_type') == 'sealed-windows-source-v1' else ('identity-captured',)
+        if ((capture.get('state') not in valid_states or
+                (capture.get('node'), capture.get('kind'), capture.get('source_id')) !=
+                (args.source_node, 'vm' if kind == 'qemu' else 'container', args.source_id)) or
                 not capture.get('job_id')):
             raise DistributionError('Identity record is not bound to the selected captured source.')
         verify = ProbeVerifier(args.isolated_bridge, policy.get('isolated_bridges', []),
-            capture['source_identity'], ct_exec=SSHContainerExec(), init_system=profile)
+            capture if profile == 'windows' and capture.get('provenance_type') == 'sealed-windows-source-v1'
+            else capture['source_identity'], ct_exec=SSHContainerExec(api=api), init_system=profile)
         ledger = ReservationLedger(scheduling.DATA / 'reservations.sqlite3')
         source_ref = f'source:{args.source_node}:{kind}:{args.source_id}'
         source_sha = capture['source_config_sha256']
@@ -1527,19 +2151,21 @@ def main(argv=None):
                 capacity = _source_capacity(source, kind)
                 inventory = discover(api, policy)
                 try:
-                    allocation = ledger.reserve_source_probe(project_id=args.project,
+                    allocation = reserve_probe_storage(ledger, auto_storage=args.auto_storage, project_id=args.project,
                         job_id=args.job_id, owner='cli', source_ref=source_ref,
                         source_sha256=source_sha, node_name=args.source_node,
                         datastore_id=args.datastore_id, capacity=capacity,
                         inventory=inventory, policy=policy, kind=capture['kind'], clone_mode=args.clone_mode)
                     ledger.mark_running(args.job_id)
                 except PlacementError as exc:
-                    raise DistributionError('Shared-ledger source-probe reservation failed.') from exc
+                    raise DistributionError('Shared-ledger source-probe reservation failed: ' + str(exc)) from exc
                 validator = shared_reservation_validator(ledger, args.job_id,
                     allocation, source_ref, source_sha)
-                worker = SourceProbeWorker(api, journal, verify, validator, backing_verifier=UnixContainerBackingVerifier())
+                if args.auto_storage:
+                    print(f"Full-copy probe storage: {args.source_node}/{allocation['resolved']['datastore_id']}",flush=True)
+                worker = SourceProbeWorker(api, journal, verify, validator, backing_verifier=UnixContainerBackingVerifier(api=api))
                 record = worker.run(source_node=args.source_node, source_id=args.source_id,
-                    datastore_id=args.datastore_id, job_id=args.job_id,
+                    datastore_id=allocation['resolved']['datastore_id'], job_id=args.job_id,
                     capture=capture, reservation=allocation)
                 inventory = discover(api, policy)
                 if (record.get('state') != 'source-probed' or
@@ -1561,17 +2187,24 @@ def main(argv=None):
             raise DistributionError('Probe bridge is not approved by administrator policy.')
         from crange_placement import PlacementError, ReservationLedger
         import crange_scheduling as scheduling
-        from crange_catalog import validate_source_identity
         capture = json.loads(args.identity_record.read_text())
-        validate_source_identity(capture.get('source_identity'))
+        if capture.get('provenance_type') == 'sealed-windows-source-v1':
+            _require_worker_sealed_record(capture, args.identity_record)
+        else:
+            from crange_catalog import validate_source_identity
+            from crange_windows_snapshot import validate_captured_identity
+            validate_captured_identity(capture.get('source_identity'))
         kind = _source_guest_type(capture)
         profile = _source_capture_profile(capture)
-        if ((capture.get('state'), capture.get('node'), capture.get('kind'), capture.get('source_id')) !=
-                ('identity-captured', args.source_node, 'vm' if kind == 'qemu' else 'container', args.source_id) or
+        valid_states = ('sealed-source-captured', 'identity-captured') if capture.get('provenance_type') == 'sealed-windows-source-v1' else ('identity-captured',)
+        if ((capture.get('state') not in valid_states or
+                (capture.get('node'), capture.get('kind'), capture.get('source_id')) !=
+                (args.source_node, 'vm' if kind == 'qemu' else 'container', args.source_id)) or
                 not capture.get('job_id')):
             raise DistributionError('Identity record is not bound to the selected captured source.')
         verify = ProbeVerifier(args.isolated_bridge, policy.get('isolated_bridges', []),
-            capture['source_identity'], ct_exec=SSHContainerExec(), init_system=profile)
+            capture if profile == 'windows' and capture.get('provenance_type') == 'sealed-windows-source-v1'
+            else capture['source_identity'], ct_exec=SSHContainerExec(api=api), init_system=profile)
         ledger = ReservationLedger(scheduling.DATA / 'reservations.sqlite3')
         source_ref = f'source:{args.source_node}:{kind}:{args.source_id}'
         source_sha = capture['source_config_sha256']
@@ -1607,7 +2240,7 @@ def main(argv=None):
                     raise DistributionError('Captured source template identity changed.')
                 probe_id = int(record.get('probe_id', 0))
                 task_upid = find_source_clone_task(api, args.source_node, args.source_id, probe_id, kind)
-                worker = SourceProbeWorker(api, journal, verify, validator, backing_verifier=UnixContainerBackingVerifier())
+                worker = SourceProbeWorker(api, journal, verify, validator, backing_verifier=UnixContainerBackingVerifier(api=api))
                 completed = worker.resume(source_node=args.source_node,
                     source_id=args.source_id, datastore_id=datastore_id,
                     job_id=args.job_id, capture=capture, reservation=allocation,
@@ -1634,11 +2267,16 @@ def main(argv=None):
         from crange_cache_jobs import artifact_pin
         import crange_scheduling as scheduling
         source_identity = json.loads(args.source_identity.read_text())
-        from crange_catalog import validate_source_identity
-        validate_source_identity(source_identity)
+        sealed_windows = source_identity.get('provenance_type') == 'sealed-windows-source-v1'
+        if sealed_windows:
+            _require_worker_sealed_record(source_identity, args.source_identity)
+        else:
+            from crange_catalog import validate_source_identity
+            from crange_windows_snapshot import validate_captured_identity
+            validate_captured_identity(source_identity)
         verify = ProbeVerifier(args.isolated_bridge, policy.get('isolated_bridges', []),
-            source_identity, ct_exec=SSHContainerExec(),
-            init_system='windows' if source_identity.get('os_family') == 'windows' else 'systemd')
+            source_identity, ct_exec=SSHContainerExec(api=api),
+            init_system='windows' if sealed_windows or source_identity.get('os_family') == 'windows' else 'systemd')
         archive = json.loads(args.archive.read_text()) if args.archive else None
         ledger = ReservationLedger(scheduling.DATA / 'reservations.sqlite3')
         try:
@@ -1648,13 +2286,18 @@ def main(argv=None):
                     if (not image or ('*' not in image.get('approved_projects', []) and
                                       args.project not in image.get('approved_projects', []))):
                         raise DistributionError('Image is not approved for the selected project.')
-                    expected_identity = (image.get('source_identity') or
+                    image_capture = image.get('identity_capture') or {}
+                    image_is_sealed = image_capture.get('provenance_type') == 'sealed-windows-source-v1'
+                    expected_identity = (image_capture if image_is_sealed else
+                                         image.get('source_identity') or
                                          image.get('verification', {}).get('source_identity'))
                     if archive:
-                        expected_identity = archive.get('identity_capture', {}).get('source_identity')
+                        archive_capture = archive.get('identity_capture', {})
+                        expected_identity = archive_capture if image_is_sealed else archive_capture.get('source_identity')
                         artifact = image.get('artifact', {})
                         if (archive.get('state') != 'exported' or not archive.get('complete_capture') or
-                                archive.get('source_identity') != source_identity or
+                                (archive.get('identity_capture') != source_identity if image_is_sealed else
+                                 archive.get('source_identity') != source_identity) or
                                 archive.get('artifact_sha256') != image.get('artifact_sha256') or
                                 archive.get('source_id') != args.source_id or
                                 archive.get('node') != args.source_node or
@@ -1682,7 +2325,7 @@ def main(argv=None):
                         approved_storage=map(tuple, policy.get('approved_storage', [])),
                         tested_paths=policy.get('tested_paths', []),
                         allocation_lock=journal.allocation_lock, hash_volume=SSHVolumeHasher(),
-                        reservation_validator=validator, backing_verifier=UnixContainerBackingVerifier())
+                        reservation_validator=validator, backing_verifier=UnixContainerBackingVerifier(api=api))
                     if archive:
                         with artifact_pin(archive['volume_id'], image['artifact_sha256'], args.job_id):
                             return worker.prepare(catalog, args.image_id,
@@ -1784,7 +2427,32 @@ def publish_stock_archive(catalog, image_id, *, node, template_file_id,
             'datastore_id': template_file_id.split(':')[0], 'state': 'ready',
             'artifact_sha256': expected_sha256,
             'verified_at': datetime.now(timezone.utc).isoformat(), 'verification': verification}]})
-def required_capacity(image, *, clone_mode='linked', source_config=None):
+def automatic_probe_candidate(image):
+    """A proposed test size, never evidence that the guest boots at that size."""
+    if image.get('probe_resources') or image.get('kind') != 'vm' or image.get('os_family') == 'windows':
+        return None
+    if image.get('init_system', image.get('identity_capture', {}).get('init_system')) != 'systemd':
+        return None
+    memory, cpu = image.get('memory_mb'), image.get('cpu_cores')
+    if (type(memory) is not int or type(cpu) is not int or memory <= 2048 or cpu < 1):
+        return None
+    return {'memory_mb': 2048, 'cpu_cores': min(cpu, 2)}
+
+
+def validate_probe_candidate(image, candidate):
+    if candidate is None:
+        return None
+    approved = image.get('probe_resources') or {}
+    approved_size = {key: approved.get(key) for key in ('memory_mb', 'cpu_cores')}
+    if (not isinstance(candidate, dict) or set(candidate) != {'memory_mb', 'cpu_cores'} or
+            any(type(value) is not int for value in candidate.values()) or
+            (candidate != automatic_probe_candidate(image) and
+             not (approved.get('verified') is True and candidate == approved_size))):
+        raise DistributionError('Probe candidate differs from the fixed Linux verification profile.')
+    return candidate
+
+
+def required_capacity(image, *, clone_mode='linked', source_config=None, probe_candidate=None):
     """Reserve the full base plus worst-case disposable-probe disk writes.
 
     Full allocation is used even for a linked verification probe: thin storage
@@ -1799,12 +2467,26 @@ def required_capacity(image, *, clone_mode='linked', source_config=None):
         from crange_catalog import validate_probe_resources
         profile = validate_probe_resources(image['probe_resources'])
         memory, cpu = profile['memory_mb'], profile['cpu_cores']
+    candidate = validate_probe_candidate(image, probe_candidate)
+    if candidate:
+        memory, cpu = candidate['memory_mb'], candidate['cpu_cores']
     if any(isinstance(value, bool) or not isinstance(value, (int, float)) or
            not math.isfinite(value) or value <= 0 for value in (disk, memory, cpu)):
         raise DistributionError('Cache preparation requires defensible disk/RAM/CPU allocations.')
     return {'disk_gb': disk * 2.1, 'memory_mb': memory, 'cpu_cores': cpu,
             'base_disk_gb': disk, 'probe_disk_gb': disk, 'temporary_disk_gb': disk * .1,
             'clone_mode': clone_mode}
+
+
+def preparation_peak_capacity(cache, guests):
+    """Budget serialized verification/deployment peaks, retaining the base."""
+    result = dict(cache)
+    for key in ('memory_mb', 'cpu_cores', 'disk_gb'):
+        value = guests.get(key, 0)
+        if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value) or value < 0:
+            raise DistributionError('Invalid trusted staging capacity demand.')
+        result[key] = max(cache.get(key, 0), value + (cache.get('base_disk_gb', 0) if key == 'disk_gb' else 0))
+    return result
 
 
 if __name__ == '__main__':

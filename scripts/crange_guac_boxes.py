@@ -41,14 +41,22 @@ def resolve(project, key):
     address = ipaddress.IPv4Address(live['address'])
     if address not in ipaddress.IPv4Network(f'10.{int(project)}.{network_id}.0/24'):
         raise CrangeError('Applied box address is outside its declared subnet.')
-    node = live.get('node_name', box['node_name'])
-    if node not in {f'proxmox{i}' for i in range(1, 7)}:
-        raise CrangeError('Applied box has no verified physical node; refresh its applied outputs.')
     vmid = int(live['id'])
     api = ProxmoxAPI()
+    resources = api.request('GET', '/cluster/resources', {'type': 'vm'})
+    matches = [item for item in resources if int(item.get('vmid', -1)) == vmid
+               and item.get('type') == ('lxc' if kind == 'container' else 'qemu')]
+    if len(matches) != 1:
+        raise CrangeError('Applied box is missing or ambiguous in the live cluster.')
+    node = matches[0].get('node')
+    if node not in {f'proxmox{i}' for i in range(1, 7)}:
+        raise CrangeError('Applied box has no verified physical node; refresh its applied outputs.')
     actual = (api.container if kind == 'container' else api.vm)(node, vmid)
     if actual.get('name', actual.get('hostname')) != expected or int(actual.get('template', 0)):
         raise CrangeError('Applied box identity does not match this project; refusing operation.')
+    if not any(re.search(r'(?:^|,)bridge=' + re.escape(vnet) + r'(?:,|$)', str(value))
+               for field, value in actual.items() if re.fullmatch(r'net\d+', field)):
+        raise CrangeError('Applied box network does not match this project; refusing operation.')
     return path, cfg, box, api, kind, node, vmid, str(address)
 
 

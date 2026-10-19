@@ -1,0 +1,53 @@
+{
+  "removed_ids_confirmed_absent": [
+    177,
+    184,
+    185,
+    186,
+    187,
+    188,
+    189
+  ],
+  "originals_running": [
+    {
+      "id": 124,
+      "node": "proxmox2",
+      "name": "p100t254-mhl-ci01"
+    },
+    {
+      "id": 125,
+      "node": "proxmox2",
+      "name": "p100t254-mhl-app01"
+    },
+    {
+      "id": 126,
+      "node": "proxmox2",
+      "name": "p100t254-mhl-bkp01"
+    },
+    {
+      "id": 127,
+      "node": "proxmox1",
+      "name": "p100t254-mhl-db01"
+    },
+    {
+      "id": 128,
+      "node": "proxmox1",
+      "name": "p100t254-mhl-dc01"
+    },
+    {
+      "id": 129,
+      "node": "proxmox1",
+      "name": "p100t254-mhl-file01"
+    }
+  ],
+  "release_caches_preserved": [
+    178,
+    179,
+    180,
+    181,
+    182,
+    183
+  ],
+  "guacamole_connection_count": 6,
+  "guacamole_status": "applied"
+}

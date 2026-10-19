@@ -13,6 +13,17 @@ from crange_image_cache import CacheError
 
 
 class CacheJobTests(unittest.TestCase):
+    def test_sealed_windows_cache_uses_exact_null_sid_capture(self):
+        capture = {'provenance_type': 'sealed-windows-source-v1', 'source_identity': None,
+                   'probes': [{'identity': {'machine_guid': 'g', 'machine_sid': 's',
+                                             'local_administrator_sid': 'a'}}]}
+        identity, profile, sealed = jobs._cache_probe_identity({
+            'identity_capture': capture, 'init_system': 'systemd'})
+        self.assertIs(identity, capture)
+        self.assertEqual(profile, 'windows')
+        self.assertTrue(sealed)
+        self.assertIsNone(identity['source_identity'])
+
     def test_ready_generation_reused_without_new_ledger_reservation(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
@@ -125,8 +136,9 @@ class CacheJobTests(unittest.TestCase):
                 result = jobs.prepare_cache(project_id=3, image_id='base-v1', node_name='proxmox2', job_id='prepare',
                     additional_capacity={'memory_mb': 1024, 'cpu_cores': 2, 'disk_gb': 8})
             self.assertFalse(result['reused'])
-            self.assertEqual(allocation_seen[0]['resources']['memory_mb'], 1536)
-            self.assertAlmostEqual(allocation_seen[0]['resources']['disk_gb'], 24.8)
+            self.assertEqual(allocation_seen[0]['resources']['memory_mb'], 1024)
+            self.assertEqual(allocation_seen[0]['resources']['cpu_cores'], 2)
+            self.assertAlmostEqual(allocation_seen[0]['resources']['disk_gb'], 16.8)
             ledger = jobs.ReservationLedger(root / 'reservations.sqlite3')
             try: self.assertEqual(ledger.get_job('prepare')['state'], 'released')
             finally: ledger.close()
@@ -177,3 +189,37 @@ class CacheJobTests(unittest.TestCase):
         with self.assertRaisesRegex(CacheError, 'Every cluster node'):
             jobs.collect_cache_evidence(api, {}, 'base-v1', 'proxmox2', 200,
                                         ledger=Mock(), journal=Mock(), policy={})
+
+class PreallocationRecoveryTests(unittest.TestCase):
+    def test_only_exact_journal_free_cache_reservation_is_released(self):
+        from contextlib import nullcontext
+        from crange_placement import ReservationLedger
+        identity='cache-'+'a'*32
+        item={'operation':'cache_prepare','image':'base','artifact_sha256':'b'*64,
+              'resolved':{'node_name':'proxmox5','datastore_id':'crange-thin'},
+              'resources':{'memory_mb':4096,'cpu_cores':2,'disk_gb':134},
+              'resource_key':'cache:base:proxmox5:crange-thin','reservation_id':'reservation'}
+        for has_journal,foreign_pin,project,expected in [(False,False,100,[identity]),(True,False,100,[]),(False,True,100,[]),(False,False,101,[])]:
+            with self.subTest(journal=has_journal,foreign=foreign_pin,project=project),tempfile.TemporaryDirectory() as directory:
+                root=Path(directory);ledger=ReservationLedger(root/'reservations.sqlite3')
+                ledger.db.execute('INSERT INTO jobs (job_id,project_id,owner,state,expires,heartbeat,allocations) VALUES (?,?,?,?,?,?,?)',(identity,100,'admin','running',9999999999,0,json.dumps([item])));ledger.close()
+                journal=root/'cache-journal';journal.mkdir()
+                if has_journal:(journal/(identity+'.json')).write_text('{}')
+                pins=root/'artifact-pins';pins.mkdir();pin=pins/(identity+'.json')
+                pin.write_text(json.dumps({'job_id':identity,'state':'active','volume_id':'crange-library:backup/test',
+                    'artifact_sha256':'c'*64 if foreign_pin else 'b'*64}))
+                policy={'enabled':True,'allowed_nodes':['proxmox5']}
+                catalog={'images':{'base':{'artifact_sha256':'b'*64,'artifact':{'volume_id':'crange-library:backup/test'},'replicas':[]}}}
+                with patch.object(jobs,'_root',return_value=root),patch.object(jobs,'_settings',return_value=(policy,catalog)),patch.object(jobs.scheduling,'node_locks',return_value=nullcontext()):
+                    self.assertEqual(jobs.reconcile_unstarted_caches(project),expected)
+                ledger=ReservationLedger(root/'reservations.sqlite3');state=ledger.db.execute('SELECT state FROM jobs').fetchone()[0];ledger.close()
+                self.assertEqual(state,'released' if expected else 'running')
+                self.assertEqual(pin.exists(),not bool(expected))
+
+    def test_native_storage_proof_must_match_exact_destination(self):
+        proof={'node':'proxmox5','storage':'crange-thin','state':'ready','snapshots_verified':True,'proof_volumes_deleted':True}
+        policy={'nodes':{'proxmox5':{'storage_proofs':{'crange-thin':proof},'snapshot_storages':['crange-thin']}}}
+        self.assertEqual(jobs.proved_linked_storage(policy,'proxmox5','crange-thin'),[('proxmox5','crange-thin')])
+        self.assertEqual(jobs.proved_linked_storage(policy,'proxmox1','crange-thin'),[])
+        proof['proof_volumes_deleted']=False
+        self.assertEqual(jobs.proved_linked_storage(policy,'proxmox5','crange-thin'),[])

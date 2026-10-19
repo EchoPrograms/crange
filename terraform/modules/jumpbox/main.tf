@@ -29,7 +29,7 @@ resource "proxmox_virtual_environment_vm" "jump" {
   on_boot = false
 
   bios          = var.template_profile.bios
-  machine       = var.template_profile.machine
+  machine       = var.box.machine != null ? var.box.machine : var.template_profile.machine
   scsi_hardware = var.template_profile.scsi_hardware
   boot_order    = ["scsi0"]
 

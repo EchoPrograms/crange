@@ -73,6 +73,15 @@ class TemplateReadinessTests(unittest.TestCase):
             self.assertEqual(result['alpine-v1']['image_id'], 'alpine-v1')
             self.assertEqual(result['alpine-v1']['template_id'], 147)
             api.request.assert_called_once_with('GET', '/nodes/proxmox2/qemu/147/config')
+            # Another ready cache must not rewrite an already approved alias.
+            image['replicas']=[{**replica,'node':'proxmox3','template_id':148}]
+            api.request.return_value={'template':1,'tags':'crange-cache-148;crange-image'}
+            previous=result['alpine-v1']
+            with patch('crange.project_dir',return_value=root), \
+                    patch('crange_scheduling.read_settings',return_value=({}, {'images':{'alpine-v1':image}})):
+                again=crange_templates.approve_catalog_image('alpine-v1',[1],api)
+            self.assertEqual(json.loads((root/'approved-scenario-templates.json').read_text())['alpine-v1'],previous)
+            self.assertEqual(again['template_id'],147)
 
     def test_admin_link_rejects_unapproved_or_unverified_images(self):
         base = {'kind': 'vm', 'verified': True, 'approved_projects': [1],
@@ -87,13 +96,37 @@ class TemplateReadinessTests(unittest.TestCase):
                               'verification': {'passed': True, 'evidence': {
                                   'machine_id': 'replica-id', 'ssh_host_key': 'ssh-ed25519 replica-key'}}}]}
         with patch('crange_scheduling.read_settings', return_value=({}, {'images': {'alpine-v1': base}})):
-            with self.assertRaisesRegex(ValueError, 'approved for all projects'):
-                crange_templates.approve_catalog_image('alpine-v1', [1], Mock())
+            with self.assertRaisesRegex(ValueError, 'not approved for every selected project'):
+                crange_templates.approve_catalog_image('alpine-v1', [2], Mock())
         base['approved_projects'] = ['*']
         base['verified'] = False
         with patch('crange_scheduling.read_settings', return_value=({}, {'images': {'alpine-v1': base}})):
-            with self.assertRaisesRegex(ValueError, 'verified VM image'):
+            with self.assertRaisesRegex(ValueError, 'verified VM or container image'):
                 crange_templates.approve_catalog_image('alpine-v1', [1], Mock())
+
+    def test_container_approval_uses_lxc_and_preserves_vm_approvals(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / 'approved-scenario-templates.json').write_text('{"existing-vm": {}}')
+            (root / 'approved-container-templates.json').write_text('{}')
+            image = {'kind': 'container', 'verified': True, 'approved_projects': ['*'],
+                     'init_system': 'openrc', 'display_name': 'Alpine Container', 'artifact_sha256': 'a' * 64,
+                     'identity_capture': {'state': 'identity-captured', 'kind': 'container',
+                        'source_config_sha256': 'b' * 64,
+                        'source_identity': {'machine_id': 'original', 'ssh_host_key': 'original-key'}},
+                     'replicas': [{'state': 'ready', 'artifact_sha256': 'a' * 64, 'cache_local': True,
+                        'clone_modes_verified': ['linked'], 'template_id': 147, 'node': 'proxmox2',
+                        'datastore_id': 'local-lvm', 'verification': {'passed': True,
+                            'evidence': {'machine_id': 'clone', 'ssh_host_key': 'clone-key'}}}]}
+            api = Mock()
+            api.request.return_value = {'template': 1, 'tags': 'crange-image;crange-cache-147'}
+            with patch('crange.project_dir', return_value=root), \
+                    patch('crange_scheduling.read_settings', return_value=({}, {'images': {'alpine-ct-v1': image}})):
+                crange_templates.approve_catalog_image('alpine-ct-v1', [1], api)
+            api.request.assert_called_once_with('GET', '/nodes/proxmox2/lxc/147/config')
+            ref = json.loads((root / 'approved-container-templates.json').read_text())['alpine-ct-v1']
+            self.assertEqual(ref['profile']['init_system'], 'openrc')
+            self.assertEqual(json.loads((root / 'approved-scenario-templates.json').read_text()), {'existing-vm': {}})
 
 
 if __name__ == '__main__':

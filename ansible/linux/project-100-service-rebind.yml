@@ -1,0 +1,62 @@
+---
+- name: Bind a restored MHL database to its assigned network before service replay
+  hosts: mhl_databases
+  become: true
+  gather_facts: false
+  tasks:
+    - name: Require the worker-verified database scope
+      ansible.builtin.assert:
+        that:
+          - inventory_hostname == 'MHL-DB01'
+          - crange_project_id | int == 100
+          - ansible_host == mhl_db_ip
+          - ansible_host == '10.100.' ~ (mhl_network_id | string) ~ '.30'
+          - (mhl_network_id | int in [1, 2, 3, 4, 5, 254]) or ((mhl_test_scope | default(false) | bool) and (1 <= mhl_network_id | int <= 253))
+        fail_msg: Use only the worker-bound applied MHL database inventory.
+
+    - name: Check for an existing Debian PostgreSQL installation
+      ansible.builtin.stat:
+        path: /usr/bin/pg_lsclusters
+      register: mhl_rebind_installed
+
+    - name: Rebind an existing captured PostgreSQL cluster
+      when: mhl_rebind_installed.stat.exists
+      block:
+        - name: Read existing PostgreSQL clusters
+          ansible.builtin.command: /usr/bin/pg_lsclusters --no-header
+          register: mhl_rebind_clusters
+          changed_when: false
+
+        - name: Reject ambiguous database installations
+          ansible.builtin.assert:
+            that:
+              - mhl_rebind_clusters.stdout_lines | length <= 1
+            fail_msg: Retain the guest for review; multiple PostgreSQL clusters are not supported.
+
+        - name: Configure the single existing cluster
+          when: mhl_rebind_clusters.stdout_lines | length == 1
+          block:
+            - name: Require a concrete version and cluster name
+              ansible.builtin.assert:
+                that:
+                  - mhl_rebind_clusters.stdout.split() | length >= 6
+                  - mhl_rebind_clusters.stdout.split()[0] is match('^[0-9]+$')
+                  - mhl_rebind_clusters.stdout.split()[1] is match('^[a-zA-Z0-9_-]+$')
+
+            - name: Bind PostgreSQL only to this guest's assigned address
+              ansible.builtin.lineinfile:
+                path: "/etc/postgresql/{{ mhl_rebind_clusters.stdout.split()[0] }}/{{ mhl_rebind_clusters.stdout.split()[1] }}/postgresql.conf"
+                regexp: '^#?listen_addresses\s*='
+                line: "listen_addresses = '{{ mhl_db_ip }}'"
+              register: mhl_rebind_address
+
+            - name: Start the restored cluster with its valid local bind address
+              ansible.builtin.systemd_service:
+                name: "postgresql@{{ mhl_rebind_clusters.stdout.split()[0] }}-{{ mhl_rebind_clusters.stdout.split()[1] }}"
+                state: "{{ 'restarted' if mhl_rebind_address.changed else 'started' }}"
+
+            - name: Confirm the restored database listener is available
+              ansible.builtin.wait_for:
+                host: "{{ mhl_db_ip }}"
+                port: 5432
+                timeout: 60

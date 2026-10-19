@@ -1,8 +1,44 @@
 ---
 - name: Configure cyber-range routers
   hosts: routers
-  gather_facts: true
+  gather_facts: false
   become: true
+
+  pre_tasks:
+    - name: Recover login management when stock LXC mount namespaces are unsupported
+      ansible.builtin.raw: |
+        set -eu
+        if systemctl is-active --quiet systemd-logind; then
+          exit 0
+        fi
+        install -d -m 0755 /etc/systemd/system/systemd-logind.service.d
+        cat > /etc/systemd/system/systemd-logind.service.d/crange-lxc.conf <<'EOF'
+        [Service]
+        ProtectSystem=no
+        ProtectHome=no
+        PrivateTmp=no
+        PrivateMounts=no
+        ProtectProc=default
+        ProcSubset=all
+        ProtectKernelTunables=no
+        ProtectKernelModules=no
+        ProtectKernelLogs=no
+        ProtectControlGroups=no
+        ProtectClock=no
+        ProtectHostname=no
+        ReadWritePaths=
+        EOF
+        chmod 0644 /etc/systemd/system/systemd-logind.service.d/crange-lxc.conf
+        systemctl daemon-reload
+        systemctl reset-failed systemd-logind
+        systemctl restart systemd-logind
+        systemctl is-active --quiet systemd-logind
+        echo CRANGE_LOGIND_RECOVERED
+      register: router_logind_bootstrap
+      changed_when: "'CRANGE_LOGIND_RECOVERED' in router_logind_bootstrap.stdout"
+
+    - name: Gather router facts after login management is ready
+      ansible.builtin.setup:
 
   tasks:
     - name: Ensure ping is available for scenario host checks

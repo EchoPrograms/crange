@@ -1,0 +1,42 @@
+{
+  "application": {
+    "available_P6_pools": [
+      "local-hdd",
+      "local-lvm"
+    ],
+    "existing_pool_disabled": true,
+    "other_pool_preparation_enabled": true,
+    "selection_preserved_on_rerender": true,
+    "real_request": {
+      "project": 100,
+      "operation": "template-distribution-prepare",
+      "options": {
+        "image": "p100-image-a7e08b9b44ac",
+        "node": "proxmox6",
+        "storage": "local-hdd"
+      }
+    },
+    "job_id": "664fe5e41eb1462ca5cbd97b8d300f46",
+    "javascript_errors": []
+  },
+  "backup": {
+    "available_P6_pools": [
+      "local-hdd",
+      "local-lvm"
+    ],
+    "existing_pool_disabled": true,
+    "other_pool_preparation_enabled": true,
+    "selection_preserved_on_rerender": true,
+    "real_request": {
+      "project": 100,
+      "operation": "template-distribution-prepare",
+      "options": {
+        "image": "p100-image-d1d3883a4571",
+        "node": "proxmox6",
+        "storage": "local-hdd"
+      }
+    },
+    "job_id": "3223f4038e884b13912e5a664b45455d",
+    "javascript_errors": []
+  }
+}

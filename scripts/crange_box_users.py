@@ -1,6 +1,5 @@
 """Fixed, project-owned Linux guest account operations; no caller shell commands."""
 import hashlib
-import ipaddress
 import json
 import os
 from pathlib import Path
@@ -31,33 +30,21 @@ def binding(kind, name, login):
 
 
 def resolve(project, kind, name):
-    from crange import project_dir, json_config, output_json, ProxmoxAPI
-    path = project_dir(str(project))
-    cfg = json_config(path)
-    field = FIELDS[kind]
-    box = cfg.get(field, {}).get(name)
-    live = output_json(path).get(field, {}).get('value', {}).get(name)
-    if not box or not live:
-        raise ValueError('Choose a deployed box in this project.')
-    network = cfg.get('custom_networks', {}).get(box.get('network_key', ''))
-    nid = int(network['network_id']) if network else int(box['team_id'])
-    vnet = f'p{int(project):03d}{"c" if network else "t"}{nid:03d}'
-    expected = f'{vnet}-jump-{int(box["jump_number"]):02d}' if kind == 'jumpbox' else f'{vnet}-{box["name"]}'
-    node = live.get('node_name', box['node_name'])
-    if node not in {f'proxmox{i}' for i in range(1, 7)}:
-        raise ValueError('Applied box has no verified physical node; refresh its applied outputs.')
-    api = ProxmoxAPI()
-    actual = (api.container if kind == 'container' else api.vm)(node, int(live['id']))
-    if actual.get('name', actual.get('hostname')) != expected or int(actual.get('template', 0)):
-        raise ValueError('Guest identity does not match this project; refusing account operation.')
+    from crange import CrangeError
+    from crange_guac_boxes import resolve as resolve_guest
+    # A declared node is a placement preference, potentially "auto". Reuse
+    # power/snapshot identity checks to find the actual live guest and network.
+    try:
+        _path, _cfg, _box, api, _kind, node, vmid, address = resolve_guest(project, f'{kind}:{name}')
+    except CrangeError as exc:
+        raise ValueError(str(exc)) from exc
+    actual = (api.container if kind == 'container' else api.vm)(node, vmid)
+    expected = actual.get('name', actual.get('hostname'))
     if kind=='vm' and actual.get('ostype','l26')!='l26':
         raise ValueError('Guest user and sudo management requires a managed Linux image; configure Windows/BSD accounts inside the guest.')
-    if (api.container_status if kind == 'container' else api.status)(node, int(live['id'])) != 'running':
+    if (api.container_status if kind == 'container' else api.status)(node, vmid) != 'running':
         raise ValueError('Start this box before managing its users.')
-    address = ipaddress.IPv4Address(live['address'])
-    if address not in ipaddress.IPv4Network(f'10.{int(project)}.{nid}.0/24'):
-        raise ValueError('Guest address does not match its declared project subnet.')
-    return str(address), f'crange-{int(project)}-{kind}-{int(live["id"])}-{expected}'
+    return address, f'crange-{int(project)}-{kind}-{vmid}-{expected}'
 
 
 def execute(args):

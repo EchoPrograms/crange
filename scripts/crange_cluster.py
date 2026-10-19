@@ -4,6 +4,7 @@ HTTP handlers only read the published snapshot. Credentialed discovery and
 reservation queries run as fixed controller jobs. Cluster data is admin-only.
 """
 import json
+import hashlib
 import os
 import time
 from datetime import datetime, timezone
@@ -15,6 +16,137 @@ import crange_scheduling as scheduling
 
 
 SNAPSHOT_NAME = 'cluster-inventory.json'
+
+
+def expand_capacity_policy(cpu_ratio=5.0, memory_ratio=2.0, disk_ratio=2.0):
+    if (type(cpu_ratio) not in (int,float) or not 1 <= cpu_ratio <= 6 or
+            type(memory_ratio) not in (int,float) or not 1 <= memory_ratio <= 2 or
+            type(disk_ratio) not in (int,float) or not 1 <= disk_ratio <= 2):
+        raise ValueError('Commitment limits are outside the reviewed CPU 1–6, RAM 1–2, disk 1–2 bounds.')
+    from crange_scheduling import CONFIG
+    from crange_network_publish import policy_write_lock
+    with policy_write_lock(CONFIG/'distribution-policy.json'):
+        return _expand_capacity_policy(cpu_ratio,memory_ratio,disk_ratio)
+
+
+def _expand_capacity_policy(cpu_ratio=5.0, memory_ratio=2.0, disk_ratio=2.0):
+    """Set bounded administrator commitment ceilings without changing reserves."""
+    import copy
+    from crange_catalog import validate_catalog
+    from crange_placement import capacity_window
+    from crange import ProxmoxAPI
+    from crange_scheduling import CONFIG, discover, read_settings
+    policy, catalog = read_settings()
+    validate_catalog(catalog)
+    expected = {'cpu_overcommit_ratio': float(cpu_ratio),
+                'memory_overcommit_ratio': float(memory_ratio),
+                'local_linked_disk_overcommit_ratio': float(disk_ratio)}
+    if (type(cpu_ratio) not in (int, float) or not 1 <= cpu_ratio <= 6 or
+            type(memory_ratio) not in (int, float) or not 1 <= memory_ratio <= 2 or
+            type(disk_ratio) not in (int, float) or not 1 <= disk_ratio <= 2):
+        raise ValueError('Commitment limits are outside the reviewed CPU 1–6, RAM 1–2, disk 1–2 bounds.')
+    policy_path = CONFIG / 'distribution-policy.json'
+    policy_sha256 = hashlib.sha256(policy_path.read_bytes()).hexdigest()
+    initial_revision = 'mhl-cluster-cpu-reserve-20261008'
+    if not isinstance(policy.get('revision'), str) or not policy['revision']:
+        raise ValueError('Placement policy has no valid revision.')
+    for node, settings in policy.get('nodes', {}).items():
+        if any(key in settings for key in expected):
+            raise ValueError(f'{node} has a node-specific commitment limit; stop for review.')
+    baseline = {'cpu_overcommit_ratio': 3.5, 'memory_overcommit_ratio': 2.0,
+                'local_linked_disk_overcommit_ratio': 1.5}
+    if policy.get('revision') == initial_revision:
+        if (policy_sha256 != 'bb1328bf74b86d5971333cd19590c011129f820b67b55fb444e5ffb649cce81b' or
+                any(policy.get(key) != value for key, value in baseline.items())):
+            raise ValueError('Protected placement policy differs from the reviewed baseline; stop for review.')
+    if policy.get('revision') != initial_revision:
+        current = {key: policy.get(key) for key in expected}
+        if (current['cpu_overcommit_ratio'] is None or not 1 <= current['cpu_overcommit_ratio'] <= 6 or
+                current['memory_overcommit_ratio'] is None or not 1 <= current['memory_overcommit_ratio'] <= 2 or
+                current['local_linked_disk_overcommit_ratio'] is None or
+                not 1 <= current['local_linked_disk_overcommit_ratio'] <= 2):
+            raise ValueError('Existing capacity limits are outside the reviewed range; stop for review.')
+    # Compute before/after capacity on the same fresh provider observation, so
+    # the response makes the effect of the fixed controls reviewable.
+    inventory = discover(ProxmoxAPI(), policy)
+    def headroom(selected_policy):
+        result = {}
+        for name, node in inventory.get('nodes', {}).items():
+            if not node.get('online'):
+                continue
+            budget = capacity_window(node, selected_policy, name)
+            result[name] = {'cpu_cores': round(budget['cpu_cores'], 2),
+                            'memory_mb': round(budget['memory_mb'], 2)}
+            storage = node.get('storages', {}).get('local-lvm')
+            if storage and storage.get('available', True) and storage.get('inventory_complete', True):
+                disk = capacity_window(node, selected_policy, name, storage,
+                                       selected_policy.get('clone_mode', 'linked'))
+                result[name]['local_lvm_disk_gb'] = round(disk['disk_gb'], 2)
+        return result
+    before = headroom(policy)
+    updated = copy.deepcopy(policy)
+    updated.update(expected)
+    def token(value):
+        return str(int(value)) if int(value) == value else str(value).replace('.', 'p')
+    updated['revision'] = 'capacity-v20261009-cpu' + token(cpu_ratio) + '-ram' + token(memory_ratio) + '-disk' + token(disk_ratio)
+    # Host reserves and memory policy are intentionally carried through verbatim.
+    if policy == updated:
+        return {'state': 'already-current', 'revision': updated['revision'], 'limits': expected,
+                'before_headroom': before, 'after_headroom': before,
+                'policy_path': str(policy_path), 'policy_sha256': policy_sha256,
+                'physical_disk_reserve_unchanged': True, 'memory_reserve_unchanged': True}
+    after = headroom(updated)
+    if hashlib.sha256(policy_path.read_bytes()).hexdigest() != policy_sha256:
+        raise ValueError('Placement policy changed during capacity review; refresh and retry.')
+    scheduling.atomic_json(policy_path, updated, mode=0o600)
+    return {'state': 'updated', 'previous_revision': policy['revision'],
+            'revision': updated['revision'], 'limits': expected,
+            'before_headroom': before, 'after_headroom': after,
+            'policy_path': str(policy_path), 'previous_policy_sha256': policy_sha256,
+            'physical_disk_reserve_unchanged': True, 'ram_overcommit_unchanged': True,
+            'allowed_nodes_unchanged': True, 'storage_approval_unchanged': True}
+
+
+def set_memory_reserve(node_name, minimum_mb, fraction, expected_revision):
+    """Admin policy edit only; leave guest sizes, ratios and storage intact."""
+    import copy
+    import uuid
+    from crange import ProxmoxAPI
+    from crange_scheduling import CONFIG, discover, read_settings
+    from crange_placement import capacity_window
+    from crange_network_publish import policy_write_lock
+    if (node_name not in {f'proxmox{i}' for i in range(1,7)}
+            or type(minimum_mb) is not int or not 2048 <= minimum_mb <= 32768
+            or type(fraction) not in (int,float) or not .1 <= fraction <= .5):
+        raise ValueError('Choose an enrolled node, at least 2 GB host RAM, and a 10–50% reserve.')
+    path = CONFIG / 'distribution-policy.json'
+    with policy_write_lock(path):
+        policy, _ = read_settings()
+        if policy.get('revision') != expected_revision:
+            raise ValueError('Placement policy changed; refresh the cluster snapshot before saving reserves.')
+        original_hash = hashlib.sha256(path.read_bytes()).hexdigest()
+        inventory = discover(ProxmoxAPI(), policy)
+        node = inventory.get('nodes', {}).get(node_name, {})
+        if node_name not in policy.get('allowed_nodes', []) or not node.get('online'):
+            raise ValueError('Memory reserves can be edited only for an enrolled online node.')
+        physical = node.get('memory_mb', 0)
+        if max(minimum_mb, physical * fraction) > physical * .5:
+            raise ValueError('The requested host reserve exceeds half this node’s physical RAM.')
+        before = capacity_window(node, policy, node_name)
+        updated = copy.deepcopy(policy)
+        settings = updated.setdefault('nodes', {}).setdefault(node_name, {})
+        settings.update(memory_reserve_mb=minimum_mb, memory_reserve_fraction=float(fraction))
+        after = capacity_window(node, updated, node_name)
+        if hashlib.sha256(path.read_bytes()).hexdigest() != original_hash:
+            raise ValueError('Placement policy changed during reserve review; refresh and retry.')
+        updated['revision'] = 'memory-reserve-' + uuid.uuid4().hex
+        scheduling.atomic_json(path, updated, mode=0o600)
+        return {'node':node_name,'revision':updated['revision'],
+                'minimum_host_memory_gb':minimum_mb/1024,'host_memory_fraction':fraction,
+                'before_headroom_gb':round(before['memory_mb']/1024,2),
+                'after_headroom_gb':round(after['memory_mb']/1024,2),
+                'guest_sizes_unchanged':True,'commitment_ratios_unchanged':True,
+                'storage_policy_unchanged':True,'network_acceptance_unchanged':True}
 
 
 def inventory_snapshot(*, admin=False):
@@ -144,6 +276,9 @@ def _refresh_inventory_snapshot(*, api=None):
                 'eligibility': {'eligible': not storage_blockers, 'blockers': storage_blockers}})
         if not any(s['eligibility']['eligible'] for s in storages): blockers.append('No approved datastore has verified capacity')
         nodes.append({'node': name, 'online': node.get('online', False), 'load': node.get('load', 0),
+            'host_memory_reserve_settings': {
+                'minimum_mb':policy.get('nodes',{}).get(name,{}).get('memory_reserve_mb',policy.get('memory_reserve_mb',4096)),
+                'fraction':policy.get('nodes',{}).get(name,{}).get('memory_reserve_fraction',policy.get('memory_reserve_fraction',.25))},
             'capacity': {'memory_mb': memory_total, 'cpu_cores': cpu_total,
                          'memory_commitment_limit_mb': budget['memory_limit_mb'] if budget else 0,
                          'cpu_commitment_limit_cores': cpu_capacity, 'storages': storages},
@@ -163,10 +298,11 @@ def _refresh_inventory_snapshot(*, api=None):
     for vmid, guest in sorted(raw['guests'].items(), key=lambda row: int(row[0])):
         image_id, replica = replicas.get(int(vmid), (None, {}))
         template = bool(guest['template'])
+        counts_compute = not template and guest.get('status') != 'stopped'
         row = {'vmid': int(vmid), 'node': guest['node_name'], 'kind': guest['kind'],
             'name': guest.get('name'), 'status': guest.get('status', 'unknown'), 'template': guest['template'], 'cache': bool(replica.get('cache_local')),
-            'image_id': image_id, 'memory_mb': 0 if template else guest['memory_mb'],
-            'cpu_cores': 0 if template else guest['cpu_cores'],
+            'image_id': image_id, 'memory_mb': guest['memory_mb'] if counts_compute else 0,
+            'cpu_cores': guest['cpu_cores'] if counts_compute else 0,
             'configured_memory_mb': guest['memory_mb'], 'configured_cpu_cores': guest['cpu_cores'],
             'datastores': guest['disks'], 'clone_modes_verified': replica.get('clone_modes_verified', [])}
         guests.append(row)
@@ -237,9 +373,19 @@ def _refresh_inventory_snapshot(*, api=None):
         if image['approved_projects'] and (has_observed_replica or central_vm_archive):
             ready_images.append(image['image_id'])
     if not ready_images: global_blockers.append('No approved image version has a verified ready archive or local cache')
+    cache_paths=set(policy.get('cache',policy).get('tested_paths',[]))
     snapshot = {'schema_version': 1, 'captured_at': raw['captured_at'], 'policy_revision': policy['revision'],
+        'commitment_policy': {'cpu_overcommit_ratio': policy.get('cpu_overcommit_ratio', 1.0),
+            'memory_overcommit_ratio': policy.get('memory_overcommit_ratio', 1.0),
+            'local_linked_disk_overcommit_ratio': policy.get('local_linked_disk_overcommit_ratio', 1.0),
+            'memory_reserve_fraction': policy.get('memory_reserve_fraction', .25),
+            'memory_reserve_mb': policy.get('memory_reserve_mb', 4096),
+            'disk_reserve_fraction': policy.get('disk_reserve_fraction', .2),
+            'disk_reserve_gb': policy.get('disk_reserve_gb', 20)},
         'max_inventory_age_seconds': policy.get('max_inventory_age_seconds', 120), 'nodes': nodes, 'guests': guests,
         'images': image_distribution,
+        'cache_capabilities': {'tested_paths':sorted(cache_paths),
+                               'container_ready':{'local-linked-container','container-archive-restore'}<=cache_paths},
         'automatic': {'enabled': bool(policy.get('enabled')), 'policy_enabled': bool(policy.get('enabled')),
                       'operational_ready': not global_blockers, 'ready_image_versions': ready_images, 'blockers': global_blockers},
         'stale': False, 'freshness': {'stale': False, 'age_seconds': 0}}
@@ -279,7 +425,7 @@ def configuration_bundle(inventory, catalog, acceptance, output_directory):
     policy['cpu_overcommit_ratio'] = 3.5
     policy['memory_overcommit_ratio'] = 2.0
     policy['local_linked_disk_overcommit_ratio'] = 1.5
-    policy['expected_cluster_nodes'] = [f'proxmox{i}' for i in range(1, 6)]
+    policy['expected_cluster_nodes'] = [f'proxmox{i}' for i in range(1, 7)]
     policy['cache'] = {'isolated_bridge': acceptance.get('isolated_bridge'),
         'isolated_bridges': acceptance.get('isolated_bridges', []),
         'tested_paths': acceptance.get('tested_paths', [])}

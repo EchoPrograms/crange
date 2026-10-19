@@ -34,6 +34,23 @@ class AllocationTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, 'missing'):
             attachment({'network_key': 'missing'}, '1', a)
 
+    def test_primary_test_network_is_isolated_and_keeps_service_host_octets(self):
+        cfg, release = self.fixture()
+        release['scenario']['boxes'] = [{'name':'app','network_key':'','ip_last_octet':40}]
+        release['scenario']['containers'] = [{'name':'db','network_key':'','ip_last_octet':30}]
+        original = copy.deepcopy(cfg)
+        mapping, owned = allocate_networks(cfg,release,'254','test')
+        self.assertIn('', mapping)
+        self.assertNotIn(mapping['']['network_id'], (0,1,2,100,254))
+        app = attachment(release['scenario']['boxes'][0], '254', mapping)
+        db = attachment(release['scenario']['containers'][0], '254', mapping)
+        self.assertEqual(app,db)
+        self.assertTrue(app['network_key'])
+        self.assertEqual(cfg['scenario_boxes'],original['scenario_boxes'])
+        self.assertEqual(allocate_networks(cfg,release,'254','test'),(mapping,owned))
+        team, _ = allocate_networks(cfg,release,'1','team')
+        self.assertEqual(attachment(release['scenario']['boxes'][0],'1',team),{'network_key':'','network_id':1})
+
     def test_refuse_unmanaged_collision_or_drift(self):
         cfg, release = self.fixture()
         mapping, _ = allocate_networks(cfg, release, '1', 'team')
@@ -173,11 +190,15 @@ class ReleaseTopologyTests(unittest.TestCase):
                    for field, group in [('scenario_boxes', 'boxes'), ('scenario_containers', 'containers')]}
         from unittest.mock import Mock
         api = Mock();api.vm.return_value = {'name': 'unrelated-production-guest'}
+        api.request.return_value = [{'vmid':live['id'], 'type':kind, 'node':'proxmox1'}
+                                    for field,kind in [('scenario_boxes','qemu'),('scenario_containers','lxc')]
+                                    for live in outputs[field]['value'].values()]
         with patch.object(crange, 'load_release', return_value=release), patch.object(crange, 'output_json', return_value=outputs), \
              patch.object(crange, 'ProxmoxAPI', return_value=api):
             with self.assertRaisesRegex(crange.CrangeError, 'identity has changed'):
                 crange.cmd_release_test_check(SimpleNamespace(project='3', version='1.0.0'))
-        api.start.assert_not_called();api.request.assert_not_called();api.container_stop.assert_not_called()
+        api.start.assert_not_called();api.container_stop.assert_not_called()
+        self.assertTrue(all(call.args[0] == 'GET' for call in api.request.call_args_list))
 
     def test_rollout_declares_selected_team_topology_without_changing_staging_or_other_team(self):
         release = self.release()

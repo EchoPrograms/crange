@@ -179,7 +179,8 @@ def apply_users(project, auth, client, repo_root, secret_hex):
     for login in sorted(set(owned)-wanted):
         if any(item['login'].lower() == login.lower() for item in other_users):
             raise ValueError('Refusing to remove a login now owned by another project.')
-        client._request('DELETE', base+'/'+login)
+        if login in current:
+            client._request('DELETE', base+'/'+login)
         del owned[login]
         save_state(state_file, state)
         print(f'{login}: removed.')

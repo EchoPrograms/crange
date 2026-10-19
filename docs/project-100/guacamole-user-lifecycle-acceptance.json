@@ -1,0 +1,52 @@
+{
+  "observed_at": "2026-10-19T13:31:42.340502+00:00",
+  "fixture_login": "audit-gui100-8eb9db62-renamed",
+  "fixture_key": "test-fixture",
+  "project": 100,
+  "browser_actions": {
+    "create_job": "ae358de926b8424182c1424c51a6435c",
+    "rename_and_lock_job": "fd39638dd3af4cd493aa85c57be45287",
+    "unlock_job": "9164832a89da45b0bdeefbbe1f720254",
+    "duplicate_inline_error_http_status": 409,
+    "native_created_login_succeeded": true,
+    "native_created_connection_count": 0
+  },
+  "serialized_lock": {
+    "exact_dashboard_api": true,
+    "job": "b74ceab50e1b4eada8e43b079214d4d3",
+    "job_status": "succeeded",
+    "native_disabled_flag": true,
+    "native_login_http_status": 403,
+    "native_login_accepted": false,
+    "no_unlock_running_during_check": true
+  },
+  "earlier_concurrent_lock_observation": "Inconclusive: an unlock was submitted while login was being checked. Not evidence of a product defect.",
+  "unlock_acceptance_pending": false,
+  "fixture_cleanup_pending": false,
+  "all_lab_acceptance": false,
+  "credential_values_recorded": false,
+  "serialized_unlock": {
+    "exact_dashboard_api": true,
+    "job": "9bf753ded5244b7d940b75eae6f3b572",
+    "job_status": "succeeded",
+    "native_disabled_flag": false,
+    "native_login_http_status": 200,
+    "native_login_accepted": true,
+    "password_length": 6,
+    "visible_native_connections": 0,
+    "temporary_native_session_revoked": true
+  },
+  "cleanup": {
+    "exact_dashboard_api": true,
+    "job": "21ab73557cdf41bea6dbb739d5e614d2",
+    "status": "succeeded",
+    "fixture_absent_from_dashboard_directory": true,
+    "fixture_absent_from_native_guacamole": true,
+    "participant_directory_accounts_preserved": 10,
+    "participant_native_accounts_preserved": 10,
+    "native_guacadmin_preserved": true,
+    "participant_directory_accounts_enabled": true,
+    "participant_directory_self_password_change_disabled": true
+  },
+  "guacamole_1_6_disabled_flag_reference": "https://github.com/apache/guacamole-client/blob/1.6.0/guacamole/src/main/java/org/apache/guacamole/rest/user/APIUser.java"
+}

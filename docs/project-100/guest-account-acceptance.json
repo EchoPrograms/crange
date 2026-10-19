@@ -1,0 +1,82 @@
+{
+  "project": 100,
+  "box": "container:t254-mhl-app01",
+  "fixture_user": "accept100_3a2c594f",
+  "checks": [
+    {
+      "phase": "created",
+      "user_exists": true,
+      "sudo_binary_available": false,
+      "password1_accepted": true,
+      "password2_accepted": false,
+      "actual_password_authenticated_sudo_root": false
+    },
+    {
+      "phase": "password",
+      "user_exists": true,
+      "sudo_binary_available": false,
+      "password1_accepted": false,
+      "password2_accepted": true,
+      "actual_password_authenticated_sudo_root": false
+    },
+    {
+      "phase": "grant-sudo",
+      "user_exists": true,
+      "sudo_binary_available": true,
+      "password1_accepted": false,
+      "password2_accepted": true,
+      "actual_password_authenticated_sudo_root": true
+    },
+    {
+      "phase": "revoke-sudo",
+      "user_exists": true,
+      "sudo_binary_available": true,
+      "password1_accepted": false,
+      "password2_accepted": true,
+      "actual_password_authenticated_sudo_root": false
+    },
+    {
+      "phase": "deleted",
+      "user_exists": false,
+      "sudo_binary_available": true,
+      "home_and_managed_sudo_removed": true
+    }
+  ],
+  "jobs": [
+    {
+      "action": "create",
+      "job_id": "4a8302ec163c44a8b59cc4a3fc9f4a1e",
+      "status": "succeeded"
+    },
+    {
+      "action": "password",
+      "job_id": "e550924c5efb468287e6309c267f6a93",
+      "status": "succeeded"
+    },
+    {
+      "action": "grant-sudo",
+      "job_id": "42b83a33a039424e846aba931e40d121",
+      "status": "failed"
+    },
+    {
+      "action": "grant-sudo",
+      "job_id": "2c8b3e6cc7474d96a78645e4c296a63b",
+      "status": "succeeded"
+    },
+    {
+      "action": "revoke-sudo",
+      "job_id": "b93ce1b2d990456c968eb0b4fae765bf",
+      "status": "succeeded"
+    },
+    {
+      "action": "delete",
+      "job_id": "bc77770d4c784f7e9dc3ce4f8429b26c",
+      "status": "succeeded"
+    }
+  ],
+  "fixture_removed": true,
+  "all_mutations_submitted_through_actual_browser_forms": true,
+  "controller_root_access_verified_after_successful_actions": true,
+  "no_plaintext_or_hashed_passwords_recorded": true,
+  "minimal_guest_sudo_prerequisite_installed": true
+}

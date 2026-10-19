@@ -1,0 +1,13 @@
+{
+  "checks": {
+    "action_opens_centered_output_dialog": true,
+    "closing_dialog_keeps_job_queued": true,
+    "queued_stop_updates_actual_job": true,
+    "stop_notification_visible": true,
+    "capture_job_unaffected": true,
+    "no_javascript_errors": true
+  },
+  "job_id": "1b8816730b1840c9bc7a1c2581e5fe73",
+  "passed": true,
+  "time": 1792028662
+}

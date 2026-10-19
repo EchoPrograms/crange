@@ -87,6 +87,25 @@ def resolve(record):
     ref = record.get('credential_ref')
     if not ref:
         return None
+    if isinstance(ref, dict) and ref.get('type') == 'crange-windows-rdp-v1':
+        from crange_windows_guest_rdp import resolve as resolve_windows_rdp
+        value = resolve_windows_rdp(
+            ref, project_id=record.get('project_id'), box_key=record.get('crange_box_key'),
+            guest_id=record.get('crange_guest_id'), image_id=record.get('crange_image_id'))
+        image_id=record.get('crange_image_id','')
+        if image_id.startswith(f"p{record.get('project_id'):03d}-image-"):
+            from crange_scheduling import read_settings
+            image=read_settings()[1].get('images',{}).get(image_id,{})
+            identity=image.get('source_identity',{})
+            if (identity.get('identity_mode')=='windows-scenario-snapshot-v1' and
+                    identity.get('snapshot_project_id')==record.get('project_id') and
+                    image.get('verified') is True and identity.get('domain_role',0)>=4):
+                from crange_windows_snapshot import validate_captured_identity
+                validate_captured_identity(identity)
+                value={**value,'username':value['username']+'@'+identity['domain_name']}
+        return value
+    if isinstance(ref, dict):
+        raise ValueError('Unsupported typed guest credential reference.')
     project = record.get('project_id')
     if isinstance(project, bool) or not isinstance(project, int) or not 1 <= project <= 255:
         raise ValueError('Invalid guest credential project.')

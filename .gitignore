@@ -35,3 +35,16 @@ __pycache__/
 
 # Runtime administrator installer build records
 templates/builds/
+
+# Local agent configuration, transcripts and browser artifacts
+.codex/
+docs/.obsidian/
+CRANGE-CODEX-SESSION.md
+output/
+.playwright-cli/
+
+# Lifecycle archives contain retired Terraform state and guest metadata
+**/.crange-lifecycle/
+**/.crange-lifecycle.json
+*.sqlite3
+*.sqlite3-*

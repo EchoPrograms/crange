@@ -22,6 +22,38 @@ def fixtures():
 
 
 class PlacementTests(unittest.TestCase):
+    def test_large_hdd_is_a_fallback_instead_of_winning_small_boot_disks(self):
+        for local_free, expected in [(150, 'local'), (1, 'local-hdd')]:
+            with self.subTest(local_free=local_free):
+                request, inventory, catalog, policy = fixtures()
+                policy.update(allowed_nodes=['n1'], allowed_storages=['local', 'local-hdd'], clone_mode='full')
+                stores = inventory['nodes']['n1']['storages']
+                stores['local-hdd'] = {**copy.deepcopy(stores['local']), 'total_gb': 4000, 'free_gb': 3000}
+                stores['local']['free_gb'] = local_free
+                result = schedule_batch([request], inventory, catalog, policy, now=100)
+                self.assertEqual(result[0]['resolved']['datastore_id'], expected)
+
+    def test_admin_installer_capacity_is_atomically_reserved_and_never_auto_expires(self):
+        _, inventory, _, policy = fixtures()
+        policy['max_inventory_age_seconds'] = 120
+        with tempfile.TemporaryDirectory() as temp:
+            ledger = ReservationLedger(pathlib.Path(temp) / 'ledger')
+            fields = dict(project_id=0, job_id='installer-job', owner='admin',
+                operation='template-create', node_name='n1', datastore_id='local',
+                demand={'memory_mb':4096,'cpu_cores':2,'disk_gb':66},
+                inventory=inventory, policy=policy, build_id='a'*32, vmid=5000, now=100)
+            ledger.reserve_external_capacity(**fields)
+            self.assertEqual(ledger.status('installer-job')['state'], 'running')
+            self.assertEqual(ledger.status('installer-job')['allocations'][0]['resolved']['vmid'], 5000)
+            self.assertEqual(ledger.status('installer-job')['allocations'][0]['resolved']['build_id'], 'a'*32)
+            with self.assertRaises(PlacementError):
+                ledger.reserve_external_capacity(**{**fields,'job_id':'second',
+                    'demand':{'memory_mb':4096,'cpu_cores':7,'disk_gb':66}})
+            with self.assertRaises(PlacementError):
+                ledger.purge_reviewed('installer-job', operation_terminal=True,
+                    no_allocations_confirmed=True, now=10000)
+            ledger.close()
+
     def bootstrap_requests(self, inventory, catalog, policy):
         policy['allowed_nodes'] = ['n1']
         catalog['images']['base-v1']['kind'] = 'container'
@@ -352,7 +384,7 @@ class PlacementTests(unittest.TestCase):
         pol['clone_mode'] = 'full'
         with self.assertRaises(PlacementError):
             schedule_batch([r], inv, cat, pol, now=100)
-        pol['local_linked_disk_overcommit_ratio'] = 1.6
+        pol['local_linked_disk_overcommit_ratio'] = 2.1
         with self.assertRaisesRegex(PlacementError, 'ceiling'):
             schedule_batch([r], inv, cat, pol, now=100)
 

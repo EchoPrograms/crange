@@ -54,6 +54,8 @@ def project_dir(project: str) -> Path:
     path = ENVS / f"project-{int(project):03d}"
     if not path.is_dir():
         raise CrangeError(f"No Terraform environment at {path.relative_to(ROOT)}")
+    from crange_project_lifecycle import require_active
+    require_active(path)
     return path
 
 
@@ -155,7 +157,15 @@ def validate_project_quota(path: Path, data: dict) -> None:
 
 
 def output_json(path: Path) -> dict:
-    return json.loads(run(["terraform", "output", "-json"], cwd=path, capture=True).stdout)
+    from crange_guest_outputs import complete_metadata
+    raw = json.loads(run(["terraform", "output", "-json"], cwd=path, capture=True).stdout)
+    try:
+        def read(name):
+            file = path / name
+            return json.loads(file.read_text()) if file.exists() else {}
+        return complete_metadata(raw, read('crange.auto.tfvars.json'), read('crange-applied-placements.json'))
+    except (OSError, ValueError) as exc:
+        raise CrangeError(f'Cannot read applied guest identity metadata: {exc}') from exc
 
 
 def terraform_env() -> dict:
@@ -173,7 +183,11 @@ def tf_run(path: Path, args: list[str], capture: bool = False) -> subprocess.Com
     identity = crange_proxmox_compat.reviewed_identity()
     endpoint_override = ("export PROXMOX_VE_ENDPOINT=" + shlex.quote(identity['endpoint']) + "; ") if identity['enabled'] else ""
     command = ["bash", "-lc", "set -a; . /home/crange/.config/crange/proxmox.env; set +a; export PROXMOX_VE_INSECURE=true; " + endpoint_override + "exec terraform " + shlex.join(args)]
-    return run(command, cwd=path, capture=capture, env=terraform_env(), timeout=1800)
+    # A reviewed batch can spend several minutes starting each Windows clone.
+    # Keep read/review commands short, but align apply with the bounded worker
+    # workflow budget instead of killing healthy serial provisioning at 30m.
+    timeout = 12 * 3600 if args and args[0] == 'apply' else 1800
+    return run(command, cwd=path, capture=capture, env=terraform_env(), timeout=timeout)
 
 
 def cmd_projects(_args: argparse.Namespace) -> None:
@@ -225,13 +239,49 @@ def cmd_guac_sync(args: argparse.Namespace) -> None:
     deployed = {}
     try:
         outputs = output_json(path)
-        deployed = {kind: outputs.get(kind, {}).get('value', {}) or {}
+        from crange_guest_outputs import has_guest_id
+        deployed = {kind: {key: guest for key, guest in (outputs.get(kind, {}).get('value', {}) or {}).items()
+                           if has_guest_id(guest)}
                     for kind in ('jump_boxes', 'scenario_boxes', 'scenario_containers')}
     except CrangeError:
         deployed = {kind: {} for kind in ('jump_boxes', 'scenario_boxes', 'scenario_containers')}
 
     connections = []
     project_id = int(cfg['project_id'])
+    windows_rdp_bindings = {}
+    try:
+        approvals = templates_for(path)
+        applied_placements = json.loads((path / 'crange-applied-placements.json').read_text())
+    except (CrangeError, OSError, json.JSONDecodeError):
+        approvals, applied_placements = {}, {}
+    from crange_windows_guest_rdp import reference as windows_rdp_reference, resolve as resolve_windows_rdp
+    for box_key, box in sorted(cfg.get('scenario_boxes', {}).items()):
+        template = box.get('template')
+        profile = approvals.get(template, {}).get('profile', {}) if isinstance(approvals, dict) else {}
+        if not isinstance(profile, dict) or not str(profile.get('os_type', '')).startswith('win'):
+            continue
+        live = deployed.get('scenario_boxes', {}).get(box_key, {})
+        placement = live.get('placement', {}) if isinstance(live, dict) else {}
+        sidecar = applied_placements.get(f'vm:{box_key}') if isinstance(applied_placements, dict) else None
+        if (not isinstance(live, dict) or type(live.get('id')) is not int
+                or not isinstance(placement, dict) or not isinstance(sidecar, dict)
+                or not isinstance(placement.get('image_id'), str)
+                or sidecar.get('guest_id') != live.get('id')
+                or sidecar.get('image_id') != placement.get('image_id')
+                or sidecar.get('declared_template') != template
+                or sidecar.get('template_id') != placement.get('template_id')
+                or sidecar.get('template_node') != placement.get('template_node')):
+            continue
+        ref = windows_rdp_reference(project_id, box_key, live['id'], placement.get('image_id'))
+        identity = {'project_id': project_id, 'crange_box_key': box_key,
+                    'crange_guest_id': live['id'], 'crange_image_id': placement.get('image_id'),
+                    'credential_ref': ref}
+        try:
+            resolve_windows_rdp(ref, project_id=project_id, box_key=box_key,
+                                guest_id=live['id'], image_id=placement.get('image_id'))
+        except (OSError, ValueError):
+            continue
+        windows_rdp_bindings[box_key] = identity
     defaults = {}
     for name, box in sorted(cfg.get('jump_boxes', {}).items()):
         team = str(box['team_id'])
@@ -240,6 +290,8 @@ def cmd_guac_sync(args: argparse.Namespace) -> None:
             defaults[team] = (number, name)
     for name, box in sorted(cfg.get('jump_boxes', {}).items()):
         live = deployed['jump_boxes'].get(name, {})
+        if not live.get('id'):
+            continue
         address = box.get('address') or live.get('address')
         # Staged resources do not have a usable Guacamole endpoint yet. They
         # enter the manifest automatically on the next sync after deployment.
@@ -255,7 +307,20 @@ def cmd_guac_sync(args: argparse.Namespace) -> None:
             if not address:
                 continue
             from crange_jumpboxes import connection_records
-            connections.extend(connection_records(project_id, kind, name, box, address))
+            rows = connection_records(project_id, kind, name, box, address)
+            if kind == 'vm':
+                profile = approvals.get(box.get('template'), {}).get('profile', {}) if isinstance(approvals, dict) else {}
+                if isinstance(profile, dict) and str(profile.get('os_type', '')).startswith('win'):
+                    for row in rows:
+                        row['guest_os'] = 'windows'
+                        if row.get('protocol') == 'rdp':
+                            row.update({key: value for key, value in windows_rdp_bindings.get(name, {}).items()
+                                        if key != 'credential_ref'})
+                            if name in windows_rdp_bindings and not row.get('credential_ref'):
+                                row['credential_ref'] = windows_rdp_bindings[name]['credential_ref']
+                            elif row.get('credential_ref') is None:
+                                row.pop('credential_ref', None)
+            connections.extend(rows)
 
     users = []
     for user in all_users:
@@ -764,6 +829,12 @@ def _bootstrap_project(path: Path, cfg: dict, api=None):
                                    network_attestation_valid, read_settings)
     if any((path / name).exists() for name in ('terraform.tfstate', 'terraform.tfstate.backup', '.terraform.tfstate.lock.info')):
         raise CrangeError('Project bootstrap is only available before Terraform state exists.')
+    from crange_project_lifecycle import state as lifecycle_state
+    restored = lifecycle_state(path).get('needs_redeploy', False)
+    if restored:
+        cfg = copy.deepcopy(cfg)
+        for field in ('jump_boxes', 'custom_networks', 'scenario_boxes', 'scenario_containers'):
+            cfg[field] = {}
     if any(cfg.get(key) for key in ('jump_boxes', 'custom_networks', 'scenario_boxes', 'scenario_containers')):
         raise CrangeError('Project bootstrap only creates base routers and networks; remove scenario guests before bootstrapping.')
     policy, catalog = read_settings()
@@ -777,9 +848,11 @@ def _bootstrap_project(path: Path, cfg: dict, api=None):
     image = catalog.get('images', {}).get(image_id)
     if not image or image.get('kind') != 'container' or image.get('source_type') != 'stock_archive' or image.get('verified') is not True:
         raise CrangeError('Router bootstrap requires the verified Debian stock archive image.')
-    if not any(replica.get('node') == node and replica.get('state') == 'ready' and replica.get('template_file_id')
-               for replica in image.get('replicas', [])):
-        raise CrangeError('The verified router archive is unavailable on the bootstrap node.')
+    archive_nodes = {replica.get('node') for replica in image.get('replicas', [])
+                     if replica.get('state') == 'ready' and replica.get('template_file_id')}
+    eligible = [candidate for candidate in candidates if candidate in archive_nodes]
+    if not eligible:
+        raise CrangeError('The verified router archive is unavailable on every enrolled bootstrap node.')
     pid = int(cfg['project_id'])
     prefix = f'p{pid:03d}'
     expected_vnets = {prefix + 'tr', prefix + 't254'} | {f'{prefix}t{int(team):03d}' for team in cfg['team_ids']}
@@ -792,6 +865,8 @@ def _bootstrap_project(path: Path, cfg: dict, api=None):
     live = api.request('GET', '/cluster/resources', {'type': 'vm'})
     for resource in live:
         tags = set(str(resource.get('tags', '')).split(';'))
+        if restored and ('crange-image' in tags or resource.get('template')):
+            continue
         if prefix in tags or str(resource.get('name', '')).startswith(prefix + '-'):
             raise CrangeError('Project-scoped guests already exist; use the normal reviewed plan instead of bootstrap.')
     vnets = api.request('GET', '/cluster/sdn/vnets')
@@ -801,7 +876,8 @@ def _bootstrap_project(path: Path, cfg: dict, api=None):
     cfg = copy.deepcopy(cfg)
     cfg['router_node'] = node
     cfg['router_placement'] = placement_intent(node)
-    return cfg, node, expected_vnets
+    cfg['bootstrap_candidate_nodes'] = eligible
+    return cfg, node, eligible, expected_vnets
 
 
 def _validate_bootstrap_plan(detail: dict, project_id: int, node: str, networks: set[str], cfg: dict) -> list[dict]:
@@ -827,7 +903,13 @@ def _validate_bootstrap_plan(detail: dict, project_id: int, node: str, networks:
         seen.add(address)
         after = item.get('change', {}).get('after') or {}
         if address.endswith('.router'):
-            if after.get('node_name') != node or after.get('pool_id') != 'crange-iac':
+            module_address = address.removesuffix('.proxmox_virtual_environment_container.router')
+            resource_key = ('router:project' if module_address == 'module.project_router' else
+                            'router:staging' if module_address == 'module.staging_router' else
+                            'router:team:' + json.loads(module_address[len('module.team_router['):-1])
+                            if module_address.startswith('module.team_router[') else None)
+            expected_node = cfg.get('bootstrap_router_nodes', {}).get(resource_key, node)
+            if after.get('node_name') != expected_node or after.get('pool_id') != 'crange-iac':
                 raise CrangeError('Bootstrap router escaped its reviewed node or pool.')
             tags = set(after.get('tags') or [])
             if prefix not in tags:
@@ -849,11 +931,33 @@ def cmd_stage_changes(args: argparse.Namespace) -> None:
     """Fixed project workflow: audited cache preparation, then exact guest plan."""
     from crange_scheduling import read_settings, required_preparations
     path = project_dir(args.project)
+    resume_network_foundations(args, path)
     cfg = json_config(path)
     policy, _ = read_settings()
+    from crange_staging import staging_projection
+    stage_cfg = staging_projection(cfg)
+    from crange_network_foundation import pending
+    from crange_scheduling import applied_resources
+    networks = pending(stage_cfg, applied_resources(path))
+    if networks:
+        print('Network foundation phase: reviewing new staging subnets before guest placement.', flush=True)
+        return cmd_plan(argparse.Namespace(project=args.project, retain=True,
+            replace_sdn_applier=False, staging=True, network_foundation=networks))
     if policy.get('enabled'):
-        from crange_cache_jobs import prepare_cache
-        fills = required_preparations(path, cfg)
+        from crange_scheduling import purge_expired_guest_reviews, DATA
+        from crange_placement import ReservationLedger
+        ledger=ReservationLedger(DATA/'reservations.sqlite3')
+        try:
+            retired=purge_expired_guest_reviews(path,cfg,os.environ.get('CRANGE_ACTOR',f'cli:{os.getuid()}'),ProxmoxAPI(),ledger)
+            for plan_id in retired:
+                print(f'Released expired unused guest review {plan_id}; no guests or provider tasks found.',flush=True)
+        finally:ledger.close()
+        from crange_cache_jobs import prepare_cache, reconcile_unstarted_caches, resume_project_snapshot_caches
+        for cache_job in reconcile_unstarted_caches(int(args.project)):
+            print(f"Released pre-allocation cache reservation {cache_job}; no provider allocation was submitted.",flush=True)
+        from crange_scheduling import declarations
+        resume_project_snapshot_caches(int(args.project),{row['image'] for row in declarations(path,stage_cfg)})
+        fills = required_preparations(path, stage_cfg)
         print(f'Cache preparation phase: {len(fills)} required local cache fill(s).', flush=True)
         revision = json.dumps(cfg, sort_keys=True)
         for fill in fills:
@@ -869,22 +973,85 @@ def cmd_stage_changes(args: argparse.Namespace) -> None:
         print('Cache preparation verified. Generating the reviewed guest plan.', flush=True)
     else:
         print('Automatic distribution disabled; retaining a plan for legacy pinned resources.', flush=True)
-    cmd_plan(argparse.Namespace(project=args.project, retain=True, replace_sdn_applier=False))
+    cmd_plan(argparse.Namespace(project=args.project, retain=True, replace_sdn_applier=False, staging=True))
+
+
+def cmd_release_stage(args):
+    """Prepare caches and review only the selected declared team releases."""
+    from crange_rollouts import review_projection
+    from crange_scheduling import read_settings, required_preparations
+    path = project_dir(args.project)
+    cfg = json_config(path)
+    try:
+        scoped = review_projection(cfg, args.teams)
+    except ValueError as exc:
+        raise CrangeError(str(exc)) from exc
+    policy, _ = read_settings()
+    if policy.get('enabled'):
+        from crange_cache_jobs import prepare_cache, resume_project_snapshot_caches
+        from crange_scheduling import declarations
+        revision = json.dumps(cfg, sort_keys=True)
+        resume_project_snapshot_caches(int(args.project), {row['image'] for row in declarations(path, scoped)})
+        fills = required_preparations(path, scoped)
+        print(f'Release cache preparation: {len(fills)} required local cache fill(s).', flush=True)
+        for fill in fills:
+            if json.dumps(json_config(path), sort_keys=True) != revision:
+                raise CrangeError('Declarations changed during release preparation; review again.')
+            print(f'Preparing {fill["image"]} on {fill["node"]}/{fill["storage"]}', flush=True)
+            prepare_cache(project_id=int(args.project), image_id=fill['image'], node_name=fill['node'],
+                          datastore_id=fill['storage'], additional_capacity=fill['additional_capacity'],
+                          owner=os.environ.get('CRANGE_ACTOR', f'cli:{os.getuid()}'))
+        if json.dumps(json_config(path), sort_keys=True) != revision:
+            raise CrangeError('Declarations changed during release preparation; review again.')
+    cmd_plan(argparse.Namespace(project=args.project, retain=True, replace_sdn_applier=False,
+                                release_teams=list(map(str, args.teams))))
 
 
 def cmd_plan(args: argparse.Namespace) -> None:
     path = project_dir(args.project)
     cfg = json_config(path)
+    full_cfg = cfg
+    release_teams = getattr(args, 'release_teams', None)
+    if release_teams:
+        from crange_rollouts import review_projection
+        try:
+            cfg = review_projection(cfg, release_teams)
+        except ValueError as exc:
+            raise CrangeError(str(exc)) from exc
+    if getattr(args, 'staging', False):
+        from crange_staging import staging_projection
+        cfg = staging_projection(cfg)
+    network_foundation = getattr(args, 'network_foundation', None)
+    if network_foundation:
+        cfg = {**cfg, 'jump_boxes': {}, 'scenario_boxes': {}, 'scenario_containers': {}}
     from crange_scheduling import prepare, tf_overrides, print_review, abandon_plan
     bootstrap_node = None
+    bootstrap_nodes = None
+    bootstrap_router_nodes = None
     bootstrap_networks = set()
     if getattr(args, 'bootstrap', False):
-        cfg, bootstrap_node, bootstrap_networks = _bootstrap_project(path, cfg)
+        cfg, bootstrap_node, bootstrap_nodes, bootstrap_networks = _bootstrap_project(path, cfg)
     plan_id = os.urandom(16).hex()
     owner = os.environ.get('CRANGE_ACTOR', f'cli:{os.getuid()}')
+    from crange_scheduling import purge_expired_guest_reviews, DATA, read_settings
+    if read_settings()[0].get('enabled'):
+        from crange_placement import ReservationLedger
+        ledger = ReservationLedger(DATA / 'reservations.sqlite3')
+        try:
+            for retired in purge_expired_guest_reviews(path, full_cfg, owner, ProxmoxAPI(), ledger):
+                print(f'Released expired unused guest review {retired}; no guests or provider tasks found.', flush=True)
+        finally:
+            ledger.close()
     try:
         placement = prepare(path, cfg, plan_id, owner,
-                            bootstrap_node=bootstrap_node)
+                            bootstrap_node=bootstrap_node, bootstrap_nodes=bootstrap_nodes,
+                            **({'network_foundation': network_foundation} if network_foundation else {}))
+        if bootstrap_node:
+            bootstrap_router_nodes = (placement or {}).get('bootstrap_router_nodes', {})
+            expected_router_keys = {'router:project','router:staging'} | {f'router:team:{team}' for team in cfg['team_ids']}
+            if set(bootstrap_router_nodes) != expected_router_keys or not set(bootstrap_router_nodes.values()) <= set(bootstrap_nodes):
+                raise CrangeError('Bootstrap reservations do not map each router to an accepted node.')
+            cfg['bootstrap_router_nodes'] = bootstrap_router_nodes
     except __import__('crange_placement').PlacementError as exc:
         if 'local linked cache' in str(exc) or 'verified local image replica' in str(exc):
             from crange_scheduling import required_preparations
@@ -904,12 +1071,30 @@ def cmd_plan(args: argparse.Namespace) -> None:
             plan_args = ["plan", "-input=false", "-out", str(plan)]
             from crange_templates import media_tf_overrides
             overrides = Path(tmp) / 'placements.tfvars.json'
-            overrides.write_text(json.dumps(media_tf_overrides(path, cfg, placement)))
+            overrides.write_text(json.dumps(media_tf_overrides(path, full_cfg if (getattr(args, 'staging', False) or release_teams) else cfg, placement, scoped=bool(getattr(args, 'staging', False) or release_teams))))
             plan_args += ['-var-file', str(overrides)]
+            if network_foundation:
+                from crange_network_foundation import targets
+                plan_args += ['-target=' + target for target in targets(network_foundation)]
+            elif release_teams:
+                from crange_rollouts import review_targets
+                plan_args += ['-target=' + target for target in review_targets(full_cfg, release_teams)]
+            elif getattr(args, 'staging', False):
+                from crange_staging import staging_targets
+                state = json.loads(tf_run(path, ['show', '-json'], capture=True).stdout)
+                plan_args += ['-target=' + target for target in staging_targets(full_cfg, state)]
             if getattr(args, 'replace_sdn_applier', False):
                 plan_args.append('-replace=proxmox_sdn_applier.apply')
             tf_run(path, plan_args)
             detail = json.loads(tf_run(path, ["show", "-json", str(plan)], capture=True).stdout)
+            if network_foundation:
+                from crange_network_foundation import validate_plan
+                validate_plan(detail, full_cfg, network_foundation, placement)
+            if release_teams:
+                from crange_rollouts import plan_blockers
+                release_blockers = plan_blockers(detail, full_cfg, release_teams)
+                if release_blockers:
+                    raise CrangeError('Release plan affects resources outside its selected releases: ' + ', '.join(release_blockers))
             changes = []
             for resource in detail.get("resource_changes", []):
                 actions = resource.get("change", {}).get("actions", [])
@@ -919,15 +1104,20 @@ def cmd_plan(args: argparse.Namespace) -> None:
                 _validate_bootstrap_plan(detail, int(args.project), bootstrap_node, bootstrap_networks, cfg)
             from crange_staging import staging_blockers
             blockers = staging_blockers(detail, json_config(path))
+            if getattr(args, 'staging', False) and blockers:
+                raise CrangeError('Staging plan would affect resources outside staging: ' + ', '.join(blockers))
             print("\nPlan review:")
             if not changes:
                 print("No resource changes.")
             for address, actions in changes:
                 print(f"  {address}: {' -> '.join(actions)}")
-            if blockers:
+            if blockers and not release_teams:
                 print("Staging deployment blocked: " + ", ".join(blockers))
-            if any("delete" in actions for _, actions in changes):
+            if any("delete" in actions and not (network_foundation and address == 'proxmox_sdn_applier.apply')
+                   for address, actions in changes):
                 print("This plan deletes or replaces resources; inspect the Terraform plan above before applying.")
+            elif network_foundation:
+                print('This foundation plan creates new routers and subnets; existing guests are unchanged.')
             if getattr(args, 'retain', False):
                 directory = Path.home() / '.local/share/crange/plans' / f'project-{int(args.project):03d}'
                 directory.mkdir(mode=0o700, parents=True, exist_ok=True)
@@ -946,8 +1136,13 @@ def cmd_plan(args: argparse.Namespace) -> None:
                           'placements': placement['placements'] if placement else [],
                           'reservation_ids': placement['reservation_ids'] if placement else [],
                           'policy_revision': placement['policy_revision'] if placement else None}
+                if release_teams:
+                    record['release_teams'] = sorted(map(str, release_teams))
+                if network_foundation:
+                    record['network_foundation'] = list(network_foundation)
                 if bootstrap_node:
                     record.update(bootstrap=True, bootstrap_node=bootstrap_node,
+                                  bootstrap_nodes=bootstrap_nodes, bootstrap_router_nodes=bootstrap_router_nodes,
                                   bootstrap_networks=sorted(bootstrap_networks))
                 manifest = directory / f'{plan_id}.json'
                 fd = os.open(manifest, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
@@ -955,7 +1150,7 @@ def cmd_plan(args: argparse.Namespace) -> None:
                     json.dump(record, stream, indent=2)
                 from crange_scheduling import atomic_json
                 project_plan_manifest = path / '.crange-plans' / f'{plan_id}.json'
-                atomic_json(project_plan_manifest, {k:record[k] for k in ('plan_id','created','changes','placements','reservation_ids','policy_revision','bootstrap','bootstrap_node','bootstrap_networks') if k in record},0o640)
+                atomic_json(project_plan_manifest, {k:record[k] for k in ('plan_id','created','changes','placements','reservation_ids','policy_revision','bootstrap','bootstrap_node','bootstrap_nodes','bootstrap_router_nodes','bootstrap_networks','network_foundation','release_teams') if k in record},0o640)
                 replaced = (placement or {}).get('replaced_reviewed_plan_ids', [])
                 if replaced:
                     from crange_scheduling import DATA
@@ -1007,24 +1202,43 @@ def cmd_apply_saved(args: argparse.Namespace, path: Path) -> None:
         raise CrangeError('Template approvals or Terraform source changed since review; create a new plan.')
     bootstrap_cfg = None
     if record.get('bootstrap'):
-        bootstrap_cfg, bootstrap_node, bootstrap_networks = _bootstrap_project(path, json_config(path))
+        bootstrap_cfg, bootstrap_node, bootstrap_nodes, bootstrap_networks = _bootstrap_project(path, json_config(path))
         if (bootstrap_node != record.get('bootstrap_node') or
+                bootstrap_nodes != record.get('bootstrap_nodes') or
                 sorted(bootstrap_networks) != record.get('bootstrap_networks')):
             raise CrangeError('Bootstrap node or project networks changed since review; create a new bootstrap plan.')
+        bootstrap_router_nodes = record.get('bootstrap_router_nodes', {})
+        expected_router_keys = {'router:project','router:staging'} | {f'router:team:{team}' for team in bootstrap_cfg['team_ids']}
+        if set(bootstrap_router_nodes) != expected_router_keys or not set(bootstrap_router_nodes.values()) <= set(bootstrap_nodes):
+            raise CrangeError('Saved bootstrap placements no longer match accepted nodes.')
+        bootstrap_cfg['bootstrap_router_nodes'] = bootstrap_router_nodes
         detail = json.loads(tf_run(path, ['show', '-json', str(plan)], capture=True).stdout)
         _validate_bootstrap_plan(detail, int(args.project), bootstrap_node, bootstrap_networks, bootstrap_cfg)
+    if record.get('network_foundation'):
+        from crange_network_foundation import pending, validate_plan
+        cfg = json_config(path)
+        keys = record['network_foundation']
+        from crange_scheduling import applied_resources
+        if set(keys) != set(pending(cfg, applied_resources(path))):
+            raise CrangeError('Declared custom-network foundation changed since review; stage again.')
+        detail = json.loads(tf_run(path, ['show', '-json', str(plan)], capture=True).stdout)
+        validate_plan(detail, cfg, keys, record['distribution'])
     if getattr(args, 'staging_only', False):
         detail = json.loads(tf_run(path, ['show', '-json', str(plan)], capture=True).stdout)
         enforce_staging_plan(detail, json_config(path))
     if getattr(args, 'release_teams', None):
+        if record.get('release_teams') and set(record['release_teams']) != set(map(str, args.release_teams)):
+            raise CrangeError('Reviewed release teams differ from the requested deployment teams.')
         from crange_rollouts import plan_blockers
         detail = json.loads(tf_run(path, ['show', '-json', str(plan)], capture=True).stdout)
         blockers = plan_blockers(detail, json_config(path), args.release_teams)
         if blockers:
             raise CrangeError('Release deployment cannot change staging, unselected teams or unowned resources: ' + ', '.join(blockers))
     changes = record.get('changes', [])
-    destructive = [item['address'] for item in changes if 'delete' in item.get('actions', [])]
-    replacements = [item['address'] for item in changes if 'delete' in item.get('actions', []) and 'create' in item.get('actions', [])]
+    guest_changes = [item for item in changes if not (record.get('network_foundation')
+                                                    and item['address'] == 'proxmox_sdn_applier.apply')]
+    destructive = [item['address'] for item in guest_changes if 'delete' in item.get('actions', [])]
+    replacements = [item['address'] for item in guest_changes if 'delete' in item.get('actions', []) and 'create' in item.get('actions', [])]
     if destructive and not args.allow_destroy:
         raise CrangeError('Saved plan destroys resources: ' + ', '.join(destructive))
     if replacements and not args.allow_replace:
@@ -1032,8 +1246,17 @@ def cmd_apply_saved(args: argparse.Namespace, path: Path) -> None:
     from crange_scheduling import begin_apply, finish_apply, node_locks
     placement = record.get('distribution')
     nodes = {p['resolved']['node_name'] for p in (placement or {}).get('placements', [])}
+    retiring = []
+    if getattr(args, 'release_teams', None):
+        from crange_release_retire import retirements
+        retiring = retirements(json_config(path), args.release_teams, detail)
+        nodes.update(guest['node'] for guest in retiring)
     with node_locks(nodes):
         begin_apply(path, placement)
+        if retiring:
+            from crange_release_retire import quiesce
+            quiesce(ProxmoxAPI(), retiring,
+                    path / '.crange-rollout-quiesce' / f'{args.plan_id}.json', args.plan_id)
         tf_run(path, ['apply', '-parallelism=1', '-input=false', str(plan)])
         finish_apply(path, placement, succeeded=True)
     record_release_apply(path)
@@ -1041,10 +1264,21 @@ def cmd_apply_saved(args: argparse.Namespace, path: Path) -> None:
     record['applied_at'] = datetime.now(timezone.utc).isoformat()
     manifest.write_text(json.dumps(record, indent=2) + '\n')
     from crange_scheduling import atomic_json
-    atomic_json(path / '.crange-plans' / f'{args.plan_id}.json', {k:record[k] for k in ('plan_id','created','changes','placements','reservation_ids','policy_revision','applied_at','bootstrap','bootstrap_node','bootstrap_networks') if k in record},0o640)
+    atomic_json(path / '.crange-plans' / f'{args.plan_id}.json', {k:record[k] for k in ('plan_id','created','changes','placements','reservation_ids','policy_revision','applied_at','bootstrap','bootstrap_node','bootstrap_nodes','bootstrap_router_nodes','bootstrap_networks','network_foundation') if k in record},0o640)
+    if record.get('network_foundation'):
+        args.network_foundation_applied = True
+        cmd_configure_network_foundation(args, record['network_foundation'])
+        record['foundation_configured_at'] = datetime.now(timezone.utc).isoformat()
+        atomic_json(manifest, record, 0o600)
+        summary_path = path / '.crange-plans' / f'{args.plan_id}.json'
+        summary = json.loads(summary_path.read_text())
+        summary['foundation_configured_at'] = record['foundation_configured_at']
+        atomic_json(summary_path, summary, 0o640)
     if record.get('bootstrap'):
         status = {'schema_version': 1, 'project_id': int(args.project), 'state': 'awaiting_network_acceptance',
                   'bootstrap_plan_id': args.plan_id, 'node': record['bootstrap_node'],
+                  'nodes': record.get('bootstrap_nodes', []),
+                  'router_nodes': record.get('bootstrap_router_nodes', {}),
                   'networks': record['bootstrap_networks'], 'applied_at': record['applied_at'],
                   'acceptance_recorded': False}
         status['state'] = 'configuration_pending'
@@ -1166,6 +1400,50 @@ def cmd_route_sync(args):
     print(result.stdout.strip())
 
 
+def cmd_mhl_business_configure(args: argparse.Namespace) -> None:
+    if not args.yes:
+        raise CrangeError("MHL business configuration applies the fixed Project 100 service roles; pass --yes after reviewing their definitions.")
+    if int(args.project) != 100:
+        raise CrangeError("MHL business services are only available for Project 100.")
+    from crange_mhl_services import configure, ServiceConfigurationError
+    try:
+        cmd_inventory(args)
+        configure(project_dir(args.project), args.network_id, recipe_sha256=getattr(args, "recipe_sha256", None))
+    except (ValueError, OSError, subprocess.SubprocessError) as exc:
+        raise CrangeError(str(exc)) from exc
+
+
+def cmd_mhl_windows_configure(args: argparse.Namespace) -> None:
+    if not args.yes:
+        raise CrangeError("MHL Windows service configuration applies the fixed Project 100 domain and file-server roles; pass --yes after reviewing the playbooks.")
+    if int(args.project) != 100:
+        raise CrangeError("MHL Windows services are only available for Project 100.")
+    from crange_mhl_services import configure_windows, ServiceConfigurationError
+    try:
+        cmd_inventory(args)
+        configure_windows(project_dir(args.project), args.network_id, recipe_sha256=getattr(args, "recipe_sha256", None))
+    except (ValueError, OSError, subprocess.SubprocessError) as exc:
+        raise CrangeError(str(exc)) from exc
+
+
+def _windows_base_action(args: argparse.Namespace, action: str) -> None:
+    import crange_windows_base
+    try:
+        result = (crange_windows_base.prepare(args.build_id) if action == "prepare"
+                  else crange_windows_base.seal(args.build_id))
+    except crange_windows_base.WindowsBaseError as exc:
+        raise CrangeError(str(exc)) from exc
+    print(result.get("result", "Windows base action completed; clone identity proof remains separate."))
+
+
+def cmd_template_windows_base_prepare(args: argparse.Namespace) -> None:
+    _windows_base_action(args, "prepare")
+
+
+def cmd_template_windows_base_seal(args: argparse.Namespace) -> None:
+    _windows_base_action(args, "seal")
+
+
 def cmd_configure_team(args: argparse.Namespace) -> None:
     """Configure only one team's routers and jump boxes, plus shared return routes."""
     if not args.yes:
@@ -1177,6 +1455,10 @@ def cmd_configure_team(args: argparse.Namespace) -> None:
     team = 254 if int(args.team) == 0 else int(args.team)
     if team != 254 and str(team) not in {str(item) for item in cfg.get("team_ids", [])}:
         raise CrangeError(f"Team {team} is not configured.")
+    from crange_ssh_identity import refresh_created_guests
+    refreshed = refresh_created_guests(path, team)
+    if refreshed:
+        print("Refreshed SSH identities for newly applied guests: " + ", ".join(refreshed), flush=True)
     cmd_route_sync(args)
     inventory_path = ROOT / "ansible" / "inventory" / "generated" / f"project-{int(args.project):03d}.json"
     run([sys.executable, str(ROOT / "scripts" / "generate-project-inventory.py"), "--terraform-dir", str(path), "--output", str(inventory_path)])
@@ -1207,6 +1489,9 @@ def cmd_configure_team(args: argparse.Namespace) -> None:
     for group in (jump_group, container_group, vm_group):
         ansible(args, "root-access.yml", [group])
     ansible(args, "vm-swap.yml", [vm_group])
+    if any(str(cfg.get("scenario_boxes", {}).get(values.get("crange_box_key"), {}).get("team_id")) == str(team)
+           for values in groups.get("windows_guests", {}).get("hosts", {}).values()):
+        cmd_configure(argparse.Namespace(project=args.project, target="windows", yes=True, team_scope=team))
 
 
 def enforce_staging_plan(detail: dict, cfg: dict) -> None:
@@ -1222,12 +1507,55 @@ def cmd_stage_deploy(args: argparse.Namespace) -> None:
     print("Phase 1/2: applying the reviewed infrastructure plan", flush=True)
     args.staging_only = True
     cmd_apply(args)
+    if getattr(args, 'network_foundation_applied', False):
+        print('Custom network foundation deployed and configured. Verify the new LAN before staging scenario guests.', flush=True)
+        return
     print("Infrastructure applied. Phase 2/2: configuring routes, routers, and jump boxes", flush=True)
     try:
         cmd_configure_team(argparse.Namespace(project=args.project, team=0, yes=True))
     except CrangeError as exc:
         raise CrangeError(f"Infrastructure deployment succeeded, but post-deploy configuration failed: {exc}") from exc
     print("Staging deployment and configuration completed.", flush=True)
+
+
+def cmd_configure_network_foundation(args, keys):
+    """Only parent routes/firewall and exact new custom routers; no guest roles."""
+    path = project_dir(args.project)
+    cfg = json_config(path)
+    if not keys or any(str(cfg['custom_networks'][key]['owner_team_id']) != '254' for key in keys):
+        raise CrangeError('Only declared staging custom networks can use this foundation workflow.')
+    from crange_scheduling import atomic_json
+    status_path = path / '.crange-network-foundation.json'
+    status = {'project_id': int(args.project), 'networks': keys, 'state': 'configuration_pending',
+              'plan_id': getattr(args, 'plan_id', None)}
+    atomic_json(status_path, status, 0o640)
+    try:
+        from crange_ssh_identity import refresh_created_guests
+        refresh_created_guests(path, 254)
+        cmd_inventory(args)
+        inventory_path = ROOT / 'ansible/inventory/generated' / f'project-{int(args.project):03d}.json'
+        inventory = json.loads(inventory_path.read_text())
+        routers = inventory['all']['children']['routers']['children']
+        for host in routers.get('project_routers', {}).get('hosts', {}):
+            ansible(args, 'router-routes.yml', [host])
+        parent = f'p{int(args.project):03d}t254_router'
+        if parent not in routers.get('staging_routers', {}).get('hosts', {}):
+            raise CrangeError('Applied staging parent router is missing from inventory.')
+        ansible(args, 'routers.yml', [parent])
+        custom = routers.get('custom_routers', {}).get('hosts', {})
+        for key in keys:
+            number = cfg['custom_networks'][key]['network_id']
+            host = f'p{int(args.project):03d}c{number:03d}_router'
+            if host not in custom or int(custom[host].get('router_owner_team_id', -1)) != 254:
+                raise CrangeError('Applied custom router is missing or has the wrong owner.')
+            ansible(args, 'routers.yml', [host])
+        status['state'] = 'awaiting_network_acceptance'
+        status['configured_at'] = datetime.now(timezone.utc).isoformat()
+    except Exception:
+        status['state'] = 'configuration_failed'
+        atomic_json(status_path, status, 0o640)
+        raise
+    atomic_json(status_path, status, 0o640)
 
 
 def cmd_inventory(args: argparse.Namespace) -> None:
@@ -1272,7 +1600,135 @@ def ansible(args: argparse.Namespace, playbook: str, limit: list[str], *, tags: 
         command += ['--tags', ','.join(tags)]
     for group in limit:
         command += ["--limit", group]
-    run(command, cwd=ROOT, env={**os.environ, "ANSIBLE_TIMEOUT": "90"})
+    # The controller only has the C locale generated; inheriting a host locale
+    # such as en_US.UTF-8 makes Ansible abort before it can reach the routers.
+    run(command, cwd=ROOT, env={**os.environ, "ANSIBLE_TIMEOUT": "90",
+                               "LC_ALL": "C.UTF-8", "LANG": "C.UTF-8"})
+
+
+def _windows_configure_credentials(project_id: int, inventory: dict, path: Path) -> dict:
+    """Resolve worker-private credentials only for exact applied guest/image identities."""
+    try:
+        all_group = inventory["all"]
+        children = all_group["children"]
+        windows = children.get("windows_guests", {})
+        all_vars = all_group.get("vars", {})
+        if not isinstance(windows, dict):
+            raise TypeError("windows_guests must be an object")
+        hosts = windows.get("hosts", {})
+    except (KeyError, TypeError) as exc:
+        raise CrangeError("Generated inventory has an invalid windows_guests group.") from exc
+    windows_vars = windows.get("vars", {})
+    if not isinstance(hosts, dict) or not isinstance(all_vars, dict) or not isinstance(windows_vars, dict):
+        raise CrangeError("Generated Windows inventory has invalid host or group variables.")
+
+    def contains_password(value):
+        if isinstance(value, dict):
+            return "ansible_password" in value or any(contains_password(item) for item in value.values())
+        if isinstance(value, list):
+            return any(contains_password(item) for item in value)
+        return False
+
+    if "ansible_password" in all_vars or contains_password(windows):
+        raise CrangeError("Windows passwords must come only from the worker-private guest credential store.")
+    if not hosts:
+        return {}
+
+    applied_path = path / "crange-applied-placements.json"
+    try:
+        applied = json.loads(applied_path.read_text())
+    except (OSError, json.JSONDecodeError) as exc:
+        raise CrangeError("Windows configuration requires crange-applied-placements.json with actual guest/image identities.") from exc
+    if not isinstance(applied, dict):
+        raise CrangeError("Windows applied-placement record is malformed.")
+
+    try:
+        from crange_windows_guest_admin import reference, resolve
+    except ImportError as exc:
+        raise CrangeError("Worker-private Windows credential support is unavailable.") from exc
+    credentials = {}
+    for host, values in sorted(hosts.items()):
+        key_prefix = f"p{project_id:03d}_vm_"
+        box_key = values.get("crange_box_key")
+        if (not isinstance(box_key, str) or host != key_prefix + box_key
+                or values.get("crange_project_id") != project_id):
+            raise CrangeError(f"Windows inventory host {host} lacks a matching project/box identity.")
+        guest_id = values.get("crange_guest_id")
+        image_id = values.get("crange_image_id")
+        template = values.get("crange_template")
+        template_id = values.get("crange_template_id")
+        template_node = values.get("crange_template_node")
+        network_id = values.get("crange_guest_network_id")
+        try:
+            network_id_int = int(network_id)
+            guest_address = ipaddress.ip_address(values.get("ansible_host", ""))
+            guest_network = ipaddress.ip_network(f"10.{project_id}.{network_id_int}.0/24")
+            address_in_scope = guest_address in guest_network
+        except (TypeError, ValueError):
+            network_id_int = 0
+            address_in_scope = False
+        if (isinstance(guest_id, bool) or not isinstance(guest_id, int)
+                or not isinstance(image_id, str) or not image_id
+                or not isinstance(template, str) or not template
+                or isinstance(template_id, bool) or not isinstance(template_id, int)
+                or not isinstance(template_node, str) or not template_node
+                or isinstance(network_id, bool) or not 1 <= network_id_int <= 254
+                or not address_in_scope):
+            raise CrangeError(f"Windows inventory host {host} lacks approved image or deployed guest metadata.")
+        placement = applied.get(f"vm:{box_key}")
+        if (not isinstance(placement, dict) or placement.get("guest_id") != guest_id
+                or placement.get("image_id") != image_id
+                or placement.get("declared_template") != template
+                or placement.get("template_id") != template_id
+                or placement.get("template_node") != template_node):
+            raise CrangeError(f"Applied placement for Windows guest {box_key} does not match generated guest/image identity.")
+        try:
+            credentials[host] = resolve(
+                reference(project_id, box_key), project_id=project_id,
+                box_key=box_key, guest_id=guest_id, image_id=image_id,
+            )
+        except (OSError, ValueError) as exc:
+            raise CrangeError(
+                f"No worker-private Windows credential is bound to project {project_id}, guest {box_key}, "
+                f"guest ID {guest_id}, and approved image {image_id}."
+            ) from None
+    return credentials
+
+
+def _run_windows_management_routes(args, inventory, scope=None):
+    groups = inventory['all']['children'].get('routers', {}).get('children', {})
+    for group_name in ('project_routers', 'team_routers', 'staging_routers', 'custom_routers'):
+        for host, values in groups.get(group_name, {}).get('hosts', {}).items():
+            if scope is not None and group_name != 'project_routers':
+                if group_name == 'custom_routers':
+                    if str(values.get('router_owner_team_id')) != str(scope):
+                        continue
+                elif host != f'p{int(args.project):03d}t{int(scope):03d}_router':
+                    continue
+            ansible(args, 'windows-routes.yml', [host])
+
+
+def _run_windows_guest_baseline(inventory: dict, credentials: dict) -> None:
+    """Run only the fixed Windows access baseline with a temporary private inventory."""
+    if not credentials:
+        return
+    windows_hosts = inventory["all"]["children"]["windows_guests"]["hosts"]
+    for host, credential in credentials.items():
+        windows_hosts[host]["ansible_user"] = credential["username"]
+        windows_hosts[host]["ansible_password"] = credential["password"]
+    with tempfile.TemporaryDirectory(prefix="crange-windows-") as temporary:
+        os.chmod(temporary, 0o700)
+        private_inventory = Path(temporary) / "windows-inventory.json"
+        descriptor = os.open(private_inventory, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+        with os.fdopen(descriptor, "w") as stream:
+            stream.write(json.dumps(inventory, indent=2) + "\n")
+        command = [
+            "ansible-playbook", "-f", "1", "-i", str(private_inventory),
+            str(ROOT / "ansible/windows/crange-guests.yml"),
+            "--limit", "windows_guests",
+        ]
+        run(command, cwd=ROOT, env={**os.environ, "ANSIBLE_TIMEOUT": "90",
+                                    "LC_ALL": "C.UTF-8", "LANG": "C.UTF-8"})
 
 
 def cmd_configure(args: argparse.Namespace) -> None:
@@ -1281,6 +1737,78 @@ def cmd_configure(args: argparse.Namespace) -> None:
         raise CrangeError("Configuration applies Ansible changes; pass --yes after reviewing the playbook.")
     output = ROOT / "ansible" / "inventory" / "generated" / f"project-{int(args.project):03d}.json"
     run([sys.executable, str(ROOT / "scripts" / "generate-project-inventory.py"), "--terraform-dir", str(path), "--output", str(output)])
+    windows_inventory = None
+    windows_credentials = {}
+    windows_context = {}
+    if args.target in ("boxes", "all", "windows"):
+        try:
+            windows_inventory = json.loads(output.read_text())
+        except (OSError, json.JSONDecodeError) as exc:
+            raise CrangeError(f"Cannot inspect generated Windows inventory: {exc}") from exc
+        scope = getattr(args, 'team_scope', None)
+        if scope is not None:
+            import copy
+            windows_inventory = copy.deepcopy(windows_inventory)
+            cfg = json_config(path)
+            group = windows_inventory['all']['children'].get('windows_guests', {})
+            group['hosts'] = {host: values for host, values in group.get('hosts', {}).items()
+                              if str(cfg.get('scenario_boxes', {}).get(values.get('crange_box_key'), {}).get('team_id')) == str(scope)}
+            group['children'] = {}
+            if not group['hosts']:
+                print('Skipping Windows baseline: no applied Windows guests in this team.', flush=True)
+                if args.target == 'windows':
+                    return
+        # First contact for a published Windows clone is a fixed, ownership-
+        # checked QGA initializer. It creates the worker-private binding before
+        # the WinRM credentials preflight; existing bindings are never rotated.
+        windows_hosts = windows_inventory.get("all", {}).get("children", {}).get("windows_guests", {}).get("hosts", {})
+        windows_keys = []
+        for guest_values in windows_hosts.values():
+            guest_key = guest_values.get("crange_box_key") if isinstance(guest_values, dict) else None
+            if isinstance(guest_key, str):
+                windows_keys.append(guest_key)
+        if args.target == "windows" and not windows_keys:
+            raise CrangeError("No declared Windows guests are available in this project; add Windows guests and deploy the reviewed scenario release first.")
+        if windows_keys:
+            applied_path = path / "crange-applied-placements.json"
+            try:
+                applied = json.loads(applied_path.read_text())
+            except (OSError, json.JSONDecodeError) as exc:
+                raise CrangeError("Windows configuration requires crange-applied-placements.json with actual guest/image identities.") from exc
+            if not isinstance(applied, dict):
+                raise CrangeError("Windows applied-placement record is malformed.")
+            for guest_key in set(windows_keys):
+                placement = applied.get(f"vm:{guest_key}")
+                guest_values = next((values for values in windows_hosts.values()
+                                     if isinstance(values, dict) and values.get("crange_box_key") == guest_key), {})
+                if (not isinstance(placement, dict)
+                        or placement.get("guest_id") != guest_values.get("crange_guest_id")
+                        or placement.get("image_id") != guest_values.get("crange_image_id")
+                        or placement.get("declared_template") != guest_values.get("crange_template")
+                        or placement.get("template_id") != guest_values.get("crange_template_id")
+                        or placement.get("template_node") != guest_values.get("crange_template_node")):
+                    raise CrangeError(f"Applied placement for Windows guest {guest_key} does not match generated guest/image identity.")
+            from crange_windows_guest_initialize import initialize
+            windows_api = ProxmoxAPI()
+            for guest_key in sorted(set(windows_keys)):
+                try:
+                    windows_context[guest_key] = initialize(windows_api, int(args.project), guest_key)
+                except Exception as exc:
+                    # Provider errors may include user-controlled response data;
+                    # expose only the fixed exception type/message here.
+                    detail = ("The Proxmox worker token lacks the required QEMU Guest Agent execution capability; "
+                              "grant only the reviewed guest-agent permissions for this VM scope. No ACL was changed."
+                              if "HTTP 403" in str(exc) else str(exc))
+                    raise CrangeError(f"Windows initialization failed for {guest_key}: {detail}") from None
+        windows_credentials = _windows_configure_credentials(int(args.project), windows_inventory, path)
+        for host,credential in windows_credentials.items():
+            key=windows_hosts[host]['crange_box_key']
+            if windows_context.get(key,{}).get('admin_login'):
+                credential['username']=windows_context[key]['admin_login']
+    if args.target == "windows":
+        _run_windows_management_routes(args, windows_inventory, getattr(args, "team_scope", None))
+        _run_windows_guest_baseline(windows_inventory, windows_credentials)
+        return
     cmd_route_sync(args)
     if args.target in ("routes", "all"):
         ansible(args, "router-routes.yml", ["project_routers"])
@@ -1298,6 +1826,8 @@ def cmd_configure(args: argparse.Namespace) -> None:
         for group in ("jumpboxes", "scenario_containers", "scenario_vms"):
             ansible(args, "root-access.yml", [group])
         ansible(args, "vm-swap.yml", ["scenario_vms"])
+        _run_windows_management_routes(args, windows_inventory)
+        _run_windows_guest_baseline(windows_inventory, windows_credentials)
 
 
 
@@ -1327,8 +1857,37 @@ class ProxmoxAPI:
         self.endpoint = values["PROXMOX_VE_ENDPOINT"].rstrip("/")
         if not self.endpoint.endswith("/api2/json"):
             self.endpoint += "/api2/json"
+        self.compat_enabled = False
+        self.compat_upstream = self.endpoint
+        compat_path = Path('/home/crange/.config/crange/proxmox-compat.json')
+        if compat_path.exists():
+            import pwd
+            from crange_proxmox_compat import load_config
+            settings = load_config(compat_path, owner_uid=pwd.getpwnam('crange').pw_uid)
+            self.endpoint = f'https://127.0.0.1:{settings["port"]}/api2/json'
+            self.compat_enabled = True
+            self.compat_upstream = settings.get('upstream', self.compat_upstream)
         self.token = values["PROXMOX_VE_API_TOKEN"]
         self.ssl_context = ssl._create_unverified_context() if os.environ.get("PROXMOX_VE_INSECURE", "true").lower() == "true" else ssl.create_default_context()
+
+    def websocket_endpoint(self):
+        """Use the verified real gateway for WebSockets, outside the HTTP adapter."""
+        if not self.compat_enabled:
+            return self.endpoint
+        self.request('GET', '/cluster/status')
+        url = self.endpoint.removesuffix('/api2/json') + '/__crange_compat/status'
+        with urllib.request.urlopen(url, context=self.ssl_context, timeout=5) as response:
+            state = json.loads(response.read(8192))
+        active = urllib.parse.urlsplit(state.get('active_upstream', ''))
+        configured = urllib.parse.urlsplit(self.compat_upstream)
+        allowed = {(configured.scheme, configured.netloc)}
+        if configured.hostname in ('10.0.0.101', '10.0.0.104', '10.0.0.106') and configured.port == 8006:
+            allowed.update(('https', f'10.0.0.{number}:8006') for number in (101, 104, 106))
+        if (not state.get('recently_verified') or (active.scheme, active.netloc) not in allowed
+                or active.username or active.password or active.query or active.fragment
+                or active.path not in ('', '/', '/api2/json', '/api2/json/')):
+            raise CrangeError('Verified cluster console gateway is unavailable.')
+        return urllib.parse.urlunsplit((active.scheme, active.netloc, '/api2/json', '', ''))
 
     def request(self, method: str, path: str, fields: dict | None = None) -> object:
         url = self.endpoint + path
@@ -1342,14 +1901,22 @@ class ProxmoxAPI:
         req = urllib.request.Request(url, data=data, method=method,
             headers={"Authorization": "PVEAPIToken=" + self.token,
                      "Content-Type": "application/x-www-form-urlencoded"})
-        try:
-            with urllib.request.urlopen(req, context=self.ssl_context, timeout=90) as response:
-                body = json.load(response)
-        except urllib.error.HTTPError as exc:
-            # Never echo response bodies or headers; API failures can contain sensitive data.
-            raise CrangeError(f"Proxmox API {method} {path} failed with HTTP {exc.code}.") from exc
-        except (OSError, ValueError) as exc:
-            raise CrangeError(f"Proxmox API {method} {path} failed: {type(exc).__name__}.") from exc
+        attempts = getattr(self, 'read_attempts', 3) if method == 'GET' else 1
+        for attempt in range(attempts):
+            try:
+                with urllib.request.urlopen(req, context=self.ssl_context, timeout=getattr(self, 'request_timeout', 90)) as response:
+                    body = json.load(response)
+                break
+            except urllib.error.HTTPError as exc:
+                # PVE may briefly return gateway 595/596 while a node API
+                # request is still healthy. Retry only idempotent reads; never
+                # replay a create, restore, task start, or other mutation.
+                if method == 'GET' and exc.code in (595, 596) and attempt + 1 < attempts:
+                    time.sleep(1 << attempt)
+                    continue
+                raise CrangeError(f"Proxmox API {method} {path} failed with HTTP {exc.code}.") from exc
+            except (OSError, ValueError) as exc:
+                raise CrangeError(f"Proxmox API {method} {path} failed: {type(exc).__name__}.") from exc
         if not isinstance(body, dict) or "data" not in body:
             raise CrangeError(f"Proxmox API {method} {path} returned no data.")
         return body["data"]
@@ -1359,12 +1926,73 @@ class ProxmoxAPI:
             raise CrangeError(f"Proxmox on {node} returned an invalid task ID.")
         deadline = time.monotonic() + timeout
         path = f"/nodes/{node}/tasks/{urllib.parse.quote(upid, safe='')}/status"
+        next_progress, last_progress = 0, None
         while time.monotonic() < deadline:
-            result = self.request("GET", path)
+            try:
+                result = self.request("GET", path)
+            except CrangeError as error:
+                if getattr(error.__cause__, 'code', None) not in (595, 596):
+                    raise
+                # The provider task remains authoritative. Resume observing the
+                # same handle within its deadline; never replay its mutation.
+                time.sleep(2)
+                continue
             if result.get("status") == "stopped":
                 if result.get("exitstatus") != "OK":
+                    # PVE starts e1000 guests successfully but warns that its
+                    # host-side MTU option only applies to VirtIO. Accept only
+                    # this observed warning, on a start task, after checking
+                    # the complete bounded log. Other warnings remain errors.
+                    if (re.fullmatch(r"WARNINGS: [1-9][0-9]*", str(result.get('exitstatus', ''))) and
+                            (':qmstart:' in upid or ':vzdump:' in upid)):
+                        lines = self.request('GET', path.rsplit('/', 1)[0] + '/log', {'limit': 1000})
+                        messages = [row.get('t', '') for row in lines]
+                        warnings = [message for message in messages if message.startswith('WARN:')]
+                        if (len(warnings) == int(result['exitstatus'].split(':')[1]) and
+                                len(lines) < 1000 and
+                                all(re.fullmatch(r"WARN: netdev net[0-9]+: ignoring MTU '[0-9]+', not using VirtIO", message)
+                                    for message in warnings) and
+                                messages[-1:] == ['TASK ' + result['exitstatus']] and
+                                ((':qmstart:' in upid and all(message in warnings or message == 'TASK ' + result['exitstatus'] for message in messages))
+                                 or (':vzdump:' in upid and 'INFO: Backup job finished successfully' in messages
+                                     and all(message.startswith('INFO:') or message in warnings
+                                             or message == 'TASK ' + result['exitstatus'] for message in messages)))):
+                            print(f"crange: warning: {node} task completed successfully; non-VirtIO NIC ignores host MTU.", flush=True)
+                            return
                     raise CrangeError(f"Proxmox task on {node} failed: {result.get('exitstatus', 'unknown')}.")
                 return
+            if any(kind in upid for kind in (':vzdump:', ':qmrestore:', ':qmclone:')) and time.monotonic() >= next_progress:
+                next_progress = time.monotonic() + 30
+                try:
+                    lines = self.request('GET', path.rsplit('/', 1)[0] + '/log', {'limit': 1000})
+                    # Print only numeric transfer evidence, never raw provider
+                    # logs which might contain configuration or credentials.
+                    if ':qmclone:' in upid:
+                        pattern = r'^transferred ([0-9.]+ (?:MiB|GiB|TiB)) of ([0-9.]+ (?:MiB|GiB|TiB)) \(([0-9]+(?:\.[0-9]+)?)%\)$'
+                        samples = [re.fullmatch(pattern, row.get('t', '')) for row in lines]
+                        samples = [sample for sample in samples if sample and float(sample[3]) <= 100]
+                        if samples and samples[-1][3] != last_progress:
+                            sample = samples[-1]; last_progress = sample[3]
+                            print(f'Clone progress: {sample[3]}% ({sample[1]} of {sample[2]})', flush=True)
+                        time.sleep(2)
+                        continue
+                    restore = ':qmrestore:' in upid
+                    pattern = (r"^progress ([0-9]{1,3})% \(read ([0-9]+) bytes, duration ([0-9]+) sec\)$" if restore else
+                               r"^INFO:\s+([0-9]{1,3})% \(([0-9.]+ (?:MiB|GiB|TiB)) of ([0-9.]+ (?:MiB|GiB|TiB))\)")
+                    samples = [re.search(pattern, row.get('t', ''))
+                               for row in lines]
+                    samples = [sample for sample in samples if sample and int(sample[1]) <= 100]
+                    if samples and samples[-1][1] != last_progress:
+                        sample = samples[-1]; last_progress = sample[1]
+                        message = (f'Restore progress: {sample[1]}% ({int(sample[2])/1024**3:.2f} GiB read)' if restore else
+                                   f'Backup progress: {sample[1]}% ({sample[2]} of {sample[3]})')
+                        print(message, flush=True)
+                        if restore and sample[1] == '100':
+                            print('Archive reading complete; waiting for durable disk writes and restore finalization. The task is still running.', flush=True)
+                except CrangeError:
+                    # Status remains authoritative if optional log access is
+                    # unavailable. Never replay the operation to obtain logs.
+                    pass
             time.sleep(2)
         raise CrangeError(f"Proxmox task on {node} did not finish within {timeout} seconds.")
 
@@ -1412,20 +2040,22 @@ class ProxmoxAPI:
         # A fixed guest command gives Linux images a clean filesystem shutdown
         # when their firmware/ACPI path is unreliable. No user-supplied command
         # is ever executed by the controller.
-        key = Path("/home/crange/.ssh/id_ed25519_range")
-        try:
-            subprocess.run(["ssh", "-i", str(key), "-o", "IdentitiesOnly=yes",
-                "-o", "StrictHostKeyChecking=no", "-o", "UserKnownHostsFile=/dev/null",
-                "-o", "ConnectTimeout=5", f"user@{address}",
-                "sudo -n systemctl poweroff"], check=False, capture_output=True,
-                text=True, timeout=15)
-        except (OSError, subprocess.TimeoutExpired):
-            pass
-        deadline = time.monotonic() + 60
-        while time.monotonic() < deadline:
-            if self.status(node, vmid) == "stopped":
-                return
-            time.sleep(2)
+        windows = str(self.vm(node, vmid).get('ostype', '')).startswith('win')
+        if not windows:
+            key = Path("/home/crange/.ssh/id_ed25519_range")
+            try:
+                subprocess.run(["ssh", "-i", str(key), "-o", "IdentitiesOnly=yes",
+                    "-o", "StrictHostKeyChecking=no", "-o", "UserKnownHostsFile=/dev/null",
+                    "-o", "ConnectTimeout=5", f"user@{address}",
+                    "sudo -n systemctl poweroff"], check=False, capture_output=True,
+                    text=True, timeout=15)
+            except (OSError, subprocess.TimeoutExpired):
+                pass
+            deadline = time.monotonic() + 60
+            while time.monotonic() < deadline:
+                if self.status(node, vmid) == "stopped":
+                    return
+                time.sleep(2)
         upid = self.request("POST", f"/nodes/{node}/qemu/{vmid}/status/shutdown", {"timeout": 90, "forceStop": 0})
         self.task(node, upid, timeout=120)
         if self.status(node, vmid) != "stopped":
@@ -1533,7 +2163,7 @@ class ProxmoxAPI:
         raise CrangeError("Could not allocate release CT image ID.")
 
 
-def templates_for(path: Path) -> dict:
+def templates_for(path: Path, *, creation=False) -> dict:
     source = path / "approved-scenario-templates.json"
     try:
         data = json.loads(source.read_text())
@@ -1541,14 +2171,20 @@ def templates_for(path: Path) -> dict:
         raise CrangeError(f"Cannot read approved scenario templates {source}: {exc}") from exc
     if not data:
         raise CrangeError("No approved scenario VM templates are configured.")
+    if creation:
+        from crange_template_selection import creation_templates
+        return creation_templates(data)
     return data
 
 
-def container_templates_for(path: Path) -> dict:
+def container_templates_for(path: Path, *, creation=False) -> dict:
     try:
         data = json.loads((path / "approved-container-templates.json").read_text())
     except (OSError, json.JSONDecodeError) as exc:
         raise CrangeError(f"Cannot read approved container templates: {exc}") from exc
+    if creation:
+        from crange_template_selection import creation_templates
+        return creation_templates(data)
     return data
 
 
@@ -1864,7 +2500,9 @@ def cmd_machine_state(args: argparse.Namespace) -> None:
     live = output_json(path).get(field, {}).get('value', {}).get(args.name)
     if not live:
         raise CrangeError('Deploy this guest before changing its power state.')
-    node = live.get('node_name', box['node_name'])
+    node = live.get('node_name') or live.get('placement', {}).get('node_name') or box['node_name']
+    if node == 'auto':
+        raise CrangeError('Applied guest placement is missing; refresh project inventory before a power action.')
     vmid = int(live['id'])
     api = ProxmoxAPI()
     actual = api.vm(node, vmid) if args.kind == 'vm' else api.container(node, vmid)
@@ -1927,7 +2565,7 @@ def scenario_guac_services(args: argparse.Namespace, existing: dict | None = Non
 def cmd_scenario_add(args: argparse.Namespace) -> None:
     path = project_dir(args.project)
     cfg = json_config(path)
-    templates = templates_for(path)
+    templates = templates_for(path, creation=True)
     if args.template not in templates:
         raise CrangeError(f"Template {args.template!r} is not approved. Approved: {', '.join(sorted(templates))}")
     team = "254" if args.team == 0 else str(args.team)
@@ -1975,7 +2613,7 @@ def cmd_scenario_edit(args: argparse.Namespace) -> None:
     box = scenario_boxes(cfg).get(args.name)
     if box is None:
         raise CrangeError(f"Scenario VM {args.name} is not declared.")
-    if args.template not in templates_for(path):
+    if args.template not in templates_for(path, creation=args.template != box.get("template")):
         raise CrangeError(f"Template {args.template!r} is not approved.")
     if args.node not in NODES | {"auto"}:
         raise CrangeError("Node must be one of proxmox1 through proxmox6.")
@@ -2016,7 +2654,7 @@ def cmd_container_add(args: argparse.Namespace) -> None:
         raise CrangeError(f"Team {team} is not configured.")
     if not re.fullmatch(r"[a-z][a-z0-9-]{0,23}", args.name):
         raise CrangeError("Container name must use lowercase letters, digits, and hyphens (max 24 chars).")
-    if args.template not in container_templates_for(path):
+    if args.template not in container_templates_for(path, creation=True):
         raise CrangeError("Container template is not in the platform-approved CT allowlist.")
     if not 2 <= args.ip <= 100 or not 1 <= args.cores <= 16 or not 512 <= args.memory <= 65536:
         raise CrangeError("CT static IP must be .2-.100, cores 1-16, and memory 512-65536 MB.")
@@ -2047,7 +2685,7 @@ def cmd_container_add(args: argparse.Namespace) -> None:
         "network_key": network_key, "network_id": network_id,
         "health_checks": checks, "guac_protocol": remote_services[0], "guac_services": remote_services,
     }
-    reference = container_templates_for(path)[args.template]
+    reference = container_templates_for(path, creation=True)[args.template]
     if reference.get("image_id"):scenario_containers(cfg)[key]["image"] = reference["image_id"]
     validate_scenario_config(path, cfg)
     validate_container_config(path, cfg)
@@ -2061,7 +2699,7 @@ def cmd_container_edit(args: argparse.Namespace) -> None:
     box = scenario_containers(cfg).get(args.name)
     if box is None:
         raise CrangeError(f"Scenario container {args.name} is not declared.")
-    if args.template not in container_templates_for(path):
+    if args.template not in container_templates_for(path, creation=args.template != box.get("template")):
         raise CrangeError("Container template is not in the platform-approved CT allowlist.")
     if args.node not in NODES | {"auto"}:
         raise CrangeError("Node must be one of proxmox1 through proxmox6.")
@@ -2182,10 +2820,17 @@ def check_endpoint(project: int, team: str, address: str, check: dict) -> None:
         cwd=ROOT, capture=True, env={**os.environ, "ANSIBLE_TIMEOUT": "90"})
 
 
+def guest_startup_timeout(profile):
+    """Keep Windows policy/service startup bounded separately from probe timeouts."""
+    return 600 if str(profile.get('os_type','')).startswith('win') else 180
+
+
 def wait_for_boot_health(project: int, team: str, address: str, check: dict,
-                         startup_timeout: int = 180) -> None:
-    """Allow guest startup time without changing an individual probe's timeout."""
+                         startup_timeout: int = 180, *, startup_deadline: float | None = None) -> None:
+    """Allow startup time without extending one guest's budget for each probe."""
     deadline = time.monotonic() + startup_timeout
+    if startup_deadline is not None:
+        deadline = min(deadline, startup_deadline)
     while True:
         try:
             check_endpoint(project, team, address, check)
@@ -2235,6 +2880,12 @@ def cmd_release_capture(args: argparse.Namespace) -> None:
     validate_custom_networks(cfg)
     validate_scenario_config(path, cfg)
     validate_container_config(path, cfg)
+    if project == 100:
+        from crange_mhl_services import profile_for, verify_release_profiles
+        try:
+            verify_release_profiles({'project_id': project, 'scenario': {'service_profiles': profile_for(254)}}, require_current=True, preserve_recipes=True)
+        except ValueError as exc:
+            raise CrangeError(str(exc)) from exc
     tests_dir = ROOT / 'releases' / f'project-{project:03d}' / 'tests'
     if tests_dir.exists() and any(tests_dir.glob('*.json')):
         raise CrangeError('Clean up release test clones before capturing staging.')
@@ -2278,6 +2929,7 @@ def cmd_release_capture(args: argparse.Namespace) -> None:
             expected_address = f"10.{project}.{box.get('network_id', 254)}.{box['ip_last_octet']}"
             if not live or live.get("address") != expected_address:
                 raise CrangeError(f"Staging VM {box['key']} is not applied at {expected_address}.")
+            print(f"Checking staging health: {box['key']}", flush=True)
             for check in box.get("health_checks", []):
                 check_endpoint(project, "254", expected_address, check)
         applied_networks = outputs.get('routers', {}).get('value', {}).get('custom_networks', {})
@@ -2290,22 +2942,27 @@ def cmd_release_capture(args: argparse.Namespace) -> None:
         ct_approvals = container_templates_for(path)
         references = {}
         captured = []
-        from crange_capture import capture_policy, capture_vm
+        from crange_capture import capture_policy, capture_vm, capture_container
         # Gate every image before stopping any staging guest.
-        if any(box['kind'] != 'vm' for box in boxes):
-            raise CrangeError('Reproducible release capture currently supports QGA-enabled VMs only; CT capture remains gated.')
         capture_profiles = {}
         from crange_scheduling import read_settings
         _, source_catalog = read_settings()
         for box in boxes:
             try:
+                reference = (approvals if box['kind']=='vm' else ct_approvals)[box['template']]
                 profile = {'agent_enabled': False, 'upgrade_packages': True,
-                           **json.loads((path / 'template-profile.json').read_text())}
-                profile.update(approvals[box['template']].get('profile', {}))
-                image_id = box.get('image') or approvals[box['template']].get('image_id')
+                           **(json.loads((path / 'template-profile.json').read_text()) if box['kind']=='vm' else {})}
+                profile.update(reference.get('profile', {}))
+                image_id = box.get('image') or reference.get('image_id')
                 catalog_image = source_catalog.get('images', {}).get(image_id, {})
-                profile['init_system'] = catalog_image.get('init_system', 'systemd')
-                capture_policy(applied['vm'][box['key']].get('node_name') or applied['vm'][box['key']].get('placement', {}).get('node_name') or box['node_name'], profile)
+                profile['init_system'] = 'windows' if str(profile.get('os_type','')).startswith('win') else catalog_image.get('init_system', 'systemd')
+                source = applied[box['kind']][box['key']]
+                source_node = source.get('node_name') or source.get('placement',{}).get('node_name') or box['node_name']
+                capture_policy(source_node, profile, kind=box['kind'])
+                if box['kind']=='container':
+                    from crange_distribution import _source_capacity
+                    _source_capacity(ProxmoxAPI().container(source_node,int(source['id'])), 'lxc')
+                if profile['init_system']=='windows': profile['scenario_snapshot']=True
                 capture_profiles[box['key']] = profile
             except (OSError, ValueError, TypeError) as exc:
                 raise CrangeError(str(exc)) from exc
@@ -2331,6 +2988,7 @@ def cmd_release_capture(args: argparse.Namespace) -> None:
                 alias = f"p{project:03d}-image-{slug}"
                 name = f"p{project:03d}-release-{slug}-{box['name'][:15]}"
                 original_template = box["template"]
+                original_image = applied[box['kind']][box['key']].get('placement',{}).get('image_id')
                 source_profile = None
                 if box["kind"] == "vm":
                     try:
@@ -2339,33 +2997,91 @@ def cmd_release_capture(args: argparse.Namespace) -> None:
                     except (OSError, ValueError, TypeError) as exc:
                         raise CrangeError('Cannot read the approved VM hardware profile before capture.') from exc
                 try:
-                    if box["kind"] == "vm":
-                        api.shutdown(node, vmid, applied["vm"][box["key"]]["address"])
+                    if box['kind']=='vm' and capture_profiles[box['key']].get('init_system')=='windows':
+                        from crange_windows_snapshot_guest import capture_credentials
+                        if not original_image:
+                            raise CrangeError('Windows capture requires its applied source image credential identity.')
+                        capture_credentials(project,box['key'],vmid,original_image,alias)
+                    checkpoint = None
+                    if box['kind'] in ('vm','container'):
+                        from crange_scheduling import DATA
+                        checkpoint_path = DATA / 'capture-journal' / f'capture-p{project:03d}-{slug}.json'
+                        if checkpoint_path.exists():
+                            checkpoint = json.loads(checkpoint_path.read_text()).get('state')
+                    if checkpoint in ('captured','verified'):
+                        print(f"Reusing immutable capture checkpoint; staging source stays running: {box['key']}",flush=True)
                     else:
-                        api.container_stop(node, vmid)
+                        print(f"Stopping staging source for capture: {box['key']} ({node}/{vmid})", flush=True)
+                        if box["kind"] == "vm":
+                            api.shutdown(node, vmid, applied["vm"][box["key"]]["address"])
+                        else:
+                            api.container_stop(node, vmid)
+                    print(f"Capturing isolated image and verifying a fresh clone: {box['key']}", flush=True)
                     if box["kind"] == "vm":
                         image_id, evidence = capture_vm(api, project=project, node=node,
                             source_id=vmid, name=name,
                             description=f"CRANGE project {project:03d} release {args.version} box {box['key']}",
                             slug=slug, profile=capture_profiles[box['key']])
                     else:
-                        image_id = api.capture_container_image(node, vmid, name,
-                            f"CRANGE project {project:03d} release {args.version} CT {box['key']}")
+                        image_id, evidence = capture_container(api, project=project, node=node,
+                            source_id=vmid, name=name,
+                            description=f"CRANGE project {project:03d} release {args.version} CT {box['key']}",
+                            slug=slug, profile=capture_profiles[box['key']])
                 finally:
+                    capture_failure = sys.exc_info()[1]
                     status = api.status(node, vmid) if box["kind"] == "vm" else api.container_status(node, vmid)
                     if status == "stopped":
-                        (api.start if box["kind"] == "vm" else api.container_start)(node, vmid)
-                reference = {"template_id": image_id, "template_node": node, "kind": box["kind"], "image_id": alias}
+                        print(f"Restarting staging source: {box['key']}", flush=True)
+                        try:
+                            (api.start if box["kind"] == "vm" else api.container_start)(node, vmid)
+                        except CrangeError as restart_failure:
+                            if capture_failure is None:
+                                raise
+                            print(f'crange: warning: source restart also failed: {restart_failure}', flush=True)
+                image_node = evidence.get('node', node)
+                reference = {"template_id": image_id, "template_node": image_node, "kind": box["kind"], "image_id": alias}
+                if box['kind'] == 'container':
+                    original_reference = container_templates_for(path).get(original_template, {})
+                    placement = applied['container'][box['key']].get('placement', {})
+                    management_user = 'root' if placement.get('template_file_id') else original_reference.get('profile', {}).get('management_user', 'user')
+                    if management_user not in ('root', 'user'):
+                        raise CrangeError('Captured container has an unsupported approved management account.')
+                    reference['profile'] = {'management_user': management_user}
                 if box["kind"] == "vm":
                     reference['profile'] = {**source_profile, 'upgrade_packages': False}
+                    captured_machine = api.vm(image_node, image_id).get('machine')
+                    if captured_machine:
+                        reference['profile']['machine'] = captured_machine
                     reference['distribution_evidence'] = evidence
+                reference['distribution_evidence'] = evidence
                 references[alias] = reference
-                captured.append((node, image_id, box["kind"]))
+                captured.append((image_node, image_id, box["kind"]))
                 box["source_template"] = original_template
+                if original_image:
+                    box['source_image_id'] = original_image
                 box["source_vm_id"] = vmid
                 box["template"] = alias
                 box["image"] = alias
                 box["full_clone"] = True
+            service_profile = {}
+            if project == 100:
+                from crange_mhl_services import profile_for
+                service_profile = profile_for(254)
+                for profile_name, configured_profile in service_profile.items():
+                    configured = configured_profile.get('guests', {}) if isinstance(configured_profile, dict) else {}
+                    if selected and not set(configured) <= {box['key'] for box in boxes}:
+                        continue
+                    for box in boxes:
+                        identity = configured.get(box['key']) if isinstance(configured, dict) else None
+                        live = applied[box['kind']].get(box['key'], {})
+                        placement = live.get('placement', {}) if isinstance(live, dict) else {}
+                        if identity and (identity.get('guest_id') != live.get('id')
+                                         or identity.get('image_id') != placement.get('image_id')):
+                            raise CrangeError(f'MHL {profile_name} services were configured against an older staging guest identity; rerun the fixed service action before release capture.')
+            if selected:
+                captured_keys = {box['key'] for box in boxes}
+                service_profile = {key:value for key,value in service_profile.items()
+                                   if set(value.get('guests', {})) <= captured_keys}
             content = {
                 "schema_version": 4,
                 "release_id": f"p{project:03d}-{args.version}",
@@ -2378,6 +3094,7 @@ def cmd_release_capture(args: argparse.Namespace) -> None:
                              "containers": [{k: v for k, v in b.items() if k != "kind"} for b in boxes if b["kind"] == "container"],
                              "networks": networks,
                              "templates": references,
+                             "service_profiles": service_profile,
                              "boot_order_permutations": permutations,
                              "team_overrides": {}},
             }
@@ -2418,6 +3135,42 @@ def cmd_release_capture(args: argparse.Namespace) -> None:
             template=alias, export_job=evidence['export_job'], probe_job=evidence['probe_job']))
     print(f"Captured immutable guest images and release {content['release_id']} at {destination.relative_to(ROOT)}")
     print(f"SHA-256 {content['integrity_sha256']}")
+
+def cmd_release_recipe(args: argparse.Namespace) -> None:
+    """Publish configured service changes with explicitly reused parent images."""
+    from crange_mhl_services import profile_for, verify_release_profiles
+    from crange_release_recipe import build, publish
+    from crange_distribution import catalog_transaction
+    from crange_scheduling import read_settings, CONFIG
+    if int(args.project) != 100:
+        raise CrangeError('Fixed service-recipe updates are currently available for Project 100.')
+    path = project_dir(args.project)
+    cfg = json_config(path)
+    parent = load_release(100, args.parent_version)
+    destination = manifest_path(100, args.version)
+    try:
+        verify_release_profiles(parent)
+        profiles = profile_for(254)
+        verify_release_profiles({'project_id': 100, 'scenario': {'service_profiles': profiles}},
+                                require_current=True, preserve_recipes=True)
+        verify_release_images(parent)
+        _, catalog = read_settings()
+        release = build(parent, cfg, output_json(path), profiles, catalog, version=args.version,
+            revision=run(['git', 'rev-parse', 'HEAD'], cwd=ROOT, capture=True).stdout.strip(),
+            dirty=bool(run(['git', 'status', '--porcelain'], cwd=ROOT, capture=True).stdout.strip()),
+            created_at=datetime.now(timezone.utc).isoformat(),
+            actor=os.environ.get('CRANGE_ACTOR', f'cli:{os.getuid()}'))
+        def update(current):
+            if json_config(path) != cfg:
+                raise ValueError('Staging definitions changed during publication; review again.')
+            return publish(destination, release, current)
+        catalog_transaction(CONFIG / 'image-catalog.json', update)
+    except (ValueError, OSError) as exc:
+        raise CrangeError(str(exc)) from exc
+    print(f'Published service update {release["release_id"]} using verified images from {parent["release_id"]}.')
+    print('No disks captured and no deployed teams changed. Prepare and check a fresh release test before rollout.')
+    print(f'SHA-256 {load_release(100, args.version)["integrity_sha256"]}')
+
 
 def cmd_release_show(args: argparse.Namespace) -> None:
     release = load_release(int(args.project), args.version)
@@ -2486,6 +3239,11 @@ def cmd_release_deploy(args: argparse.Namespace) -> None:
     cfg = json_config(path)
     release = load_release(int(args.project), args.version)
     verify_release_images(release)
+    from crange_mhl_services import verify_release_profiles
+    try:
+        verify_release_profiles(release, preserve_recipes=True)
+    except ValueError as exc:
+        raise CrangeError(str(exc)) from exc
     tests_dir = ROOT / "releases" / f"project-{int(args.project):03d}" / "tests"
     if (tests_dir / f"{args.version}.json").exists():
         raise CrangeError("Clean up the release test clones before rollout.")
@@ -2599,7 +3357,14 @@ def cmd_release_deploy(args: argparse.Namespace) -> None:
     validate_scenario_config(path, cfg)
     validate_container_config(path, cfg)
     save_config(path, cfg)
-    print(f"Release {args.version} declared for teams {', '.join(wanted)}. Review infra-plan before applying fresh clones.")
+    print(f"Release {args.version} declared for teams {', '.join(wanted)}. Use Review rollout to prepare images and review these teams before applying fresh clones.")
+
+
+def cmd_release_configure(args):
+    if not args.yes:
+        raise CrangeError('Release configuration changes selected guests; pass --yes.')
+    args.configure_only = True
+    cmd_release_apply(args)
 
 
 def cmd_release_apply(args):
@@ -2608,7 +3373,7 @@ def cmd_release_apply(args):
     teams = [str(int(team)) for team in args.teams]
     if not teams or len(teams) != len(set(teams)) or any(team not in set(map(str, cfg.get('team_ids', []))) for team in teams):
         raise CrangeError('Choose configured ordinary teams without duplicates.')
-    if not getattr(args, 'plan_id', None):
+    if not getattr(args, 'configure_only', False) and not getattr(args, 'plan_id', None):
         raise CrangeError('Release deployment requires a retained, reviewed plan.')
     from crange_rollouts import verify_owned
     for team in teams:
@@ -2619,16 +3384,38 @@ def cmd_release_apply(args):
             verify_owned(cfg, team, record['desired'])
         except ValueError as exc:
             raise CrangeError(str(exc)) from exc
-    args.release_teams = teams
-    cmd_apply(args)
-    print('Release infrastructure applied. Configuring selected teams.', flush=True)
+    from crange_mhl_services import verify_release_profiles
+    profiles_by_team = {}
+    recipes_by_team = {}
+    for team in teams:
+        release = load_release(int(args.project), cfg['release_rollouts'][team]['desired']['version'])
+        if int(release.get('project_id', -1)) != int(args.project):
+            raise CrangeError('Release service profile project scope differs from the requested project.')
+        try:
+            profiles_by_team[team] = verify_release_profiles(release)
+            recipes_by_team[team] = release.get("scenario", {}).get("service_profiles", {})
+        except ValueError as exc:
+            raise CrangeError(str(exc)) from exc
+    if getattr(args, 'configure_only', False):
+        from crange_release_resume import validate_applied
+        validate_applied(path, cfg, teams)
+        print('Verified existing release infrastructure. Resuming selected-team configuration; no Terraform apply.', flush=True)
+    else:
+        args.release_teams = teams
+        cmd_apply(args)
+        print('Release infrastructure applied. Configuring selected teams.', flush=True)
     try:
         for team in teams:
             cmd_configure_team(argparse.Namespace(project=args.project, team=int(team), yes=True))
-        cmd_release_check(argparse.Namespace(project=args.project, teams=list(map(int, teams))))
+            for profile in profiles_by_team[team]:
+                operation = cmd_mhl_business_configure if profile == 'business' else cmd_mhl_windows_configure
+                operation(argparse.Namespace(project=args.project, network_id=int(team), yes=True,
+                                             recipe_sha256=recipes_by_team[team][profile]["source_sha256"]))
+            cmd_release_check(argparse.Namespace(project=args.project, teams=[int(team)]))
     except CrangeError as exc:
         raise CrangeError('Release infrastructure applied, but configuration or health verification failed: ' + str(exc)) from exc
-    print('Selected-team release deployment and health checks completed.')
+    print('Selected-team release configuration and health checks completed.' if getattr(args, 'configure_only', False)
+          else 'Selected-team release deployment and health checks completed.')
 
 
 def record_release_apply(path):
@@ -2643,6 +3430,19 @@ def record_release_apply(path):
     if changed:
         save_config(path, cfg)
         print('Recorded applied team releases. Run release-check to verify their health.')
+
+
+def applied_guest_node(api, field, live):
+    """Resolve the physical node from current cluster identity, never a preference."""
+    vmid = int(live['id'])
+    kind = 'qemu' if field == 'scenario_boxes' else 'lxc'
+    rows = api.request('GET', '/cluster/resources', {'type': 'vm'})
+    if not isinstance(rows, list):
+        raise CrangeError('Live cluster guest inventory is unavailable.')
+    matches = [row for row in rows if str(row.get('vmid')) == str(vmid) and row.get('type') == kind]
+    if len(matches) != 1 or matches[0].get('node') not in NODES:
+        raise CrangeError('Applied release guest has no unambiguous live cluster node.')
+    return matches[0]['node']
 
 
 def cmd_release_check(args):
@@ -2671,7 +3471,7 @@ def cmd_release_check(args):
                     address = f"10.{args.project}.{box['network_id']}.{box['ip_last_octet']}"
                     if not live.get('id') or live.get('address') != address:
                         raise CrangeError('Applied guest address differs from the release.')
-                    vmid, node = int(live['id']), live.get('node_name', box['node_name'])
+                    vmid, node = int(live['id']), applied_guest_node(api, field, live)
                     actual = api.vm(node, vmid) if field == 'scenario_boxes' else api.container(node, vmid)
                     vnet = f"p{int(args.project):03d}c{box['network_id']:03d}" if box.get('network_key') else f"p{int(args.project):03d}t{int(team):03d}"
                     if actual.get('name', actual.get('hostname')) != vnet + '-' + box['name'] or int(actual.get('template', 0)):
@@ -2697,20 +3497,18 @@ def cmd_release_test_prepare(args: argparse.Namespace) -> None:
     cfg = json_config(path)
     release = load_release(int(args.project), args.version)
     verify_release_images(release)
+    from crange_mhl_services import verify_release_profiles
+    try:
+        verify_release_profiles(release, preserve_recipes=True)
+    except ValueError as exc:
+        raise CrangeError(str(exc)) from exc
     tests_dir = ROOT / "releases" / f"project-{int(args.project):03d}" / "tests"
     tests_dir.mkdir(parents=True, exist_ok=True)
     record_path = tests_dir / f"{args.version}.json"
     if record_path.exists():
         raise CrangeError(f"A test record already exists for {args.version}; check or clean it up first.")
     validate_custom_networks(cfg)
-    used = {int(b['ip_last_octet']) for field in ('scenario_boxes', 'scenario_containers')
-            for b in cfg.get(field, {}).values() if str(b['team_id']) == '254' and not b.get('network_key')}
-    used.update(10 + int(b['jump_number']) for b in cfg.get('jump_boxes', {}).values()
-                if str(b['team_id']) == '254' and not b.get('network_key'))
-    used.update(int(n['uplink_last_octet']) for n in cfg.get('custom_networks', {}).values()
-                if str(n['owner_team_id']) == '254')
-    free = iter(host for host in range(90, 101) if host not in used)
-    network_map, owned = release_networks(cfg, release, '254', 'test', range(90, 101))
+    network_map, owned = release_networks(cfg, release, '254', 'test')
     additions = {
         'scenario_boxes': release_scenario_boxes(path, release, '254', f'test{args.version}', network_map),
         'scenario_containers': release_scenario_containers(path, release, '254', f'test{args.version}', network_map),
@@ -2720,11 +3518,6 @@ def cmd_release_test_prepare(args: argparse.Namespace) -> None:
         for key, box in clones.items():
             if key in cfg.get(field, {}):
                 raise CrangeError(f'Test clone key {key} already exists.')
-            if not box.get('network_key'):
-                try:
-                    box['ip_last_octet'] = next(free)
-                except StopIteration as exc:
-                    raise CrangeError('Team 0 has too few reserved test addresses (.90-.100).') from exc
             box['started'] = True
             cfg.setdefault(field, {})[key] = box
             prepared['boxes' if field == 'scenario_boxes' else 'containers'][key] = {
@@ -2751,6 +3544,7 @@ def cmd_release_test_prepare(args: argparse.Namespace) -> None:
 def cmd_release_test_check(args: argparse.Namespace) -> None:
     project = int(args.project)
     release = load_release(project, args.version)
+    verify_release_images(release)
     record_path = ROOT / "releases" / f"project-{project:03d}" / "tests" / f"{args.version}.json"
     try:
         record = json.loads(record_path.read_text())
@@ -2787,14 +3581,18 @@ def cmd_release_test_check(args: argparse.Namespace) -> None:
                                     if key.endswith(f"-{b['name']}-t254")), None)
             if not source_name or source_name in ids:
                 raise CrangeError('Disposable test guest has invalid release source metadata.')
-            node, vmid = live.get('node_name', box['node_name']), int(live['id'])
+            node, vmid = applied_guest_node(api, field, live), int(live['id'])
             actual = api.vm(node, vmid) if field == 'scenario_boxes' else api.container(node, vmid)
             vnet = f"p{project:03d}c{box['network_id']:03d}" if box.get('network_key') else f"p{project:03d}t254"
             if actual.get('name', actual.get('hostname')) != vnet + '-' + box['name'] or int(actual.get('template', 0)):
                 raise CrangeError('Disposable test guest identity has changed; refusing power operations.')
             ids[source_name] = (node, vmid)
+    if release.get('scenario', {}).get('service_profiles'):
+        from crange_mhl_services import configure_test_cohort
+        configure_test_cohort(path, release, record)
     if not permutations:
         permutations = [[b["name"] for b in release["scenario"]["boxes"] + release["scenario"].get("containers", [])]]
+    vm_templates=templates_for(path)
     for order in permutations:
         if set(order) != (set(vmids) | set(ctids)) or len(order) != len(vmids) + len(ctids):
             raise CrangeError("Release boot-order metadata does not match its VM/CT set.")
@@ -2807,7 +3605,9 @@ def cmd_release_test_check(args: argparse.Namespace) -> None:
         for name, (node, vmid) in ctids.items():
             if api.container_status(node, vmid) != "stopped":
                 api.container_stop(node, vmid)
+        boot_started_at={}
         for name in order:
+            boot_started_at[name]=time.monotonic()
             if name in vmids:
                 api.start(*vmids[name])
             elif name in ctids:
@@ -2835,7 +3635,15 @@ def cmd_release_test_check(args: argparse.Namespace) -> None:
                 continue
             for check in validate_health_checks(info.get("health_checks", [])):
                 try:
-                    wait_for_boot_health(project, "254", live["address"], check)
+                    field='scenario_boxes' if key in record['boxes'] else 'scenario_containers'
+                    box=cfg.get(field,{}).get(key,{})
+                    profile=vm_templates.get(box.get('template'),{}).get('profile',{})
+                    startup=guest_startup_timeout(profile) if key in record['boxes'] else 180
+                    source_name=box.get('release_source_name')
+                    if source_name not in boot_started_at:
+                        raise CrangeError('Boot health lacks its validated release source identity.')
+                    wait_for_boot_health(project, "254", live["address"], check,startup_timeout=startup,
+                        startup_deadline=boot_started_at[source_name]+startup)
                     print(f"PASS boot order {','.join(order)} {key} {health_check_label(check)}", flush=True)
                 except (OSError, CrangeError) as exc:
                     failed = True
@@ -2961,6 +3769,12 @@ def cmd_worker(_args):
     store.worker(threading.Event())
 
 
+def cmd_network_worker(_args):
+    from crange_network_worker import serve
+    serve(os.environ.get('CRANGE_JOB_DB', '/var/lib/crange-jobs/jobs.sqlite3'),
+          os.environ.get('CRANGE_AUTH_DB', '/var/lib/crange-web/.local/share/crange/auth.sqlite3'))
+
+
 def cmd_served(args):
     from crange_service import install
     try:
@@ -2989,19 +3803,239 @@ def cmd_cluster_refresh(args):
     print(f'Cluster inventory refreshed: {len(snapshot.get("nodes", []))} nodes; policy {snapshot.get("policy_revision", "unknown")}.')
 
 
+def cmd_capture_settings(args):
+    """Administrator-only reviewed capture defaults, against live existing stores."""
+    from crange_scheduling import CONFIG, read_settings, atomic_json
+    with (CONFIG/'capture-settings.lock').open('a') as lock:
+        fcntl.flock(lock,fcntl.LOCK_EX)
+        policy,_=read_settings()
+        if args.bridge not in policy.get('isolated_bridges',[]):
+            raise CrangeError('Choose an already approved isolated capture bridge.')
+        if args.storage not in policy.get('allowed_storages',[]) or args.storage not in ('local-lvm','ssd-lvm','hdd-lvm','crange-thin','local-hdd'):
+            raise CrangeError('Choose an administrator-allowlisted thin capture storage ID.')
+        if args.backup not in {row[1] for row in policy.get('approved_backup_storage',[])}:
+            raise CrangeError('Choose an existing approved shared backup storage ID.')
+        nodes=policy.get('allowed_nodes',[])
+        if not nodes or not policy.get('enabled'):raise CrangeError('Enable distribution before capture settings.')
+        api=ProxmoxAPI();pairs=[];backups=[]
+        destinations={row.get('node') for row in api.request('GET','/cluster/resources',{'type':'storage'})
+                      if row.get('storage')==args.storage}
+        for node in nodes:
+            if node not in NODES:raise CrangeError('Capture settings require an enrolled node.')
+            archive=api.request('GET',f'/nodes/{node}/storage/{args.backup}/status')
+            if (int(archive.get('active',0))!=1 or int(archive.get('shared',0))!=1
+                    or 'backup' not in str(archive.get('content','')).split(',')):
+                raise CrangeError(f'{node}: capture archive must be existing active shared backup storage.')
+            backups.append([node,args.backup])
+            if node not in destinations:
+                continue
+            local=api.request('GET',f'/nodes/{node}/storage/{args.storage}/status')
+            if (int(local.get('active',0))!=1 or local.get('type') not in ('lvmthin','lvm')
+                    or not {'images','rootdir'}<=set(str(local.get('content','')).split(','))):
+                raise CrangeError(f'{node}: capture storage must be active local LVM for managed VM/CT disks.')
+            pairs.append([node,args.storage])
+        if not pairs:raise CrangeError('No enrolled node has this approved capture storage.')
+        policy['approved_storage']=[list(row) for row in sorted(set(map(tuple,policy.get('approved_storage',[])+pairs)))]
+        policy['approved_backup_storage']=[list(row) for row in sorted(set(map(tuple,policy.get('approved_backup_storage',[])+backups)))]
+        policy.update(capture_isolated_bridge=args.bridge,capture_datastore=args.storage,capture_backup_storage=args.backup)
+        policy['revision']='capture-settings-'+hashlib.sha256(json.dumps({k:v for k,v in policy.items() if k!='revision'},sort_keys=True).encode()).hexdigest()[:16]
+        atomic_json(CONFIG/'distribution-policy.json',policy)
+        print(f'Capture settings saved for {len(pairs)} approved destination(s): isolated {args.bridge}, preferred local {args.storage}, archive {args.backup}. Other nodes retain their approved local fallback; resource reserves and clone verification remain required.')
+
+
+def cmd_node_backup_prepare(args):
+    import socket
+    from crange_scheduling import DATA, atomic_json
+    with socket.socket(socket.AF_UNIX,socket.SOCK_STREAM) as client:
+        client.settimeout(240);client.connect('/run/crange-ct-read/node-backup.sock')
+        client.sendall(json.dumps({'action':'prepare','node':args.node}).encode()+b'\n');raw=b''
+        while not raw.endswith(b'\n') and len(raw)<8192:
+            part=client.recv(8192-len(raw))
+            if not part:break
+            raw+=part
+    result=json.loads(raw)
+    if result.get('error'):raise CrangeError(str(result['error']).removeprefix('crange: '))
+    if result.get('node')!=args.node or result.get('state')!='ready':raise CrangeError('Node backup preparation was not confirmed.')
+    atomic_json(DATA/'node-backup-capabilities'/(args.node+'.json'),result,0o600)
+    print(json.dumps(result,sort_keys=True))
+
+
+def cmd_library_grow(args):
+    import socket
+    with socket.socket(socket.AF_UNIX,socket.SOCK_STREAM) as client:
+        client.settimeout(240);client.connect('/run/crange-ct-read/library-grow.sock')
+        client.sendall(b'{"action":"grow"}\n');raw=b''
+        while not raw.endswith(b'\n') and len(raw)<8192:
+            chunk=client.recv(8192-len(raw))
+            if not chunk:break
+            raw+=chunk
+    reply=json.loads(raw)
+    if reply.get('error'):raise CrangeError(reply['error'])
+    print(json.dumps(reply,sort_keys=True))
+
+
+def cmd_library_resources(args):
+    import socket
+    with socket.socket(socket.AF_UNIX,socket.SOCK_STREAM) as client:
+        client.settimeout(300);client.connect('/run/crange-ct-read/socket')
+        client.sendall(json.dumps({'command':'range-library-recover' if getattr(args,'recover',False) else 'range-library-resources','node':'proxmox5'}).encode()+b'\n')
+        raw=b''
+        while not raw.endswith(b'\n') and len(raw)<8192:
+            chunk=client.recv(8192-len(raw))
+            if not chunk:break
+            raw+=chunk
+    reply=json.loads(raw)
+    if set(reply)!={'value'}:raise CrangeError('Library resource update was not confirmed; inspect host state before retry.')
+    print(json.dumps(json.loads(reply['value']),sort_keys=True))
+
+
+def cmd_capacity_policy_set(args):
+    from crange_cluster import expand_capacity_policy
+    print(json.dumps(expand_capacity_policy(args.cpu_ratio, args.memory_ratio, args.disk_ratio), sort_keys=True))
+
+
+def cmd_memory_reserve_set(args):
+    from crange_cluster import set_memory_reserve
+    print(json.dumps(set_memory_reserve(args.node, args.minimum_mb, args.fraction,
+                                       args.expected_revision), sort_keys=True))
+
+
 def cmd_distribution_inventory(args):
     from crange_scheduling import discover, read_settings
     print(json.dumps(discover(ProxmoxAPI(), read_settings()[0]), indent=2))
+
+
+def cmd_reconcile_project_reservations(args):
+    from crange_scheduling import reconcile_applied_reservations
+    path = project_dir(args.project)
+    try:
+        released = reconcile_applied_reservations(path)
+    except ValueError as exc:
+        raise CrangeError(str(exc)) from exc
+    print(f'Reconciled {len(released)} applied project reservation(s).')
+    resume_network_foundations(args, path)
+
+
+def resume_network_foundations(args, path):
+    """Finish an exact proven apply; never resubmit its saved Terraform plan."""
+    summaries = path / '.crange-plans'
+    directory = Path.home() / '.local/share/crange/plans' / f'project-{int(args.project):03d}'
+    from crange_network_foundation import validate_plan
+    from crange_scheduling import atomic_json, applied_resources
+    for summary_path in sorted(summaries.glob('*.json')):
+        try:
+            summary = json.loads(summary_path.read_text())
+        except PermissionError:
+            # Older administrator-owned reviews are outside this worker's
+            # authority. Do not broaden permissions or block owned recovery.
+            continue
+        keys = summary.get('network_foundation')
+        if not keys or summary.get('foundation_configured_at'):
+            continue
+        if summary.get('reservation_state') != 'released' and not summary.get('applied_at'):
+            continue
+        manifest = directory / (summary_path.stem + '.json')
+        record = json.loads(manifest.read_text())
+        cfg = json_config(path)
+        inputs = path / 'crange.auto.tfvars.json'
+        if (record.get('project') != int(args.project) or record.get('plan_id') != summary_path.stem
+                or record.get('network_foundation') != keys
+                or hashlib.sha256(inputs.read_bytes()).hexdigest() != record.get('inputs_sha256')
+                or automation_inputs_digest(path) != record.get('automation_inputs_sha256')):
+            raise CrangeError('Interrupted network foundation inputs changed; review its applied state before recovery.')
+        plan = directory / (summary_path.stem + '.tfplan')
+        if not record.get('applied_at'):
+            if not plan.exists() or hashlib.sha256(plan.read_bytes()).hexdigest() != record.get('sha256'):
+                raise CrangeError('Interrupted network foundation no longer has its exact reviewed plan.')
+            detail = json.loads(tf_run(path, ['show', '-json', str(plan)], capture=True).stdout)
+            validate_plan(detail, cfg, keys, record['distribution'])
+        actual = applied_resources(path)
+        placements = {item['resource_key']: item for item in record['distribution']['placements']}
+        api = ProxmoxAPI()
+        pool = api.request('GET', '/pools/crange-iac').get('members', [])
+        for key in keys:
+            net = cfg['custom_networks'][key]
+            resource = 'router:custom:' + key
+            row = actual.get(resource, {})
+            expected = placements[resource]['resolved']
+            if row.get('node_name') != expected['node_name'] or not row.get('vm_id'):
+                raise CrangeError('Interrupted network foundation router is not at its reviewed node.')
+            node, guest = row['node_name'], int(row['vm_id'])
+            config = api.request('GET', f'/nodes/{node}/lxc/{guest}/config')
+            tasks = api.request('GET', f'/nodes/{node}/tasks', {'source':'active', 'limit':1000})
+            vnet = f'p{int(args.project):03d}c{int(net["network_id"]):03d}'
+            nic = lambda name: dict(part.split('=',1) for part in str(config.get(name,'')).split(',') if '=' in part)
+            disk = (row.get('disk') or [{}])[0]
+            request = next(item for item in record['distribution']['requests'] if item['resource_key'] == resource)
+            if (config.get('template') or config.get('lock') or not config.get('unprivileged')
+                    or not any(member.get('type') == 'lxc' and int(member.get('vmid',0)) == guest for member in pool)
+                    or disk.get('datastore_id') != expected['datastore_id'] or disk.get('size') != request['disk_gb']
+                    or not {f'p{int(args.project):03d}', vnet} <= set(str(config.get('tags','')).split(';'))
+                    or api.request('GET', f'/nodes/{node}/lxc/{guest}/status/current').get('status') != 'running'
+                    or not isinstance(tasks,list)
+                    or any(str(task.get('id')) == str(guest) for task in tasks)
+                    or nic('net0').get('bridge') != f'p{int(args.project):03d}t254'
+                    or nic('net0').get('ip') != f'10.{int(args.project)}.254.{net["uplink_last_octet"]}/24'
+                    or nic('net0').get('gw') != f'10.{int(args.project)}.254.1'
+                    or nic('net1').get('bridge') != vnet
+                    or nic('net1').get('ip') != f'10.{int(args.project)}.{net["network_id"]}.1/24'):
+                raise CrangeError('Interrupted network foundation live ownership, interfaces or terminal tasks differ.')
+        record['applied_at'] = record.get('applied_at') or datetime.now(timezone.utc).isoformat()
+        atomic_json(manifest, record, 0o600)
+        summary['applied_at'] = record['applied_at']
+        atomic_json(summary_path, summary, 0o640)
+        plan.unlink(missing_ok=True)
+        print('Resuming only the applied custom-router configuration; Terraform is not reapplied.', flush=True)
+        recovery_args = argparse.Namespace(project=args.project, plan_id=summary_path.stem)
+        cmd_configure_network_foundation(recovery_args, keys)
+        stamp = datetime.now(timezone.utc).isoformat()
+        record['foundation_configured_at'] = summary['foundation_configured_at'] = stamp
+        atomic_json(manifest, record, 0o600)
+        atomic_json(summary_path, summary, 0o640)
+
+
+def cmd_container_cache_acceptance(args):
+    from crange_container_cache_acceptance import run
+    run(args.project_id,args.image,args.node,args.storage)
+
+
+def cmd_range_storage(args):
+    from crange_range_storage import request
+    options = ({'size_gb': args.size_gb} if args.storage_action == 'review' else
+               {'plan_id': args.plan_id, 'review_sha256': args.review_sha256})
+    print(json.dumps(request(args.storage_action, options), indent=2))
+
+
+def cmd_capture_inspect(args):
+    from crange_capture import inspect_capture
+    print(json.dumps(inspect_capture(ProxmoxAPI(), project=int(args.project), version=args.version,
+                                    machine=args.name, path=project_dir(args.project)), indent=2))
+
+
+def cmd_capture_network_prepare(args):
+    from crange_capture import private_bridge_request
+    from crange_scheduling import read_settings
+    policy=read_settings()[0]
+    if args.node not in policy.get('allowed_nodes',[]) or policy.get('capture_isolated_bridge')!='crprobe1450':
+        raise CrangeError('Choose an enrolled node with the approved fixed capture bridge.')
+    print(json.dumps(private_bridge_request(args.node),indent=2))
+
+
+def cmd_windows_p100_sealed_publish(args):
+    from crange_windows_p100_publication import publish
+    publish()
 
 
 def cmd_distribution_prepare(args):
     if bool(getattr(args, 'acceptance_policy', None)) != bool(getattr(args, 'acceptance_job_id', None)):
         raise CrangeError('Isolated acceptance requires both protected policy and explicit job ID.')
     from crange_cache_jobs import prepare_cache
-    prepare_cache(project_id=int(args.project), image_id=args.image, node_name=args.node,
+    print(f'Preparing local cache for {args.image} on {args.node}/{args.storage}.', flush=True)
+    result = prepare_cache(project_id=int(args.project), image_id=args.image, node_name=args.node,
                   datastore_id=args.storage, owner=os.environ.get('CRANGE_ACTOR', f'cli:{os.getuid()}'),
                   acceptance_policy_path=getattr(args, 'acceptance_policy', None),
                   job_id=getattr(args, 'acceptance_job_id', None))
+    print(f'Local cache verified: template {result["template_id"]} on {args.node}/{args.storage}.', flush=True)
 
 
 def cmd_cache_gc_review(args):
@@ -3028,18 +4062,73 @@ def cmd_cache_resume(args):
     print('Cache operation resumed: ' + json.dumps(result, sort_keys=True))
 
 
+def cmd_cache_snapshot_probe_retry(args):
+    from crange_cache_jobs import resume_snapshot_cache
+    print(json.dumps(resume_snapshot_cache(args.job_id, replace_probe=True), sort_keys=True))
+
+
+def cmd_cache_restore_resume(args):
+    from crange_cache_restore import resume
+    print(json.dumps(resume(args.job_id), sort_keys=True))
+
+
+def cmd_windows_cache_recovery(args):
+    from crange_windows_cache_recovery import reconcile, resume
+    if args.action == 'resume':
+        result = resume(args.image, args.source_job_id)
+    else:
+        result = reconcile(args.image, args.source_job_id, action=args.action)
+    print('Windows cache recovery: ' + json.dumps(result, sort_keys=True))
+
+
 
 def make_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(prog="crange", description="Manage CRANGE teams, jump boxes, and reviewed Terraform/Ansible workflows.")
     sub = p.add_subparsers(dest="command", required=True)
+    from crange_project_lifecycle import cli as lifecycle_cli, OPERATIONS
+    for operation in sorted(OPERATIONS):
+        q = sub.add_parser(operation, help='Queued project lifecycle management')
+        q.add_argument('project'); q.add_argument('--confirm', required=True)
+        q.set_defaults(func=lifecycle_cli, lifecycle_operation=operation)
     q = sub.add_parser('cluster-refresh', help='Collect a sanitized worker-owned cluster capacity snapshot'); q.set_defaults(func=cmd_cluster_refresh)
+    q = sub.add_parser('capture-settings',help='Admin: configure audited capture storage and isolation defaults')
+    q.add_argument('--bridge',required=True);q.add_argument('--storage',required=True);q.add_argument('--backup',required=True);q.set_defaults(func=cmd_capture_settings)
+    q = sub.add_parser('cluster-capacity-policy-set', help='Admin: set bounded CPU/RAM/disk commitment ceilings')
+    q.add_argument('--cpu-ratio', type=float, required=True); q.add_argument('--memory-ratio', type=float, required=True)
+    q.add_argument('--disk-ratio', type=float, required=True); q.set_defaults(func=cmd_capacity_policy_set)
+    q = sub.add_parser('container-cache-acceptance', help='Admin: verify isolated container restore and linked cache support')
+    q.add_argument('--project-id',type=int,required=True);q.add_argument('--image',required=True)
+    q.add_argument('--node',choices=sorted(NODES),required=True);q.add_argument('--storage',required=True)
+    q.set_defaults(func=cmd_container_cache_acceptance)
+    q = sub.add_parser('node-backup-prepare',help='Admin: prepare native template backups on an enrolled node');q.add_argument('--node',required=True,choices=sorted(NODES));q.set_defaults(func=cmd_node_backup_prepare)
+    q = sub.add_parser('library-grow',help='Admin: grow the fixed NFS data volume by 64 GiB online');q.set_defaults(func=cmd_library_grow)
+    q = sub.add_parser('library-resources',help='Admin: raise the fixed NFS library resource floor online')
+    q.add_argument('--recover',action='store_true');q.set_defaults(func=cmd_library_resources)
+    q = sub.add_parser('range-storage-review', help='Admin: review unused P5 HDD thin storage creation')
+    q.add_argument('--size-gb', type=int, choices=(256,512), required=True)
+    q.set_defaults(func=cmd_range_storage, storage_action='review')
+    q = sub.add_parser('range-storage-apply', help='Admin: apply the exact reviewed storage plan')
+    q.add_argument('--plan-id', required=True); q.add_argument('--review-sha256', required=True)
+    q.set_defaults(func=cmd_range_storage, storage_action='apply')
+    q = sub.add_parser('cluster-memory-reserve-set', help='Admin: edit one node’s host RAM admission reserve')
+    q.add_argument('--node', required=True); q.add_argument('--minimum-mb', type=int, required=True)
+    q.add_argument('--fraction', type=float, required=True); q.add_argument('--expected-revision', required=True)
+    q.set_defaults(func=cmd_memory_reserve_set)
     q = sub.add_parser('distribution-inventory', help='Read all cluster workloads and conservative placement capacity')
     q.set_defaults(func=cmd_distribution_inventory)
+    q = sub.add_parser('reconcile-project-reservations', help='Verify applied guests and release retained apply reservations')
+    q.add_argument('project'); q.set_defaults(func=cmd_reconcile_project_reservations)
+    q = sub.add_parser('capture-inspect', help='Inspect an owned retained Windows capture with fixed guest diagnostics')
+    q.add_argument('project'); q.add_argument('version'); q.add_argument('name'); q.set_defaults(func=cmd_capture_inspect)
+    q = sub.add_parser('capture-network-prepare', help='Admin: prepare fixed host isolation on a capture bridge')
+    q.add_argument('--node',required=True);q.set_defaults(func=cmd_capture_network_prepare)
+    q = sub.add_parser('windows-p100-sealed-publish', help='Admin: resume and publish the fixed sealed P100 Windows image')
+    q.set_defaults(func=cmd_windows_p100_sealed_publish)
     q = sub.add_parser('distribution-prepare', help='Prepare and verify an approved immutable image replica')
     q.add_argument('image', type=lambda value: value if re.fullmatch(r'[a-zA-Z0-9][a-zA-Z0-9_.-]{0,127}', value) else (_ for _ in ()).throw(argparse.ArgumentTypeError('Invalid image ID')))
     q.add_argument('--project', required=True, type=int, help='Authorized project whose approved image/cache quota is charged')
     q.add_argument('--node', required=True, choices=sorted(NODES))
-    q.add_argument('--storage', required=True, choices=['local-lvm', 'ssd-lvm', 'hdd-lvm'])
+    q.add_argument('--storage', required=True, choices=['local-lvm', 'ssd-lvm', 'hdd-lvm', 'crange-thin', 'local-hdd'])
     q.add_argument('--acceptance-policy', type=Path, help='Admin-only root-owned one-node isolated CT cache policy')
     q.add_argument('--acceptance-job-id', type=lambda v:v if re.fullmatch(r'[a-zA-Z0-9-]{1,64}',v) else (_ for _ in ()).throw(argparse.ArgumentTypeError('Invalid acceptance job ID')))
     q.set_defaults(func=cmd_distribution_prepare)
@@ -3051,12 +4140,23 @@ def make_parser() -> argparse.ArgumentParser:
     q.add_argument('job_id',type=lambda v:v if re.fullmatch(r'[a-zA-Z0-9-]{1,64}',v) else (_ for _ in ()).throw(argparse.ArgumentTypeError('Invalid cache job ID'))); q.set_defaults(func=cmd_cache_reconcile)
     q = sub.add_parser('cache-resume', help='Admin: resume one exact restored cache template through probe verification')
     q.add_argument('job_id',type=lambda v:v if re.fullmatch(r'cache-[a-zA-Z0-9-]{1,64}',v) else (_ for _ in ()).throw(argparse.ArgumentTypeError('Invalid cache job ID'))); q.set_defaults(func=cmd_cache_resume)
+    q = sub.add_parser('cache-snapshot-probe-retry', help='Admin: replace only an exact failed snapshot probe, preserving its restored cache')
+    q.add_argument('job_id'); q.set_defaults(func=cmd_cache_snapshot_probe_retry)
+    q = sub.add_parser('cache-restore-resume', help='Admin: verify an exact completed archive restore and publish its cache')
+    q.add_argument('job_id'); q.set_defaults(func=cmd_cache_restore_resume)
+    q = sub.add_parser('cache-windows-p100-recovery', help='Admin: resume or reconcile the exact sealed P100 Windows cache job')
+    q.add_argument('image', choices=['mhl-windows-server-2025-base-p100-v1'])
+    q.add_argument('--source-job-id', required=True, type=lambda v:v if re.fullmatch(r'cache-[a-zA-Z0-9-]{1,64}',v) else (_ for _ in ()).throw(argparse.ArgumentTypeError('Invalid protected cache job ID')))
+    q.add_argument('--action', required=True, choices=['resume', 'cleanup'])
+    q.set_defaults(func=cmd_windows_cache_recovery)
     q = sub.add_parser('serve', help='Serve dashboard and API on port 8000')
     q.add_argument('--host', default='127.0.0.1')
     q.add_argument('--port', type=int, default=8000)
     q.set_defaults(func=cmd_serve)
     q = sub.add_parser('worker', help='Run the controller job worker')
     q.set_defaults(func=cmd_worker)
+    q = sub.add_parser('network-worker', help='Run the privileged fixed network verification worker')
+    q.set_defaults(func=cmd_network_worker)
     q = sub.add_parser('served', help='Install and enable the dashboard system service')
     q.add_argument('--user', default='crange', help='Unprivileged service account')
     q.set_defaults(func=cmd_served)
@@ -3079,9 +4179,22 @@ def make_parser() -> argparse.ArgumentParser:
     q = sub.add_parser('template-create', help='Admin ISO installer with reviewed hardware settings')
     q.add_argument('--definition', required=True)
     q.set_defaults(func=lambda a: __import__('crange_templates').create(json.loads(a.definition)))
+    q = sub.add_parser('template-cancel', help='Cancel one unfinished administrator installer build')
+    q.add_argument('build_id')
+    q.set_defaults(func=lambda a: __import__('crange_templates').cancel(a.build_id))
+    q = sub.add_parser('template-start-installer', help='Answer the DVD boot prompt for a fresh owned Windows installer')
+    q.add_argument('build_id')
+    q.set_defaults(func=lambda a: __import__('crange_windows_installer').start(a.build_id))
+    q = sub.add_parser('template-windows-base-prepare', help='Run the fixed Windows workgroup base preparation for an eligible owned installer')
+    q.add_argument('build_id'); q.set_defaults(func=cmd_template_windows_base_prepare)
+    q = sub.add_parser('template-windows-base-seal', help='Run fixed Sysprep on a prepared owned Windows installer build')
+    q.add_argument('build_id'); q.set_defaults(func=cmd_template_windows_base_seal)
     q = sub.add_parser('template-publish', help='Publish a prepared installer as an approved immutable template')
     q.add_argument('build_id'); q.add_argument('--projects', type=int, nargs='+', required=True); q.add_argument('--prepared', action='store_true')
     q.set_defaults(func=lambda a: __import__('crange_templates').publish(a.build_id,a.projects,a.prepared))
+    q = sub.add_parser('template-base-prepare', help='Admin: publish a maintained Linux base through isolated clone acceptance')
+    q.add_argument('base', choices=sorted(__import__('crange_platform_bases').BASES))
+    q.set_defaults(func=lambda a: __import__('crange_platform_bases').prepare(a.base))
     q = sub.add_parser('template-approve-image', help='Link an already verified, platform-approved VM image into selected projects')
     q.add_argument('image_id'); q.add_argument('--projects', type=int, nargs='+', required=True)
     q.set_defaults(func=lambda a: __import__('crange_templates').approve_catalog_image(a.image_id,a.projects))
@@ -3148,6 +4261,10 @@ def make_parser() -> argparse.ArgumentParser:
         if add:
             q.add_argument("--team", type=int, required=True); q.add_argument("--network", help="Custom network key; defaults to the team's standard LAN"); q.add_argument("--node", default="auto", choices=sorted(NODES | {"auto"}), help="Legacy explicit node pin; defaults to Automatic"); q.add_argument("--preferred-node", default=None, choices=["",*sorted(NODES)], help="Soft suggestion with Automatic"); q.add_argument("--cores", type=int, default=2); q.add_argument("--memory", type=int, default=4096, help="RAM in MB"); q.add_argument("--full-clone", action="store_true", default=None, help="Use a full clone (required when deploying away from the template node)")
         q.set_defaults(func=lambda a, add=add: mutate_box(a, add))
+    q = sub.add_parser("release-configure", help="Resume configuration and health checks for an already applied release")
+    q.add_argument("project"); q.add_argument("--teams", nargs="+", required=True); q.add_argument("--yes", action="store_true"); q.set_defaults(func=cmd_release_configure)
+    q = sub.add_parser("release-stage", help="Prepare images and review only selected declared releases")
+    q.add_argument("project"); q.add_argument("--teams", nargs="+", required=True); q.set_defaults(func=cmd_release_stage)
     q = sub.add_parser("stage-changes", help="Prepare approved local caches and retain an exact reviewed guest plan"); q.add_argument("project"); q.set_defaults(func=cmd_stage_changes)
     q = sub.add_parser("infra-plan", help="Initialize, plan, and summarize project changes"); q.add_argument("project"); q.add_argument("--retain", action="store_true", help="Keep plan for exact reviewed apply"); q.add_argument("--replace-sdn-applier", action="store_true", help="Repair a partially applied SDN network by reapplying cluster SDN"); q.set_defaults(func=cmd_plan)
     q = sub.add_parser("infra-apply", help="Apply the exact reviewed plan"); q.add_argument("project"); q.add_argument("--yes", action="store_true"); q.add_argument("--plan-id", help="Apply a saved, integrity-checked plan"); q.add_argument("--allow-destroy", action="store_true"); q.add_argument("--allow-replace", action="store_true"); q.set_defaults(func=cmd_apply)
@@ -3157,11 +4274,17 @@ def make_parser() -> argparse.ArgumentParser:
     q = sub.add_parser("configure-team", help="Configure one team's routers and jump boxes without touching other teams")
     q.add_argument("project"); q.add_argument("team", type=int, help="Team number, or 0 for staging")
     q.add_argument("--yes", action="store_true"); q.set_defaults(func=cmd_configure_team)
+    q = sub.add_parser("mhl-business-configure", help="Configure fixed Project 100 MHL business services in staging or one selected team")
+    q.add_argument("project"); q.add_argument("--network-id", type=int, choices=(254, 1, 2, 3, 4, 5), required=True)
+    q.add_argument("--yes", action="store_true"); q.set_defaults(func=cmd_mhl_business_configure)
+    q = sub.add_parser("mhl-windows-configure", help="Configure fixed Project 100 MHL domain and file services in staging or one selected team")
+    q.add_argument("project"); q.add_argument("--network-id", type=int, choices=(254, 1, 2, 3, 4, 5), required=True)
+    q.add_argument("--yes", action="store_true"); q.set_defaults(func=cmd_mhl_windows_configure)
     q = sub.add_parser("inventory"); q.add_argument("project"); q.set_defaults(func=cmd_inventory)
     q = sub.add_parser('route-sync', help='Ensure the applied project aggregate route without firewall changes')
     q.add_argument('project'); q.set_defaults(func=cmd_route_sync)
-    q = sub.add_parser("configure", help="Apply reviewed Ansible router routes, routers, or jumpbox config")
-    q.add_argument("project"); q.add_argument("target", choices=("routes", "routers", "boxes", "all")); q.add_argument("--yes", action="store_true"); q.set_defaults(func=cmd_configure)
+    q = sub.add_parser("configure", help="Apply reviewed Ansible routes, routers, boxes, or Windows access baseline")
+    q.add_argument("project"); q.add_argument("target", choices=("routes", "routers", "boxes", "windows", "all")); q.add_argument("--yes", action="store_true"); q.set_defaults(func=cmd_configure)
     q = sub.add_parser("machine-state", help="Start or gracefully stop one deployed scenario VM or container")
     q.add_argument("project"); q.add_argument("name"); q.add_argument("--kind", choices=("vm", "container"), required=True)
     q.add_argument("--state", choices=("start", "stop"), required=True); q.set_defaults(func=cmd_machine_state)
@@ -3204,6 +4327,7 @@ def make_parser() -> argparse.ArgumentParser:
     q = sub.add_parser("container-health"); q.add_argument("project"); q.add_argument("name", nargs="?"); q.set_defaults(func=cmd_container_health)
     q = sub.add_parser("scenario-health"); q.add_argument("project"); q.add_argument("name", nargs="?"); q.set_defaults(func=cmd_scenario_health)
     q = sub.add_parser("release-capture"); q.add_argument("project"); q.add_argument("version"); q.add_argument("--machine", action="append", default=[], help="Capture only these explicit staging scenario keys; repeat for multiple machines"); q.add_argument("--boot-order", action="append", default=[], help="Comma-separated staging VM start order; repeat to record permutations"); q.set_defaults(func=cmd_release_capture)
+    q = sub.add_parser('release-recipe', help='Publish configured service changes with parent disk images'); q.add_argument('project'); q.add_argument('version'); q.add_argument('--parent-version', required=True); q.set_defaults(func=cmd_release_recipe)
     q = sub.add_parser('release-publish', help='Publish a captured release image from completed protected distribution journals')
     q.add_argument('project'); q.add_argument('version'); q.add_argument('template')
     q.add_argument('--export-job', required=True); q.add_argument('--probe-job', required=True)

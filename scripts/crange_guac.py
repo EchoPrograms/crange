@@ -41,6 +41,8 @@ def guest_parameters(record):
         raise GuacamoleError(str(exc)) from exc
     if custom:
         username, password = custom['username'], custom['password']
+    elif protocol == 'rdp' and record.get('guest_os') == 'windows':
+        raise GuacamoleError('Windows RDP credentials are not configured for this applied guest.')
     if username and protocol != 'vnc':
         params['username'] = username
     if password:
@@ -166,7 +168,8 @@ class GuacamoleClient:
         for name, identifier in sorted(owned.items()):
             if name in desired:
                 continue
-            self._request('DELETE', f'/api/session/data/{source}/connections/{identifier}')
+            if identifier in connections:
+                self._request('DELETE', f'/api/session/data/{source}/connections/{identifier}')
         if state_path:
             state_path.parent.mkdir(parents=True, exist_ok=True)
             payload = json.dumps({'schema_version': 2,

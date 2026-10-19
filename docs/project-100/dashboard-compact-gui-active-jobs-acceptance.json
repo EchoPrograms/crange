@@ -1,0 +1,56 @@
+{
+  "checked_at": 1792157122,
+  "views": {
+    "overview": {
+      "rendered": true,
+      "page_width": 1660
+    },
+    "projects": {
+      "rendered": true,
+      "page_width": 1660
+    },
+    "project-overview": {
+      "rendered": true,
+      "page_width": 1660
+    },
+    "teams": {
+      "rendered": true,
+      "page_width": 1660
+    },
+    "scenario": {
+      "rendered": true,
+      "page_width": 1660
+    },
+    "project-users": {
+      "rendered": true,
+      "page_width": 1660
+    },
+    "users": {
+      "rendered": true,
+      "page_width": 1660
+    },
+    "templates": {
+      "rendered": true,
+      "page_width": 1660
+    },
+    "cluster": {
+      "rendered": true,
+      "page_width": 1660
+    },
+    "jobs": {
+      "rendered": true,
+      "page_width": 1660
+    }
+  },
+  "checks": {
+    "real_project_selector_populated": true,
+    "row_menu_works": true,
+    "six_nodes_and_expansion_persists": true,
+    "live_running_task_indicator_visible": true,
+    "live_jobs_show_running_status": true,
+    "mobile_no_page_overflow": true
+  },
+  "blocked_mutations": [],
+  "browser_errors": [],
+  "passed": true
+}

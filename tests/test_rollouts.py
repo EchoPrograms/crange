@@ -12,6 +12,19 @@ import test_release_networks as topology
 crange = topology.crange
 
 class RolloutTests(unittest.TestCase):
+    def test_release_node_resolution_uses_live_cluster_not_auto_or_stale_hint(self):
+        api=Mock();api.request.return_value=[{'vmid':152,'type':'qemu','node':'proxmox5'}]
+        for hint in ('auto','proxmox1',None):
+            self.assertEqual(crange.applied_guest_node(api,'scenario_boxes',{'id':152,'node_name':hint}), 'proxmox5')
+        api.request.return_value=[{'vmid':152,'type':'lxc','node':'proxmox5'}]
+        self.assertEqual(crange.applied_guest_node(api,'scenario_containers',{'id':152}), 'proxmox5')
+        for rows in ([], [{'vmid':152,'type':'qemu','node':'proxmox5'}],
+                     [{'vmid':152,'type':'lxc','node':'auto'}],
+                     [{'vmid':152,'type':'lxc','node':'proxmox5'}]*2):
+            api.request.return_value=rows
+            with self.assertRaises(crange.CrangeError):
+                crange.applied_guest_node(api,'scenario_containers',{'id':152})
+
     def fixture(self):
         box = {'team_id':'1','release_id':'p003-1.0','release_scope':'team','name':'r-old',
                'ip_last_octet':20,'network_id':100,'network_key':'release-net'}
@@ -153,6 +166,7 @@ class TransitionIntegrationTests(unittest.TestCase):
         with patch.object(crange,'output_json',return_value=outputs):crange.record_release_apply(self.project)
         api=Mock();api.vm.side_effect=lambda node,vmid:{'name':names[vmid],'template':0}
         api.container.side_effect=lambda node,vmid:{'hostname':names[vmid],'template':0}
+        api.request.return_value=[{'vmid':vmid,'type':'qemu' if vmid<300 else 'lxc','node':'proxmox4'} for vmid in names]
         api.status.return_value=api.container_status.return_value='running'
         args=SimpleNamespace(project='3',teams=[1])
         with patch.object(crange,'output_json',return_value=outputs),patch.object(crange,'ProxmoxAPI',return_value=api), \
@@ -166,7 +180,8 @@ class TransitionIntegrationTests(unittest.TestCase):
             crange.cmd_release_check(args)
         r=crange.json_config(self.project)['release_rollouts']['1']
         self.assertEqual(r['health']['status'],'passed')
-        api.start.assert_not_called();api.container_start.assert_not_called();api.request.assert_not_called()
+        api.start.assert_not_called();api.container_start.assert_not_called()
+        self.assertTrue(all(call.args[0]=='GET' for call in api.request.call_args_list))
 
 class ReleasePlanScopeTests(unittest.TestCase):
     def setUp(self):
@@ -218,8 +233,36 @@ class ReleasePlanScopeTests(unittest.TestCase):
     def test_release_apply_configures_only_selected_teams_and_checks_health(self):
         args=SimpleNamespace(project='3',teams=[1],plan_id='a'*32)
         with patch.object(crange,'project_dir',return_value=Path('/tmp/project-003')),patch.object(crange,'json_config',return_value=self.cfg), \
+             patch.object(crange,'load_release',return_value={'project_id':3,'scenario':{}}), \
              patch.object(crange,'cmd_apply') as apply,patch.object(crange,'cmd_configure_team') as configure,patch.object(crange,'cmd_release_check') as check:
             crange.cmd_release_apply(args)
         self.assertEqual(apply.call_args.args[0].release_teams,['1'])
         self.assertEqual(configure.call_count,1);self.assertEqual(configure.call_args.args[0].team,1)
         self.assertEqual(check.call_args.args[0].teams,[1])
+
+    def test_release_services_run_for_selected_team_before_health(self):
+        import crange_mhl_services as services
+        args = SimpleNamespace(project='3', teams=[1], plan_id='a'*32)
+        events = []
+        with patch.object(crange, 'project_dir', return_value=Path('/tmp/project-003')), \
+             patch.object(crange, 'json_config', return_value=self.cfg), \
+             patch.object(crange, 'load_release', return_value={'project_id':3,'scenario':{'service_profiles':{'business':{'source_sha256':'a'*64}}}}), \
+             patch.object(services, 'verify_release_profiles', return_value=['business']), \
+             patch.object(crange, 'cmd_apply', side_effect=lambda a:events.append('apply')), \
+             patch.object(crange, 'cmd_configure_team', side_effect=lambda a:events.append(('configure',a.team))), \
+             patch.object(crange, 'cmd_mhl_business_configure', side_effect=lambda a:events.append(('business',a.network_id,a.recipe_sha256))), \
+             patch.object(crange, 'cmd_release_check', side_effect=lambda a:events.append('health')):
+            crange.cmd_release_apply(args)
+        self.assertEqual(events, ['apply', ('configure',1), ('business',1,'a'*64), 'health'])
+
+    def test_invalid_service_recipe_blocks_before_infrastructure_apply(self):
+        import crange_mhl_services as services
+        args = SimpleNamespace(project='3', teams=[1], plan_id='a'*32)
+        with patch.object(crange, 'project_dir', return_value=Path('/tmp/project-003')), \
+             patch.object(crange, 'json_config', return_value=self.cfg), \
+             patch.object(crange, 'load_release', return_value={'project_id':3}), \
+             patch.object(services, 'verify_release_profiles', side_effect=ValueError('recipe changed')), \
+             patch.object(crange, 'cmd_apply') as apply:
+            with self.assertRaisesRegex(crange.CrangeError, 'recipe changed'):
+                crange.cmd_release_apply(args)
+        apply.assert_not_called()

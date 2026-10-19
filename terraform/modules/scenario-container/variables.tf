@@ -20,3 +20,8 @@ variable "box" {
     started              = bool
   })
 }
+
+variable "ssh_public_key" {
+  type    = string
+  default = null
+}
