@@ -252,3 +252,17 @@ No guest deployment, power or network configuration was changed. Evidence:
 - The connection title opens Guacamole’s native connection selector, with checkboxes for multiple connections displayed together. Existing authentication, permission filtering, connection grouping and tiling remain native.
 
 - Preferences now has a Back action; leaving a connection returns to its active project instead of the project directory. The Access icon is a simplified inverse CR monogram, with SVG and touch-icon assets updated together.
+
+
+## Guacamole settings and portal consistency — 2026-10-19
+
+- Matched portal and Settings headers to CRANGE Control's typography, spacing,
+  square controls and neutral palette; retained the larger readable portal text.
+- Added a plain CRANGE Control link at the top right, opening the controller in a
+  separate tab without leaving the current access portal.
+- Replaced the inconsistent native account dropdown with an aligned popover and
+  reorganized Settings into a compact navigation rail and readable working area.
+  Native permissions, settings actions, filtering and editing routes are retained.
+- Pinned project card network/server counts to the bottom for consistent alignment.
+- Verified desktop/narrow browser layouts, menu keyboard/outside dismissal and
+  project return; Guacamole UI/workspace/auth regression checks passed.

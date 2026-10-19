@@ -79,7 +79,7 @@
             var p = preferenceService.preferences;
             scope.backFromPreferences = function () {
                 var parent=scope;
-                while(parent){if(parent.cr && typeof parent.cr.back === 'function'){parent.cr.back();return;}parent=parent.$parent;}
+                while(parent){if(parent.cr && typeof parent.cr.back === 'function'){parent.cr.back();return;}if(typeof parent.settingsBack==='function'){parent.settingsBack();return;}parent=parent.$parent;}
                 $location.url('/');
             };
             languageService.getLanguages().then(function (languages) { if (!languages[p.language]) { var base = String(p.language || 'en').split('_')[0]; if (languages[base]) p.language = base; } });

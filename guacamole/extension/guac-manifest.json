@@ -10,7 +10,8 @@
     "auth-launch.js",
     "native-inventory.js",
     "ui.js",
-    "workspace.js"
+    "workspace.js",
+    "settings.js"
   ],
   "resources": {
     "assets/remote-access.svg": "image/svg+xml",

@@ -99,3 +99,17 @@ The session toolbar has a dedicated drag grip (arrow keys also move it; Home res
 The session title is a multiselect dropdown backed by Guacamole 1.6’s native connection-list context and client route updates, retaining its permission-filtered tree and tile manager. Checkboxes add/remove connections from the current view; the selector does not mint extra permissions. Native source: https://github.com/apache/guacamole-client/blob/1.6.0/guacamole/src/main/frontend/src/app/client/templates/connection.html
 
 Preferences includes a Back link to the prior project view. Leaving a known CRANGE session returns to that session’s project, including when it was launched from All projects. The project return marker is scoped to the browser tab. Access branding uses a two-letter CR mark with an inverse square background for small-size readability.
+
+
+Native Settings and the account dropdown share CRANGE Control's header, square
+controls, IBM Plex Sans typography and neutral navigation surfaces. The six native
+settings sections still use Guacamole's original controllers, permission-filtered
+page lists, edit links, filters and pagers. The account menu uses a viewport-bound
+popover with outside-click, Escape and keyboard navigation support. The portal
+and Settings header include a plain CRANGE Control link to
+https://crange.brogano.dev/ in a new tab, preserving any current remote session.
+Project card network/server counts align at the bottom even when names wrap.
+
+Run `node tests/test_guac_settings.cjs` alongside the workspace, UI and launch
+checks when changing this navigation. Desktop and narrow browser fixtures cover
+the native settings markup, menu placement/dismissal and portal header.
