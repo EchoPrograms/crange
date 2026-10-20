@@ -1,0 +1,17 @@
+{
+  "detector": {
+    "ignoreRules": [],
+    "ignoreFiles": [],
+    "ignoreValues": [
+      {
+        "rule": "cramped-padding",
+        "value": "*",
+        "files": [
+          "gui/index.html"
+        ],
+        "createdAt": "2026-10-20T14:37:02.043Z",
+        "reason": "Agent: browser measurement of the 54px flex-centered brand shows 8.109375px text clearance above the bottom border and 12px around the CR mark. Zero declared vertical padding does not mean flush content; retain the compact header geometry."
+      }
+    ]
+  }
+}
