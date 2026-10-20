@@ -13,6 +13,34 @@ from crange_image_cache import CacheError
 
 
 class CacheJobTests(unittest.TestCase):
+    def test_snapshot_resume_retains_offline_or_router_only_cache_without_blocking_other_work(self):
+        from crange_placement import ReservationLedger
+        for node,status,restricted,resumed in [('proxmox1','offline',False,False),
+                ('proxmox1','online',True,False),('proxmox2','online',False,True)]:
+            with self.subTest(node=node,status=status,restricted=restricted),tempfile.TemporaryDirectory() as directory:
+                root=Path(directory);journal=root/'cache-journal';journal.mkdir()
+                allocation={'operation':'cache_prepare','image':'image-v1'}
+                ledger=ReservationLedger(root/'reservations.sqlite3')
+                ledger.db.execute('INSERT INTO jobs(job_id,project_id,state,allocations) VALUES(?,?,?,?)',
+                                  ('cache-123',100,'running',json.dumps([allocation])))
+                ledger.close()
+                (journal/'cache-123.json').write_text(json.dumps({'state':'verifying','kind':'qemu',
+                    'node':node,'image_id':'image-v1'}))
+                policy={'allowed_nodes':['proxmox1','proxmox2'],'router_only_nodes':['proxmox1'] if restricted else []}
+                catalog={'images':{'image-v1':{}}}
+                api=Mock();api.request.return_value=[{'node':node,'status':status}]
+                with patch.object(jobs,'_root',return_value=root), \
+                     patch.object(jobs,'_settings',return_value=(policy,catalog)), \
+                     patch.object(jobs,'_cache_probe_identity',return_value=({'identity_mode':'windows-scenario-snapshot-v1'},None,False)), \
+                     patch.object(jobs,'ProxmoxAPI',return_value=api), \
+                     patch.object(jobs,'resume_snapshot_cache') as resume:
+                    jobs.resume_project_snapshot_caches(100,{'image-v1'})
+                self.assertEqual(resume.call_count,int(resumed))
+                retained=ReservationLedger(root/'reservations.sqlite3')
+                self.assertEqual(retained.get_job('cache-123')['state'],'running')
+                retained.close()
+                self.assertTrue((journal/'cache-123.json').exists())
+
     def test_sealed_windows_cache_uses_exact_null_sid_capture(self):
         capture = {'provenance_type': 'sealed-windows-source-v1', 'source_identity': None,
                    'probes': [{'identity': {'machine_guid': 'g', 'machine_sid': 's',

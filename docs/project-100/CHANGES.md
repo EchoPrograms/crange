@@ -1,5 +1,25 @@
 # Project 100 changes and fixes
 
+## 2026-10-20 — scoped configuration and outage acceptance
+
+- Deployed post-apply private inventory filtering, SSH identity refresh scope
+  and reuse of the filtered inventory for Windows initialization. Explicit
+  Configure team remains a complete team operation. Added tests for nested
+  host removal, preserved routing variables, temporary-file permissions and
+  missing-host rejection.
+- Live staging review exposed a stale-inventory gate before any allocation.
+  Deployed guest-disk storage filtering and four concurrent read-only guest
+  configuration requests; provider mutations remain sequential. The next
+  dashboard API review succeeded and proposed only the disposable staging CT.
+  Its deploy job is running; do not claim creation/configuration acceptance yet.
+- Added tests/fixes for preserving unchanged guests' exact image/storage
+  metadata and retaining unavailable snapshot-cache journals/reservations while
+  allowing planning on surviving nodes. Those follow-ups are pending deployment
+  until the current worker job finishes. Full suite: 1,092 tests, one skipped.
+- Verified the actual mounted Guacamole extension matches the current build
+  entry-for-entry and the public JS serves the custom Settings UI/controller
+  link. An unused host path was not mistaken for the running Docker mount.
+
 ## Starting state
 
 The preceding platform work published and clone-verified Parrot 7.3, prepared a

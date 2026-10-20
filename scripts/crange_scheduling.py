@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import copy
+from concurrent.futures import ThreadPoolExecutor
 import fcntl
 import hashlib
 import json
@@ -423,7 +424,10 @@ def discover(api, policy, planned_networks=()):
         storage_error = False
         if storage_detail:
             try:
-                storage_rows = api.request('GET', f'/nodes/{name}/storage')
+                # ISO/template-only NFS mirrors can be offline independently of
+                # usable guest storage. PVE filters before probing stores when
+                # content is supplied; do not wait for irrelevant media mounts.
+                storage_rows = api.request('GET', f'/nodes/{name}/storage', {'content': 'images,rootdir'})
             except Exception:
                 storage_rows = storage_summary
                 storage_detail = False
@@ -474,12 +478,19 @@ def discover(api, policy, planned_networks=()):
                 'clone_modes': ['full', 'linked'] if snapshots else ['full'],
                 'snapshots_verified': snapshots}
         result['nodes'][name] = node
+    # Configuration reads dominate larger clusters and can outlive the inventory
+    # freshness window when serialized. Bound read concurrency to the gateway's
+    # normal four slots. Mutations and dependent follow-ups remain sequential.
+    online_guests = [g for g in guests if result['nodes'].get(g['node'], {}).get('online')]
+    with ThreadPoolExecutor(max_workers=4) as readers:
+        config_reads = {str(g['vmid']): readers.submit(api.request, 'GET',
+            f'/nodes/{g["node"]}/{g["type"]}/{int(g["vmid"])}/config') for g in online_guests}
     for guest in guests:
         name = guest['node']
         if name not in result['nodes'] or not result['nodes'][name].get('online'): continue
         kind = guest['type']; vmid = int(guest['vmid'])
         try:
-            config = api.request('GET', f'/nodes/{name}/{kind}/{vmid}/config')
+            config = config_reads[str(vmid)].result()
         except Exception as exc:
             # A VMID can disappear between the cluster listing and config read
             # during a reviewed cancel/recreate. Ignore only a confirmed stale

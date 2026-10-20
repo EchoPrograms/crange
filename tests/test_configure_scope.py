@@ -71,6 +71,12 @@ class ConfigureScopeTests(unittest.TestCase):
             with self.assertRaises(ValueError):
                 configuration_inventory(inventory, cfg, 254, keys)
 
+    def test_missing_applied_host_cannot_silently_skip_configuration(self):
+        cfg, inventory = self.fixture()
+        inventory['all']['children'].pop('scenario_containers')
+        with self.assertRaisesRegex(ValueError, 'missing from inventory: p003_ct_new'):
+            configuration_inventory(inventory, cfg, 254, ['container:new'])
+
     def test_post_apply_configuration_uses_private_filtered_inventory_and_preserves_global(self):
         cfg, inventory = self.fixture()
         with tempfile.TemporaryDirectory() as temporary:

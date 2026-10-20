@@ -94,7 +94,7 @@ class ArchiveFallbackTests(unittest.TestCase):
                  'template_file_id': 'local:vztmpl/old.tar.zst'}}) as freeze, \
              patch.object(templates, 'resolve_archive') as resolve:
             result = templates.media_tf_overrides(Path('/unused'), {}, api=Mock())
-        freeze.assert_called_once_with(router, live)
+        freeze.assert_called_once_with(router, live, {})
         resolve.assert_not_called()
         self.assertEqual(result['resolved_placements']['router:project']['template_file_id'], 'local:vztmpl/old.tar.zst')
 

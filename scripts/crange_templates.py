@@ -725,13 +725,21 @@ def media_tf_overrides(path, cfg, prepared=None, api=None, *, scoped=False):
     records={p['resource_key']:p for p in (prepared or {}).get('placements',[])}
     api=api or ProxmoxAPI()
     physical = applied_resources(path)
+    applied_file = path / 'crange-applied-placements.json'
+    applied = json.loads(applied_file.read_text()) if applied_file.exists() else {}
     existing = physical if not prepared or scoped else {}
     for row in declarations(path,cfg):
         key=row['resource_key'];record=records.get(key,{})
         placement=resolved.get(key,{})
         if key in existing:
             if key not in records:
-                resolved[key]=freeze(row,existing[key])['resolved']
+                prior = applied.get(key, {})
+                if (prior.get('guest_id') != existing[key].get('vm_id')
+                        or prior.get('node_name') != existing[key].get('node_name')):
+                    prior = {}
+                resolved[key]=freeze(row,existing[key],prior)['resolved']
+                if prior.get('image_id') and prior.get('declared_template') == row['box'].get('template'):
+                    resolved[key]['image_id'] = prior['image_id']
             continue
         if scoped and key not in records:
             continue

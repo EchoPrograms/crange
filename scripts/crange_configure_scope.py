@@ -49,6 +49,16 @@ def configuration_inventory(inventory, cfg, network_id, resource_keys):
         selected.add(f'{project}c{int(net["network_id"]):03d}_router')
     result = copy.deepcopy(inventory)
 
+    def all_hosts(group):
+        hosts = set(group.get('hosts', {}))
+        for child in group.get('children', {}).values():
+            hosts.update(all_hosts(child))
+        return hosts
+
+    missing = selected - all_hosts(inventory['all'])
+    if missing:
+        raise ValueError('Applied configuration hosts are missing from inventory: ' + ', '.join(sorted(missing)))
+
     def prune(group):
         if 'hosts' in group:
             group['hosts'] = {host: value for host, value in group['hosts'].items() if host in selected}

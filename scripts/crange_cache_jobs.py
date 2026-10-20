@@ -297,9 +297,20 @@ def resume_project_snapshot_caches(project_id, image_ids):
                 if record.get('state')=='verifying' and record.get('kind')=='qemu':
                     _,catalog=_settings()
                     identity,_,sealed=_cache_probe_identity(catalog['images'].get(record.get('image_id'),{}))
-                    if not sealed and identity.get('identity_mode')=='windows-scenario-snapshot-v1':records.append(job_id)
+                    if not sealed and identity.get('identity_mode')=='windows-scenario-snapshot-v1':records.append((job_id,record.get('node')))
     finally:ledger.close()
-    for job_id in records:resume_snapshot_cache(job_id)
+    if records:
+        from crange_placement import workload_node_allowed
+        policy,_=_settings()
+        online={row['node'] for row in ProxmoxAPI().request('GET','/nodes') if row.get('status')=='online'}
+        for job_id,node in records:
+            if node not in online or not workload_node_allowed(policy,node,'cache:probe','vm'):
+                # Keep its exact journal/reservation for reconciliation. A new
+                # staging operation may prepare another cache on a surviving
+                # eligible node without restarting this uncertain generation.
+                print(f'Retaining unavailable cache preparation {job_id} on {node}; planning on surviving nodes.',flush=True)
+                continue
+            resume_snapshot_cache(job_id)
 
 
 def _resume_accepted_container_restore(api, ledger, journal, policy, catalog, image, record, project_id):

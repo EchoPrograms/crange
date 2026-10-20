@@ -15,6 +15,25 @@ DEFINITION={'name':'custom-windows-v1','node':'proxmox4','iso':'local:iso/window
             'cpu':'host','nic_models':['e1000','virtio'],'agent':False,'cloud_init':False,'tpm':True}
 
 class AdminTemplateTests(unittest.TestCase):
+    def test_scoped_media_keeps_exact_existing_image_and_disk_metadata(self):
+        for actual_id in (125,999):
+            with self.subTest(actual_id=actual_id), tempfile.TemporaryDirectory() as directory:
+                path=Path(directory)
+                (path/'crange-applied-placements.json').write_text(json.dumps({'container:live': {
+                    'guest_id':125,'node_name':'proxmox6','datastore_id':'local-hdd',
+                    'image_id':'immutable-v1','declared_template':'approved'}}))
+                rows=[{'resource_key':'container:live','reference':{},'box':{'template':'approved'}}]
+                with patch('crange_scheduling.declarations',return_value=rows), \
+                     patch('crange_scheduling.applied_resources',return_value={
+                         'container:live':{'vm_id':actual_id,'node_name':'proxmox6'}}):
+                    result=t.media_tf_overrides(path,{},api=Mock(),scoped=True)['resolved_placements']['container:live']
+                if actual_id==125:
+                    self.assertEqual(result['datastore_id'],'local-hdd')
+                    self.assertEqual(result['image_id'],'immutable-v1')
+                else:
+                    self.assertNotIn('image_id',result)
+                    self.assertEqual(result['datastore_id'],'local-lvm')
+
     def test_scoped_media_preserves_live_team_and_skips_unplanned_archive(self):
         rows = [
             {'resource_key': 'container:live', 'reference': {}, 'box': {'node_name': 'auto'}},

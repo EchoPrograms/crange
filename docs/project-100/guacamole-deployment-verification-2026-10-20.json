@@ -1,0 +1,12 @@
+{
+  "verified_at": "2026-10-20T05:31:33.593693+00:00",
+  "public_url": "https://crguac.brogano.dev/",
+  "public_bundle_http": 200,
+  "public_bundle_sha256": "ff2a9f9fc7db7c496f58cb5056f241923d2d54f5efe84d98699e40acf6207134",
+  "controller_link_served": true,
+  "custom_settings_served": true,
+  "mounted_extension_entries": 25,
+  "extension_content_matches_current_local_build": true,
+  "service_restart_performed": false,
+  "verification": "Compared every JAR entry at the running Docker bind source /opt/guacamole/extensions/crange-theme.jar with the local build; no changed, missing or extra entries."
+}

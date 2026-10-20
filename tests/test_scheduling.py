@@ -24,6 +24,46 @@ class API:
         raise AssertionError(path)
 
 class SchedulingTests(unittest.TestCase):
+    def test_online_config_reads_are_concurrent_and_bounded(self):
+        import threading
+        class ConcurrentAPI(API):
+            def __init__(self):
+                self.barrier = threading.Barrier(4)
+                self.lock = threading.Lock()
+                self.active = self.maximum = self.reads = 0
+            def request(self, method, path, fields=None):
+                if path == '/cluster/resources' and fields == {'type':'vm'}:
+                    return [{'node':'proxmox2','type':'qemu','vmid':i} for i in range(200,208)]
+                if path.endswith('/config'):
+                    self.assert_read(method)
+                    with self.lock:
+                        self.active += 1
+                        self.maximum = max(self.maximum, self.active)
+                        self.reads += 1
+                    try:
+                        self.barrier.wait(timeout=3)
+                        return {'memory':512,'cores':1,'template':0,'scsi0':'local-lvm:disk,size=2G','tags':'p003'}
+                    finally:
+                        with self.lock:self.active -= 1
+                return super().request(method,path,fields)
+            def assert_read(self, method):
+                if method != 'GET':raise AssertionError('Discovery attempted a mutation')
+        api = ConcurrentAPI()
+        result = scheduling.discover(api,dict(scheduling.DEFAULT_POLICY,allowed_nodes=['proxmox2']))
+        self.assertEqual((api.reads, api.maximum), (8,4))
+        self.assertEqual(result['nodes']['proxmox2']['committed_memory_mb'],4096)
+
+    def test_placement_storage_discovery_skips_iso_only_mirror_probes(self):
+        class FilteredAPI(API):
+            def request(self, method, path, fields=None):
+                if path.endswith('/storage') and path.startswith('/nodes/'):
+                    self.fields = fields
+                return super().request(method, path, fields)
+        api = FilteredAPI()
+        result = scheduling.discover(api, dict(scheduling.DEFAULT_POLICY, allowed_nodes=['proxmox2']))
+        self.assertEqual(api.fields, {'content': 'images,rootdir'})
+        self.assertTrue(result['nodes']['proxmox2']['storages']['local-lvm']['available'])
+
     def test_sanitized_cluster_capacity_snapshot_accepts_unrelated_guest_tags_only_in_fixed_scope(self):
         import json, time
         snapshot={'guest_node':'proxmox1','kind':'lxc','vmid':100,'status':'offline',

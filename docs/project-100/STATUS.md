@@ -1,7 +1,31 @@
 # Project 100 — current status
 
-Updated October 19, 2026 (UTC). Historical diagnostics and job evidence are in
+Updated October 20, 2026 (UTC). Historical diagnostics and job evidence are in
 [platform-progress.md](platform-progress.md).
+
+## October 20 — scoped staging deployment acceptance in progress
+
+Post-deploy configuration now uses a temporary private inventory containing only
+the reviewed changed guests and their required project/staging/custom router
+path. Full router variables remain intact, unrelated hosts are removed from all
+parent/child groups, and the normal full-team Configure action is preserved.
+The changed guest scope also limits SSH identity refresh and Windows baseline
+initialization. These changes are deployed.
+
+A temporary Project 100 manager submitted a disposable staging CT through the
+normal dashboard API/worker queue. A review failed before allocation because
+slow serial capacity discovery exceeded the inventory freshness window. Storage
+queries now request guest-disk content and online configuration reads use at
+most four concurrent readers. The subsequent review succeeded and proposed only
+the disposable CT on Proxmox6/local-hdd, while Proxmox1 remains offline. Deployment
+job `4e0047426678427392267a49b6f33f13` is running; guest access and cleanup acceptance
+are not yet established. The full Python suite ran 1,092 tests, one skipped.
+
+The live Guacamole extension was checked at its actual Docker bind source,
+`/opt/guacamole/extensions/crange-theme.jar`: every one of its 25 entries matches
+the current build. The public site serves the custom Settings interface and
+CRANGE Control link. No restart was necessary. See
+[Guacamole deployment verification](guacamole-deployment-verification-2026-10-20.json).
 
 ## October 19 — redundancy implementation in progress
 
