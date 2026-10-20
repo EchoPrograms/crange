@@ -1,5 +1,18 @@
 # Project 100 changes and fixes
 
+## October 20 — Guacamole workstation discovery and connection links
+
+- Refresh the authenticated Guacamole connection trees alongside CRANGE rows,
+  fixing empty Connect cells after new workstation deployments. Discover new
+  boxes every 15 seconds without overlapping refresh requests.
+- Verified the deployed portal with the assigned user's two boxes/three links
+  and the existing administrator's 56 boxes, including all 20 workstations and
+  their 30 protocol links.
+- Recorded the separate Team 1 routing outage: six SSH/RDP checks fail from
+  Guacamole while three Team 2 control checks pass. Router CT 120 is still on
+  unavailable Proxmox1; this UI deployment does not establish network acceptance.
+
+
 ## October 20 — observed team guest status
 
 - Replaced Desired state with live Status in both team machine tables. Declared

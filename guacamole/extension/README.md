@@ -116,3 +116,14 @@ Project card network/server counts align at the bottom even when names wrap.
 Run `node tests/test_guac_settings.cjs` alongside the workspace, UI and launch
 checks when changing this navigation. Desktop and narrow browser fixtures cover
 the native settings markup, menu placement/dismissal and portal header.
+
+
+Server-list Refresh reloads the current authenticated connection trees using
+Guacamole's `connectionGroupService` and `dataSourceService`, then binds protocol
+links against those trees. The list also discovers deployed boxes every 15
+seconds while the portal is visible; concurrent manual/background refreshes
+share one request. Power and native metadata retain their separate five-second
+poll. This prevents a portal opened before deployment from retaining empty
+Connect cells or hiding newly deployed workstations. Keep the current native
+tree as the link authorization boundary. Regression check:
+`node tests/test_guac_ui.cjs`.

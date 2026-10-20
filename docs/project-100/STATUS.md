@@ -3,6 +3,29 @@
 Updated October 20, 2026 (UTC). Historical diagnostics and job evidence are in
 [platform-progress.md](platform-progress.md).
 
+## October 20 — Guacamole workstation visibility and Connect buttons repaired
+
+The portal was refreshing CRANGE rows while retaining the native connection
+tree loaded before workstation deployment. That left new workstations absent
+from an already open list or present with empty Connect cells. Refresh now
+reloads the current authenticated Guacamole trees and CRANGE inventory together;
+a 15-second background refresh discovers new boxes in open sessions. Overlapping
+refreshes share one request, and links still require the current native tree.
+
+The extension is deployed. Browser checks show `guacadmin` sees all 56 managed
+boxes, including 20 jump boxes/workstations with 30 protocol links. The assigned
+user `p100-t001u01` sees only its two boxes and three links (Linux SSH/RDP and
+Windows RDP). No page or native-verification errors appeared. See
+[refresh acceptance](guacamole-workstation-refresh-acceptance.json).
+
+**Team 1 network connectivity remains blocked.** All six tested SSH/RDP ports
+on its four workstations time out from Guacamole. The same checks for Team 2's
+Linux SSH/RDP and application SSH succeed. Team 1 router CT 120 remains recorded
+on Proxmox1, which reports offline and absent from live cluster membership.
+Proxmox1 has not been positively fenced or confirmed powered off, so the old
+router identity must not be started elsewhere yet. Visible Connect buttons do
+not establish end-to-end guest network readiness.
+
 ## October 20 — team tables display actual guest status
 
 Both Jump boxes and Scenario machines now show **Status**, using recorded guest

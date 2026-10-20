@@ -93,7 +93,7 @@
                 });
             }
         };
-    }]).directive('crangeBoxList', ['$http', '$interval', 'authenticationService', 'ClientIdentifier', 'preferenceService', function ($http, $interval, authenticationService, ClientIdentifier, preferenceService) {
+    }]).directive('crangeBoxList', ['$http', '$interval', 'authenticationService', 'ClientIdentifier', 'preferenceService', 'connectionGroupService', 'dataSourceService', 'ConnectionGroup', function ($http, $interval, authenticationService, ClientIdentifier, preferenceService, connectionGroupService, dataSourceService, ConnectionGroup) {
         return {
             restrict: 'E',
             scope: { connectionGroups: '=' },
@@ -281,6 +281,7 @@
                 }
                 var nativeInventory = null;
                 var nativeInventoryRequest = null;
+                var connectionGroupsRequest = null, listRequest = null;
                 var destroyed = false;
                 var powerRequests = 0, powerCursor = 0, powerPending = Object.create(null);
                 scope.nativeInventoryLoading = true;
@@ -385,6 +386,24 @@
                     groupBoxes();
                     if (nativeInventory === null) refreshNativeInventory();
                 }
+                function refreshConnectionGroups() {
+                    if (connectionGroupsRequest) return connectionGroupsRequest;
+                    // Reload the current identity's authorized tree. CRANGE's
+                    // server list can change after this Guacamole page opens.
+                    connectionGroupsRequest = dataSourceService.apply(
+                        connectionGroupService.getConnectionGroupTree,
+                        authenticationService.getAvailableDataSources(),
+                        ConnectionGroup.ROOT_IDENTIFIER
+                    ).then(function (groups) {
+                        if (!destroyed) {
+                            scope.connectionGroups = groups;
+                            bindLinks();
+                        }
+                    }, function (error) {
+                        if (!destroyed) scope.error = message(error);
+                    }).finally(function () { connectionGroupsRequest = null; });
+                    return connectionGroupsRequest;
+                }
                 scope.retryPower = function (box) { refreshPower(box, true); };
                 function refreshPower(box, priority) {
                     var key = box.project + '/' + box.resource_key;
@@ -476,11 +495,13 @@
                     else if (scope.projectOptionsReady && scope.cr.selectedProject !== 'all' && !projects[scope.cr.selectedProject]) scope.cr.selectedProject = 'all';
                 }
                 scope.refresh = function () {
+                    if (listRequest) return listRequest;
                     refreshNativeInventory();
                     scope.loading = true;
                     scope.$parent.cr.loading = true;
                     scope.error = '';
-                    return request({operation: 'list'}).then(function (data) {
+                    var groups = refreshConnectionGroups();
+                    listRequest = request({operation: 'list'}).then(function (data) {
                         var previous = Object.create(null);
                         scope.boxes.forEach(function (box) { previous[box.project + '/' + box.resource_key] = box; });
                         scope.boxes = (Array.isArray(data.boxes) ? data.boxes : []).map(function (box) {
@@ -495,10 +516,14 @@
                             box.busy = !!(box.job && ['queued', 'running'].indexOf(box.job.status) !== -1);
                             if (box.busy) poll(box, box.job.id);
                         });
-                    }, function (error) { scope.error = message(error); }).finally(function () {
+                    }, function (error) { scope.error = message(error); }).then(function () {
+                        return groups;
+                    }).finally(function () {
                         scope.loading = false;
                         scope.$parent.cr.loading = false;
+                        listRequest = null;
                     });
+                    return listRequest;
                 };
                 scope.filteredBoxes = function (group) {
                     var term = (scope.search || '').toLowerCase().trim();
@@ -597,6 +622,9 @@
                     refreshPowerBatch();
                     refreshNativeInventory();
                 }, 5000));
+                polls.push($interval(function () {
+                    if (!document.hidden && scope.cr.page !== 'preferences') scope.refresh();
+                }, 15000));
                 scope.refresh();
             }
         };

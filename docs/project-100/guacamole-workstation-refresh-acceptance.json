@@ -1,0 +1,109 @@
+{
+  "checked_at": "2026-10-20T14:59:25.025341+00:00",
+  "problem": "An open portal refreshed CRANGE rows and power but retained the Guacamole connection tree loaded before new workstations were deployed. The ordinary Refresh action could leave protocol URLs empty.",
+  "reproduction": {
+    "identity": "p100-t001u01",
+    "visible_boxes": 2,
+    "authorized_protocols": 3,
+    "linked_protocols_after_old_refresh": 0,
+    "linked_protocols_after_fixed_refresh": 3
+  },
+  "change": {
+    "authenticated_tree_reload": true,
+    "current_session_contexts_only": true,
+    "background_list_refresh_seconds": 15,
+    "overlapping_refreshes_share_request": true,
+    "revoked_tree_grants_remove_links": true
+  },
+  "deployed_browser_checks": {
+    "user": {
+      "identity": "p100-t001u01",
+      "boxes": 2,
+      "jumpbox_links": 3,
+      "errors": []
+    },
+    "administrator": {
+      "identity": "guacadmin",
+      "boxes": 56,
+      "jumpboxes": 20,
+      "jumpbox_links": 30,
+      "errors": [],
+      "verification_session": "Short-lived signed authentication with the existing native database contexts; no account or permission changes."
+    }
+  },
+  "connectivity": {
+    "source": "Guacamole VM 110",
+    "team_1": [
+      {
+        "address": "10.100.1.11",
+        "port": 22,
+        "result": "unreachable"
+      },
+      {
+        "address": "10.100.1.11",
+        "port": 3389,
+        "result": "unreachable"
+      },
+      {
+        "address": "10.100.1.12",
+        "port": 3389,
+        "result": "unreachable"
+      },
+      {
+        "address": "10.100.1.13",
+        "port": 22,
+        "result": "unreachable"
+      },
+      {
+        "address": "10.100.1.13",
+        "port": 3389,
+        "result": "unreachable"
+      },
+      {
+        "address": "10.100.1.14",
+        "port": 3389,
+        "result": "unreachable"
+      }
+    ],
+    "team_2_control": [
+      {
+        "address": "10.100.2.11",
+        "port": 22,
+        "result": "reachable"
+      },
+      {
+        "address": "10.100.2.11",
+        "port": 3389,
+        "result": "reachable"
+      },
+      {
+        "address": "10.100.2.40",
+        "port": 22,
+        "result": "reachable"
+      }
+    ],
+    "team_1_router": {
+      "vm_id": 120,
+      "recorded_node": "proxmox1",
+      "node_status": "offline",
+      "cluster_member_online": false
+    },
+    "remaining_blocker": "Team 1 network connectivity requires router recovery. Proxmox1 has not been positively fenced or confirmed powered off; do not start a second instance of its router."
+  },
+  "deployment": {
+    "jar_sha256": "536e110d1f30d867edb7da7e0f8ae86088ce060c3ae3981ea3978ce68a992dfe",
+    "ui_js_sha256": "a2edb0171340dd88403b420aa9a6e8a35c0a9630b6d3e09c4090f944406f9c26",
+    "backup": "/opt/guacamole/extensions/crange-theme.jar.20261020T145208Z.bak",
+    "active_connections_at_restart": 0,
+    "public_app_contains_fix": true,
+    "controller_extension_source_synced": true
+  },
+  "validation": [
+    "Guacamole UI and connection-tree refresh tests passed",
+    "Guacamole workspace tests passed",
+    "Guacamole settings tests passed",
+    "Guacamole launch credential cleanup tests passed",
+    "Guacamole ticket storage isolation tests passed",
+    "Deployed browser checks passed for user and administrator"
+  ]
+}
