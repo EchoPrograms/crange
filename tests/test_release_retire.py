@@ -108,6 +108,13 @@ class ReleaseRetirementTests(unittest.TestCase):
 
     def saved_apply(self, fail_stop=False):
         cfg, detail = self.fixture(); targets = retirements(cfg, ['1'], detail)
+        from crange_apply_scope import reviewed_distribution
+        actual = {'vm:old': detail['resource_changes'][0]['change']['before']}
+        detail['resource_changes'].append({
+            'address': 'module.scenario_box["new"].proxmox_virtual_environment_vm.scenario',
+            'change': {'actions': ['create'], 'before': None, 'after': {'node_name': 'proxmox2'}}})
+        distribution = reviewed_distribution({'requests': [], 'placements': [
+            {'resource_key': 'vm:new', 'resolved': {'node_name': 'proxmox2'}}]}, detail, actual)
         api, _, _, _ = self.api(targets); events = []
         original = api.request.side_effect
         def request(method, path, fields=None):
@@ -125,7 +132,7 @@ class ReleaseRetirementTests(unittest.TestCase):
                       'inputs_sha256': hashlib.sha256(inputs.read_bytes()).hexdigest(),
                       'automation_inputs_sha256': 'trusted-source',
                       'changes': [{'address': targets[0]['resource'], 'actions': ['delete']}],
-                      'distribution': {'placements': [{'resolved': {'node_name': 'proxmox2'}}]}}
+                      'distribution': distribution}
             (private/(plan_id+'.json')).write_text(json.dumps(record))
             def terraform(path, command, **kwargs):
                 if command[0] == 'apply': events.append('apply')
@@ -138,6 +145,7 @@ class ReleaseRetirementTests(unittest.TestCase):
             stack.enter_context(patch('crange_rollouts.plan_blockers', return_value=[]))
             stack.enter_context(patch('crange_scheduling.begin_apply', side_effect=lambda *a: events.append('begin')))
             stack.enter_context(patch('crange_scheduling.finish_apply', side_effect=lambda *a, **k: events.append('finish')))
+            stack.enter_context(patch('crange_scheduling.applied_resources', return_value=actual))
             locks = stack.enter_context(patch('crange_scheduling.node_locks', return_value=nullcontext()))
             args = SimpleNamespace(project='100', plan_id=plan_id, release_teams=['1'],
                                    allow_destroy=True, allow_replace=False)

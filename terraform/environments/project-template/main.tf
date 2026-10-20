@@ -313,6 +313,9 @@ resource "proxmox_sdn_applier" "apply" {
   ]
 }
 
+# Guest creation requires the SDN bridges, not another guest to be refreshed
+# or running. Router/service configuration order is enforced by Ansible.
+# Keep scoped staging/release targets independent of unrelated team routers.
 module "project_router" {
   source = "../../modules/router"
 
@@ -357,10 +360,7 @@ module "team_router" {
     full_clone = var.resolved_placements["router:team:${each.key}"].clone_mode == "full"
   })
 
-  depends_on = [
-    proxmox_sdn_applier.apply,
-    module.project_router
-  ]
+  depends_on = [proxmox_sdn_applier.apply]
 }
 
 module "staging_router" {
@@ -383,10 +383,7 @@ module "staging_router" {
     full_clone = var.resolved_placements["router:staging"].clone_mode == "full"
   })
 
-  depends_on = [
-    proxmox_sdn_applier.apply,
-    module.project_router
-  ]
+  depends_on = [proxmox_sdn_applier.apply]
 }
 
 module "custom_router" {
@@ -412,11 +409,7 @@ module "custom_router" {
     full_clone = var.resolved_placements["router:custom:${each.key}"].clone_mode == "full"
   })
 
-  depends_on = [
-    proxmox_sdn_applier.apply,
-    module.team_router,
-    module.staging_router
-  ]
+  depends_on = [proxmox_sdn_applier.apply]
 }
 
 module "jumpbox" {
@@ -445,12 +438,7 @@ module "jumpbox" {
 
   template_profile = local.template_profile
 
-  depends_on = [
-    proxmox_sdn_applier.apply,
-    module.team_router,
-    module.staging_router,
-    module.custom_router
-  ]
+  depends_on = [proxmox_sdn_applier.apply]
 }
 
 module "scenario_box" {
@@ -478,18 +466,13 @@ module "scenario_box" {
     full_clone = var.resolved_placements["vm:${each.key}"].clone_mode == "full"
   })
 
-  depends_on = [
-    proxmox_sdn_applier.apply,
-    module.team_router,
-    module.staging_router,
-    module.custom_router
-  ]
+  depends_on = [proxmox_sdn_applier.apply]
 }
 
 module "scenario_container" {
   ssh_public_key = local.ssh_public_key
-  for_each = var.scenario_containers
-  source   = "../../modules/scenario-container"
+  for_each       = var.scenario_containers
+  source         = "../../modules/scenario-container"
 
   box = merge({
     project_id       = var.project_id
@@ -509,7 +492,7 @@ module "scenario_container" {
     full_clone           = var.resolved_placements["container:${each.key}"].clone_mode == "full"
     verified_local_cache = try(var.resolved_placements["container:${each.key}"].verified_local_cache, false)
   })
-  depends_on = [proxmox_sdn_applier.apply, module.team_router, module.staging_router, module.custom_router]
+  depends_on = [proxmox_sdn_applier.apply]
 }
 
 output "vnets" {

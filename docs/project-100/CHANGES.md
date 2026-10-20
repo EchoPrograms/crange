@@ -266,3 +266,40 @@ No guest deployment, power or network configuration was changed. Evidence:
 - Pinned project card network/server counts to the bottom for consistent alignment.
 - Verified desktop/narrow browser layouts, menu keyboard/outside dismissal and
   project return; Guacamole UI/workspace/auth regression checks passed.
+
+
+## Node-loss resilience — 2026-10-19
+
+- Restricted new workloads on Proxmox1 to router containers; Proxmox2 remains
+  unrestricted. Explicit pins, installer admission, cache target planning and
+  release-capture destinations honor the role. Existing placements are retained.
+- Fixed automatic router bootstrap requiring offline unused candidates to be
+  available. Exact pins still fail when their target is unavailable.
+- Added 26-case placement and quorum models plus conflicting-policy rejection.
+  The full Python suite passed 1,077 tests (one skipped), including subsequent
+  scoped-apply checks.
+- Installed configuration version 23 with two votes for Proxmox4 and one for
+  each other node. Verified configuration and live quorum on all five online
+  members without restarting services or inducing a host failure. Scoped
+  Terraform work during outages and fenced router HA remain pending; these
+  checks must not be presented as complete lab failover acceptance.
+
+- Fixed the offline capacity reader denying unrelated services on an unavailable
+  node. Added a root-owned inventory scope with quorum, membership, offline
+  identity, tag and digest checks; output contains limits rather than raw config.
+  Historical VM snapshot sections are excluded from active-limit accounting.
+
+- Live validation exposed repeated LXC mount settings in an unrelated service.
+  The sanitized reader now ignores non-capacity fields while continuing to
+  reject duplicate CPU/RAM/disk limits. The 31 relay and 31 scheduling tests pass.
+
+- Cache planning now uses published image sizing without contacting an offline
+  source template. A live discovery/admission check selected Proxmox6/local-hdd
+  for a new router; no guest or reservation was created. Discovery took 112s.
+- Deployed reviewed-plan guest scoping for begin/finish/reconciliation, retained
+  state fingerprints, and explicit deletion-node checks. Removed broad guest
+  dependencies on every team router while retaining SDN and Ansible ordering.
+  Tests verify an unrelated offline router is untouched, while affected-node
+  outages, unreviewed reservations and unrelated state drift remain errors.
+  Terraform validation and formatting passed. Live staging outage review is
+  running; no infrastructure apply is implied by this source deployment.

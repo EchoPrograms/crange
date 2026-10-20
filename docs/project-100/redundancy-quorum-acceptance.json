@@ -1,0 +1,273 @@
+{
+  "core_node": "proxmox4",
+  "votes": {
+    "proxmox1": 1,
+    "proxmox2": 1,
+    "proxmox3": 1,
+    "proxmox4": 2,
+    "proxmox5": 1,
+    "proxmox6": 1
+  },
+  "expected_votes": 7,
+  "quorum": 4,
+  "tolerated_failures": 3,
+  "cases": [
+    {
+      "failed_nodes": [],
+      "remaining_votes": 7,
+      "quorate": true
+    },
+    {
+      "failed_nodes": [
+        "proxmox1"
+      ],
+      "remaining_votes": 6,
+      "quorate": true
+    },
+    {
+      "failed_nodes": [
+        "proxmox2"
+      ],
+      "remaining_votes": 6,
+      "quorate": true
+    },
+    {
+      "failed_nodes": [
+        "proxmox3"
+      ],
+      "remaining_votes": 6,
+      "quorate": true
+    },
+    {
+      "failed_nodes": [
+        "proxmox5"
+      ],
+      "remaining_votes": 6,
+      "quorate": true
+    },
+    {
+      "failed_nodes": [
+        "proxmox6"
+      ],
+      "remaining_votes": 6,
+      "quorate": true
+    },
+    {
+      "failed_nodes": [
+        "proxmox1",
+        "proxmox2"
+      ],
+      "remaining_votes": 5,
+      "quorate": true
+    },
+    {
+      "failed_nodes": [
+        "proxmox1",
+        "proxmox3"
+      ],
+      "remaining_votes": 5,
+      "quorate": true
+    },
+    {
+      "failed_nodes": [
+        "proxmox1",
+        "proxmox5"
+      ],
+      "remaining_votes": 5,
+      "quorate": true
+    },
+    {
+      "failed_nodes": [
+        "proxmox1",
+        "proxmox6"
+      ],
+      "remaining_votes": 5,
+      "quorate": true
+    },
+    {
+      "failed_nodes": [
+        "proxmox2",
+        "proxmox3"
+      ],
+      "remaining_votes": 5,
+      "quorate": true
+    },
+    {
+      "failed_nodes": [
+        "proxmox2",
+        "proxmox5"
+      ],
+      "remaining_votes": 5,
+      "quorate": true
+    },
+    {
+      "failed_nodes": [
+        "proxmox2",
+        "proxmox6"
+      ],
+      "remaining_votes": 5,
+      "quorate": true
+    },
+    {
+      "failed_nodes": [
+        "proxmox3",
+        "proxmox5"
+      ],
+      "remaining_votes": 5,
+      "quorate": true
+    },
+    {
+      "failed_nodes": [
+        "proxmox3",
+        "proxmox6"
+      ],
+      "remaining_votes": 5,
+      "quorate": true
+    },
+    {
+      "failed_nodes": [
+        "proxmox5",
+        "proxmox6"
+      ],
+      "remaining_votes": 5,
+      "quorate": true
+    },
+    {
+      "failed_nodes": [
+        "proxmox1",
+        "proxmox2",
+        "proxmox3"
+      ],
+      "remaining_votes": 4,
+      "quorate": true
+    },
+    {
+      "failed_nodes": [
+        "proxmox1",
+        "proxmox2",
+        "proxmox5"
+      ],
+      "remaining_votes": 4,
+      "quorate": true
+    },
+    {
+      "failed_nodes": [
+        "proxmox1",
+        "proxmox2",
+        "proxmox6"
+      ],
+      "remaining_votes": 4,
+      "quorate": true
+    },
+    {
+      "failed_nodes": [
+        "proxmox1",
+        "proxmox3",
+        "proxmox5"
+      ],
+      "remaining_votes": 4,
+      "quorate": true
+    },
+    {
+      "failed_nodes": [
+        "proxmox1",
+        "proxmox3",
+        "proxmox6"
+      ],
+      "remaining_votes": 4,
+      "quorate": true
+    },
+    {
+      "failed_nodes": [
+        "proxmox1",
+        "proxmox5",
+        "proxmox6"
+      ],
+      "remaining_votes": 4,
+      "quorate": true
+    },
+    {
+      "failed_nodes": [
+        "proxmox2",
+        "proxmox3",
+        "proxmox5"
+      ],
+      "remaining_votes": 4,
+      "quorate": true
+    },
+    {
+      "failed_nodes": [
+        "proxmox2",
+        "proxmox3",
+        "proxmox6"
+      ],
+      "remaining_votes": 4,
+      "quorate": true
+    },
+    {
+      "failed_nodes": [
+        "proxmox2",
+        "proxmox5",
+        "proxmox6"
+      ],
+      "remaining_votes": 4,
+      "quorate": true
+    },
+    {
+      "failed_nodes": [
+        "proxmox3",
+        "proxmox5",
+        "proxmox6"
+      ],
+      "remaining_votes": 4,
+      "quorate": true
+    }
+  ],
+  "all_cases_quorate": true,
+  "changed": true,
+  "previous_votes": {
+    "proxmox1": 1,
+    "proxmox2": 1,
+    "proxmox3": 1,
+    "proxmox4": 1,
+    "proxmox5": 1,
+    "proxmox6": 1
+  },
+  "previous_config_version": 22,
+  "config_version": 23,
+  "before_sha256": "2db5899354faf2cd01ef0251f3131512255eb88067a79002bdc000a4050dc0d1",
+  "candidate_sha256": "4f7183b3c43af0cf19bdf4b5b6f9e28c0f3a2876bc0545309f9bd947d35a78d9",
+  "prepared_at": "2026-10-19T23:11:54.621705+00:00",
+  "corosync_configuration_test_passed": true,
+  "applied_at": "2026-10-19T23:15:03.388753+00:00",
+  "verified_live_members": [
+    {
+      "node": "proxmox2",
+      "verified": true,
+      "configuration_sha256": "4f7183b3c43af0cf19bdf4b5b6f9e28c0f3a2876bc0545309f9bd947d35a78d9"
+    },
+    {
+      "node": "proxmox3",
+      "verified": true,
+      "configuration_sha256": "4f7183b3c43af0cf19bdf4b5b6f9e28c0f3a2876bc0545309f9bd947d35a78d9"
+    },
+    {
+      "node": "proxmox4",
+      "verified": true,
+      "configuration_sha256": "4f7183b3c43af0cf19bdf4b5b6f9e28c0f3a2876bc0545309f9bd947d35a78d9"
+    },
+    {
+      "node": "proxmox5",
+      "verified": true,
+      "configuration_sha256": "4f7183b3c43af0cf19bdf4b5b6f9e28c0f3a2876bc0545309f9bd947d35a78d9"
+    },
+    {
+      "node": "proxmox6",
+      "configuration_sha256": "4f7183b3c43af0cf19bdf4b5b6f9e28c0f3a2876bc0545309f9bd947d35a78d9",
+      "verified": true
+    }
+  ],
+  "power_failures_induced": false,
+  "network_configuration_changed": false,
+  "service_restarts": false
+}

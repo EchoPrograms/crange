@@ -24,6 +24,25 @@ class API:
         raise AssertionError(path)
 
 class SchedulingTests(unittest.TestCase):
+    def test_sanitized_cluster_capacity_snapshot_accepts_unrelated_guest_tags_only_in_fixed_scope(self):
+        import json, time
+        snapshot={'guest_node':'proxmox1','kind':'lxc','vmid':100,'status':'offline',
+                  'template':False,'memory_bytes':4000*1024**2,'cpu_cores':2,
+                  'disk_bytes':70*1024**3,'tags':['monitoring'],
+                  'config_sha256':'a'*64,'captured_at':time.time(),'scope':'cluster-capacity'}
+        class Socket:
+            def __enter__(self):return self
+            def __exit__(self,*args):pass
+            def settimeout(self,*args):pass
+            def connect(self,*args):pass
+            def sendall(self,*args):pass
+            def recv(self,*args):return (json.dumps({'value':json.dumps(snapshot)})+'\n').encode()
+        with patch.object(scheduling.socket,'socket',return_value=Socket()):
+            self.assertEqual(scheduling._offline_config_snapshot('proxmox1','lxc',100)['cpu_cores'],2)
+            del snapshot['scope']
+            with self.assertRaisesRegex(PlacementError,'validation'):
+                scheduling._offline_config_snapshot('proxmox1','lxc',100)
+
     def test_container_cpu_request_does_not_require_vm_host_feature(self):
         self.assertIsNone(scheduling.requested_cpu_type('container', {}))
         self.assertEqual(scheduling.requested_cpu_type('vm', {}), 'host')
@@ -97,6 +116,23 @@ class SchedulingTests(unittest.TestCase):
         requests[0]['placement']['allowed_nodes']=['proxmox1']
         with self.assertRaises(PlacementError):
             scheduling._bootstrap_planned_networks(inventory,policy,requests,'proxmox1',nodes)
+
+    def test_bootstrap_auto_candidates_tolerate_unselected_offline_nodes(self):
+        policy = {'allowed_nodes':['proxmox1','proxmox2']}
+        request = {'kind':'container','resource_key':'router:project','project_id':100,
+                   'networks':['crtrans','p100tr'],
+                   'placement':{'mode':'auto','allowed_nodes':['proxmox1','proxmox2']}}
+        inventory = {'nodes':{'proxmox1':{'online':False},
+                              'proxmox2':{'online':True,'verified_networks':['crtrans']}}}
+        with patch.object(scheduling, 'bootstrap_node_candidates', return_value=['proxmox1','proxmox2']):
+            result = scheduling._bootstrap_planned_networks(inventory, policy, [request],
+                                                          'proxmox1', ['proxmox1','proxmox2'])
+            self.assertNotIn('bootstrap_planned_networks', result['nodes']['proxmox1'])
+            self.assertEqual(result['nodes']['proxmox2']['bootstrap_planned_networks'], ['crtrans','p100tr'])
+            inventory['nodes']['proxmox2']['online'] = False
+            with self.assertRaisesRegex(PlacementError, 'No reviewed bootstrap candidate'):
+                scheduling._bootstrap_planned_networks(inventory, policy, [request],
+                                                      'proxmox1', ['proxmox1','proxmox2'])
 
     def test_router_declarations_honor_per_router_bootstrap_node_map(self):
         cfg={'project_id':100,'team_ids':['1'], 'router_node':'proxmox1',
@@ -372,6 +408,7 @@ class SchedulingTests(unittest.TestCase):
             scheduling.discover(OfflineNoConfigAPI(),dict(scheduling.DEFAULT_POLICY,allowed_nodes=['proxmox1']))
 
     def test_offline_discovery_uses_fresh_fixed_snapshot_when_node_config_api_fails(self):
+        offline_reads = []
         class OfflineAPI(API):
             def request(self, method, path, fields=None):
                 if path == '/nodes':
@@ -381,6 +418,7 @@ class SchedulingTests(unittest.TestCase):
                              'maxmem':None,'maxcpu':None,'maxdisk':None,
                              'tags':'network-infrastructure;p100;range-lan;terraform'}]
                 if path == '/nodes/proxmox2/lxc/113/config':
+                    offline_reads.append(path)
                     raise CrangeError('Proxmox API GET failed with HTTP 500.')
                 return super().request(method,path,fields)
         snapshot={'guest_node':'proxmox2','kind':'lxc','vmid':113,'status':'offline',
@@ -394,6 +432,7 @@ class SchedulingTests(unittest.TestCase):
         self.assertEqual(result['nodes']['proxmox2']['committed_memory_mb'],512)
         self.assertEqual(result['nodes']['proxmox2']['committed_cpu_cores'],1)
         self.assertEqual(result['quota_usage']['100']['disk_gb'],8)
+        self.assertEqual(offline_reads, [], 'A known offline node must not be retried when shared metadata is available')
 
     def test_existing_placement_ignores_changed_preference(self):
         row={'resource_key':'vm:web','image':'base-v1','reference':{},'box':{'node_name':'auto','placement':{'mode':'auto','preferred_node':'proxmox5'}}}

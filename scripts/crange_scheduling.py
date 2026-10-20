@@ -14,7 +14,7 @@ from contextlib import contextmanager
 from pathlib import Path
 
 from crange_catalog import validate_catalog, catalog_identity
-from crange_placement import PlacementError, ReservationLedger
+from crange_placement import PlacementError, ReservationLedger, workload_node_allowed
 
 CONFIG = Path(os.environ.get('CRANGE_DISTRIBUTION_CONFIG', Path.home() / '.config/crange'))
 DATA = Path(os.environ.get('CRANGE_DISTRIBUTION_DATA', '/var/lib/crange-distribution'))
@@ -23,6 +23,8 @@ DEFAULT_POLICY = {'revision': 'conservative-v1', 'enabled': False,
                   # Cluster membership alone does not admit placements: each node
                   # still requires storage/provider/network acceptance.
                   'allowed_nodes': [f'proxmox{i}' for i in range(1, 7)],
+                  'expected_cluster_nodes': sorted(KNOWN_NODES),
+                  'router_only_nodes': ['proxmox1'],
                   'allowed_storages': ['local-lvm', 'ssd-lvm', 'hdd-lvm', 'crange-thin', 'local-hdd'],
                   'max_inventory_age_seconds': 120, 'review_ttl_seconds': 3600,
                   'max_reviewed_plans': 2, 'max_load': 1.0,
@@ -175,6 +177,7 @@ def _offline_config_snapshot(node, kind, vmid):
     captured = snapshot.get('captured_at')
     digest = snapshot.get('config_sha256')
     tags = snapshot.get('tags')
+    capacity_inventory = snapshot.get('scope') == 'cluster-capacity'
     if (snapshot.get('guest_node') != node or snapshot.get('kind') != kind or
             snapshot.get('vmid') != vmid or snapshot.get('status') != 'offline' or
             type(snapshot.get('template')) is not bool or
@@ -184,8 +187,8 @@ def _offline_config_snapshot(node, kind, vmid):
             not math.isfinite(snapshot['cpu_cores']) or snapshot['cpu_cores'] < 0 or
             type(snapshot.get('disk_bytes')) is not int or snapshot['disk_bytes'] <= 0 or
             not isinstance(digest, str) or not re.fullmatch(r'[a-f0-9]{64}', digest) or
-            not isinstance(tags, list) or not tags or any(not isinstance(tag, str) for tag in tags) or
-            not (('p100' in tags) ^ ('crange-image' in tags)) or
+            not isinstance(tags, list) or any(not isinstance(tag, str) for tag in tags) or
+            (not capacity_inventory and (not tags or not (('p100' in tags) ^ ('crange-image' in tags)))) or
             not isinstance(captured, (int, float)) or isinstance(captured, bool) or
             not math.isfinite(captured) or captured > time.time() + 5 or time.time() - captured > 120):
         raise PlacementError('Fixed offline config snapshot failed identity, freshness, or limit validation.')
@@ -271,14 +274,22 @@ def _bootstrap_planned_networks(inventory, policy, requests, node_name=None, rou
         selected_nodes = allowed_nodes
     else:
         selected_nodes = set((router_nodes or {}).values()) or {node_name}
+    available_nodes = set()
     for selected in selected_nodes:
         node = inventory.get('nodes', {}).get(selected)
         if not node or not node.get('online') or node.get('draining'):
+            if isinstance(router_nodes, list):
+                # An automatic candidate is an option, not a dependency. The
+                # scheduler still rejects it; exact pinned targets must fail.
+                continue
             raise PlacementError('Bootstrap node is unavailable.')
+        available_nodes.add(selected)
+    if not available_nodes:
+        raise PlacementError('No reviewed bootstrap candidate is available.')
     # Keep planning eligibility distinct from live, exact-VNet acceptance. The
     # enrolled zone proof plus project-only resource allowlist permits crtrans
     # for router foundation planning, but this never records acceptance.
-    for selected in selected_nodes:
+    for selected in available_nodes:
         inventory['nodes'][selected]['bootstrap_planned_networks'] = sorted(expected)
     return inventory
 
@@ -344,23 +355,22 @@ def discover(api, policy, planned_networks=()):
                 maxima = {key: guest.get(key) for key in ('maxmem', 'maxcpu', 'maxdisk')}
                 if maxima['maxdisk'] is None or (not template and any(value is None for value in maxima.values())):
                     # /cluster/resources omits configured maxima for guests on
-                    # an offline node. PVE keeps the authoritative guest config
-                    # in pmxcfs, so read it through the normal VM.Audit API and
-                    # derive only the missing values. Never infer from a name,
+                    # an offline node. Read its quorum-backed shared config
+                    # first: retrying the unavailable node's API for every
+                    # guest can stall discovery for minutes. Never infer from a name,
                     # Terraform declaration, or zero usage counters.
                     snapshot = None
                     try:
-                        config = api.request('GET', f"/nodes/{name}/{guest['type']}/{guest['vmid']}/config")
-                    except Exception:
                         snapshot = _offline_config_snapshot(name, guest['type'], int(guest['vmid']))
-                        template = snapshot['template']
-                        if maxima['maxmem'] is None and snapshot['memory_bytes']:
-                            maxima['maxmem'] = snapshot['memory_bytes']
-                        if maxima['maxcpu'] is None and snapshot['cpu_cores']:
-                            maxima['maxcpu'] = snapshot['cpu_cores']
-                        if maxima['maxdisk'] is None:
-                            maxima['maxdisk'] = snapshot['disk_bytes']
-                    else:
+                    except PlacementError as snapshot_error:
+                        # Compatibility for deployments without the fixed relay.
+                        # A denied or malformed relay response must fail closed.
+                        if str(snapshot_error) != 'Fixed offline config snapshot relay is unavailable.':
+                            raise
+                        try:
+                            config = api.request('GET', f"/nodes/{name}/{guest['type']}/{guest['vmid']}/config")
+                        except Exception:
+                            raise snapshot_error from None
                         if not isinstance(config, dict):
                             raise PlacementError(f'Cannot account workloads on offline node {name}; guest {guest["vmid"]} config is invalid.')
                         template = bool(int(config.get('template', template)))
@@ -372,6 +382,14 @@ def discover(api, policy, planned_networks=()):
                             configured_disks = disk_allocations(config)
                             if configured_disks:
                                 maxima['maxdisk'] = sum(configured_disks.values()) * 2**30
+                    else:
+                        template = snapshot['template']
+                        if maxima['maxmem'] is None and snapshot['memory_bytes']:
+                            maxima['maxmem'] = snapshot['memory_bytes']
+                        if maxima['maxcpu'] is None and snapshot['cpu_cores']:
+                            maxima['maxcpu'] = snapshot['cpu_cores']
+                        if maxima['maxdisk'] is None:
+                            maxima['maxdisk'] = snapshot['disk_bytes']
                 missing_values = [key for key, value in maxima.items()
                                   if value is None and (not template or key == 'maxdisk')]
                 if missing_values:
@@ -904,6 +922,9 @@ def begin_apply(path, prepared, api=None):
         raise PlacementError('Placement policy changed after review; restage.')
     if catalog_identity(catalog)!=prepared['catalog_sha256']:
         raise PlacementError('Published image catalog changed after review; restage.')
+    if prepared.get('apply_scope'):
+        from crange_apply_scope import verify_untouched
+        verify_untouched(prepared, applied_resources(path))
     api=api or ProxmoxAPI()
     networks={n for request in prepared['requests'] for n in request['networks']}
     inventory=discover(api,policy,networks)
@@ -915,6 +936,10 @@ def begin_apply(path, prepared, api=None):
         if any('router:custom:' + key in applied_resources(path) for key in prepared['network_foundation']):
             raise PlacementError('A reviewed custom router already exists; restage instead of applying an old foundation plan.')
         inventory=_custom_foundation_networks(inventory,policy,prepared['requests'],cfg,prepared['network_foundation'])
+    for identity in prepared.get('apply_scope', {}).get('removed_guests', {}).values():
+        node = inventory['nodes'].get(identity['node_name'], {})
+        if not node.get('online') or node.get('draining'):
+            raise PlacementError('Reviewed deletion node is offline or draining; restage.')
     for placement in prepared['placements']:
         resolved = placement['resolved']
         node = inventory['nodes'].get(resolved['node_name'], {})
@@ -964,6 +989,10 @@ def finish_apply(path, prepared, *, succeeded, api=None):
     api=api or ProxmoxAPI()
     if not succeeded:return
     actual=applied_resources(path)
+    from crange_apply_scope import verify_untouched
+    verify_untouched(prepared, actual)
+    if any(key in actual for key in prepared.get('apply_scope', {}).get('removed_guests', {})):
+        raise PlacementError('Reviewed guest deletion is incomplete; reservations retained.')
     record_file=path/'crange-applied-placements.json'
     previous=json.loads(record_file.read_text()) if record_file.exists() else {}
     record={key:value for key,value in previous.items() if key in actual
@@ -1032,7 +1061,7 @@ def reconcile_applied_reservations(path, *, api=None):
             # exist at their reviewed node in Terraform state, have project
             # ownership in PVE, and have no active provider task.
             prepared = {'plan_id': manifest.stem, 'placements': record['placements'],
-                        'requests': allocations}
+                        'requests': allocations, **({'apply_scope': record['apply_scope']} if 'apply_scope' in record else {})}
             finish_apply(path, prepared, succeeded=True, api=api)
             record.update(reservation_state='released', reservation_reconciled_at=time.time(),
                           reservation_reconciliation='exact_applied_state_and_terminal_provider_tasks')
@@ -1115,7 +1144,7 @@ def required_preparations(path, cfg, *, api=None):
     for reservation in pending:
         if reservation['node_name'] in working['nodes'] and reservation['datastore_id'] in working['nodes'][reservation['node_name']]['storages']:
             consume(reservation['node_name'],reservation['datastore_id'],reservation)
-    fills=[];planned_caches=set()
+    fills=[];planned_caches=set();cache_demands={}
     for row in sorted(new,key=lambda r:(r['image'] or '',r['resource_key'])):
         image=catalog['images'].get(row['image'])
         if not image:raise PlacementError(f'{row["resource_key"]}: publish an approved immutable image before staging.')
@@ -1130,6 +1159,8 @@ def required_preparations(path, cfg, *, api=None):
             if not node.get('online'):reasons.append('node-offline')
             if node.get('draining'):reasons.append('node-draining')
             if node_name not in policy.get('allowed_nodes',[]):reasons.append('node-excluded-by-policy')
+            if not workload_node_allowed(policy, node_name, row['resource_key'], row['kind']):
+                reasons.append('node-reserved-for-routers')
             if intent.get('pinned_node',node_name)!=node_name or node_name not in intent.get('allowed_nodes',policy['allowed_nodes']):
                 reasons.append('placement-intent-excludes-node')
             if row['kind'] not in node.get('guest_types',[]):reasons.append('guest-type-not-accepted')
@@ -1147,9 +1178,17 @@ def required_preparations(path, cfg, *, api=None):
                 already=(row['image'],node_name,storage_id) in planned_caches
                 cache_demand={'memory_mb':0,'cpu_cores':0,'disk_gb':0}
                 if not replicas and not already:
-                    source=next((r for r in image.get('replicas',[]) if r['state']=='ready' and r.get('template_id')),None)
-                    config=api.request('GET',f'/nodes/{source["node"]}/{"qemu" if row["kind"]=="vm" else "lxc"}/{source["template_id"]}/config') if source else {}
-                    cache_demand=required_capacity(image,source_config=config)
+                    if row['image'] not in cache_demands:
+                        config={}
+                        if not (image.get('probe_resources') or (image.get('memory_mb') and image.get('cpu_cores'))):
+                            source=next((r for r in image.get('replicas',[]) if r['state']=='ready'
+                                and r.get('template_id') and working['nodes'].get(r['node'],{}).get('online')),None)
+                            if source:
+                                config=api.request('GET',f'/nodes/{source["node"]}/{"qemu" if row["kind"]=="vm" else "lxc"}/{source["template_id"]}/config')
+                        # Published sizing is sufficient for an archived image;
+                        # its original template host need not still be online.
+                        cache_demands[row['image']]=required_capacity(image,source_config=config)
+                    cache_demand=cache_demands[row['image']]
                 peak = preparation_peak_capacity(cache_demand, demand)
                 total = {key: peak[key] for key in demand}
                 profile=template_profile(path,row)

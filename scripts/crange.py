@@ -1106,6 +1106,9 @@ def cmd_plan(args: argparse.Namespace) -> None:
             blockers = staging_blockers(detail, json_config(path))
             if getattr(args, 'staging', False) and blockers:
                 raise CrangeError('Staging plan would affect resources outside staging: ' + ', '.join(blockers))
+            from crange_apply_scope import reviewed_distribution
+            from crange_scheduling import applied_resources
+            placement = reviewed_distribution(placement, detail, applied_resources(path))
             print("\nPlan review:")
             if not changes:
                 print("No resource changes.")
@@ -1136,6 +1139,8 @@ def cmd_plan(args: argparse.Namespace) -> None:
                           'placements': placement['placements'] if placement else [],
                           'reservation_ids': placement['reservation_ids'] if placement else [],
                           'policy_revision': placement['policy_revision'] if placement else None}
+                if placement:
+                    record['apply_scope'] = placement['apply_scope']
                 if release_teams:
                     record['release_teams'] = sorted(map(str, release_teams))
                 if network_foundation:
@@ -1150,7 +1155,7 @@ def cmd_plan(args: argparse.Namespace) -> None:
                     json.dump(record, stream, indent=2)
                 from crange_scheduling import atomic_json
                 project_plan_manifest = path / '.crange-plans' / f'{plan_id}.json'
-                atomic_json(project_plan_manifest, {k:record[k] for k in ('plan_id','created','changes','placements','reservation_ids','policy_revision','bootstrap','bootstrap_node','bootstrap_nodes','bootstrap_router_nodes','bootstrap_networks','network_foundation','release_teams') if k in record},0o640)
+                atomic_json(project_plan_manifest, {k:record[k] for k in ('plan_id','created','changes','placements','reservation_ids','policy_revision','apply_scope','bootstrap','bootstrap_node','bootstrap_nodes','bootstrap_router_nodes','bootstrap_networks','network_foundation','release_teams') if k in record},0o640)
                 replaced = (placement or {}).get('replaced_reviewed_plan_ids', [])
                 if replaced:
                     from crange_scheduling import DATA
@@ -1245,7 +1250,15 @@ def cmd_apply_saved(args: argparse.Namespace, path: Path) -> None:
         raise CrangeError('Saved plan replaces resources: ' + ', '.join(replacements))
     from crange_scheduling import begin_apply, finish_apply, node_locks
     placement = record.get('distribution')
+    if placement:
+        if not placement.get('apply_scope'):
+            raise CrangeError('Saved plan predates scoped apply verification; review a fresh plan.')
+        from crange_apply_scope import reviewed_distribution
+        from crange_scheduling import applied_resources
+        detail = json.loads(tf_run(path, ['show', '-json', str(plan)], capture=True).stdout)
+        placement = reviewed_distribution(placement, detail, applied_resources(path))
     nodes = {p['resolved']['node_name'] for p in (placement or {}).get('placements', [])}
+    nodes.update(identity['node_name'] for identity in (placement or {}).get('apply_scope', {}).get('removed_guests', {}).values())
     retiring = []
     if getattr(args, 'release_teams', None):
         from crange_release_retire import retirements
@@ -1264,7 +1277,7 @@ def cmd_apply_saved(args: argparse.Namespace, path: Path) -> None:
     record['applied_at'] = datetime.now(timezone.utc).isoformat()
     manifest.write_text(json.dumps(record, indent=2) + '\n')
     from crange_scheduling import atomic_json
-    atomic_json(path / '.crange-plans' / f'{args.plan_id}.json', {k:record[k] for k in ('plan_id','created','changes','placements','reservation_ids','policy_revision','applied_at','bootstrap','bootstrap_node','bootstrap_nodes','bootstrap_router_nodes','bootstrap_networks','network_foundation') if k in record},0o640)
+    atomic_json(path / '.crange-plans' / f'{args.plan_id}.json', {k:record[k] for k in ('plan_id','created','changes','placements','reservation_ids','policy_revision','apply_scope','applied_at','bootstrap','bootstrap_node','bootstrap_nodes','bootstrap_router_nodes','bootstrap_networks','network_foundation') if k in record},0o640)
     if record.get('network_foundation'):
         args.network_foundation_applied = True
         cmd_configure_network_foundation(args, record['network_foundation'])

@@ -12,7 +12,7 @@ from pathlib import Path
 from crange_distribution import (DistributionError, PROBE_POOL, FileJournal,
     _owned, _require_probe_pool, _source_config_identity, _sealed_windows_source_volumes, _source_capacity,
     capture_source_identity, export_image, SSHVolumeHasher)
-from crange_placement import ReservationLedger
+from crange_placement import ReservationLedger, workload_node_allowed
 from crange_scheduling import CONFIG, DATA, atomic_json, discover, node_locks, read_settings
 
 
@@ -538,6 +538,8 @@ def capture_policy(node, profile, policy_override=None, *, kind="vm"):
         raise DistributionError('Release capture requires a tested approved QGA-enabled VM profile; rebuild staging with that profile first.')
     if not policy.get('enabled') or node not in policy.get('allowed_nodes', []):
         raise DistributionError('Release capture node is not enabled by administrator policy.')
+    if not workload_node_allowed(policy, node, 'capture:probe', kind):
+        raise DistributionError('Release capture destination is reserved for router containers.')
     bridge = policy.get('capture_isolated_bridge')
     if bridge not in policy.get('isolated_bridges', []) or not re.fullmatch(r'[A-Za-z0-9_-]{1,15}', str(bridge)):
         raise DistributionError('Configure an approved capture_isolated_bridge before capture.')

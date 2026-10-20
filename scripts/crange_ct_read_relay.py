@@ -137,6 +137,14 @@ def validate_request(value, config, peer_uid):
                 not isinstance(kind, str) or kind not in ('lxc', 'qemu') or
                 type(vmid) is not int or vmid < 100):
             raise ValueError('Unsupported offline config snapshot scope.')
+        inventory_nodes = config.get('offline_config_inventory_nodes', [])
+        if (not isinstance(inventory_nodes, list) or
+                any(not isinstance(node, str) or node not in {f'proxmox{i}' for i in range(1, 7)} for node in inventory_nodes)):
+            raise ValueError('Invalid protected offline inventory node policy.')
+        if guest_node in inventory_nodes:
+            # This authorizes only sanitized capacity metadata. host_read proves
+            # current cluster membership, quorum and the exact offline identity.
+            return reader, vmid, 'offline-config-snapshot', None
         allowed = config.get('offline_config_guests', {}).get(guest_node, {}).get(str(vmid))
         if (not isinstance(allowed, dict) or allowed.get('kind') != kind or
                 not isinstance(allowed.get('required_tags'), list) or
@@ -253,15 +261,25 @@ def _configured_disk_bytes(config):
 def offline_config_snapshot(request, policy, *, get, read_bytes, now=None):
     """Return sanitized configured limits after exact before/after identity checks."""
     guest_node, kind, vmid = request['guest_node'], request['kind'], request['vmid']
-    allow = policy['offline_config_guests'][guest_node][str(vmid)]
+    inventory_mode = guest_node in policy.get('offline_config_inventory_nodes', [])
+    allow = policy.get('offline_config_guests', {}).get(guest_node, {}).get(str(vmid), {})
+    if not inventory_mode and (allow.get('kind') != kind or not allow.get('required_tags')):
+        raise ValueError('Guest is outside the protected offline snapshot policy.')
+    def require_quorum():
+        rows = get('/cluster/status')
+        clusters = [row for row in rows if row.get('type') == 'cluster']
+        if len(clusters) != 1 or clusters[0].get('quorate') != 1:
+            raise ValueError('Offline capacity inventory requires cluster quorum.')
+    if inventory_mode:
+        require_quorum()
     nodes_before = get('/nodes')
     node_rows = [row for row in nodes_before if row.get('node') == guest_node]
     if len(node_rows) != 1 or node_rows[0].get('status') != 'offline':
         raise ValueError('Offline config snapshot requires the exact guest node to be offline.')
     resources_before = get('/cluster/resources', '--type', 'vm')
     identity_before = _resource_identity(resources_before, guest_node, kind, vmid)
-    required = set(allow['required_tags'])
-    resource_tags = set(str(identity_before.get('tags') or '').split(';'))
+    required = set(allow.get('required_tags', []))
+    resource_tags = set(filter(None, str(identity_before.get('tags') or '').split(';')))
     if not required <= resource_tags:
         raise ValueError('Cluster resource ownership tags do not match the offline snapshot allowlist.')
     config_dir = 'qemu-server' if kind == 'qemu' else 'lxc'
@@ -273,16 +291,26 @@ def offline_config_snapshot(request, policy, *, get, read_bytes, now=None):
         raise ValueError('Offline guest config encoding is invalid.') from exc
     config = {}
     for line in text.splitlines():
+        if line.strip().startswith('['):
+            # Snapshot sections contain historical copies, not active limits.
+            break
         if not line or line.lstrip().startswith('#') or ':' not in line:
             continue
         key, value = line.split(':', 1)
         key = key.strip()
+        if key not in ('cores', 'sockets', 'memory', 'tags', 'template') and not re.fullmatch(
+                r'(?:scsi|sata|virtio|ide|efidisk|tpmstate|mp)\d+|rootfs', key):
+            # LXC permits repeated low-level settings (e.g. mount entries).
+            # They are neither capacity fields nor part of this response.
+            continue
         if key in config:
             raise ValueError('Offline guest config has duplicate fields.')
         config[key] = value.strip()
-    configured_tags = set(config.get('tags', '').split(';'))
+    configured_tags = set(filter(None, config.get('tags', '').split(';')))
     if not required <= configured_tags:
         raise ValueError('Shared config ownership tags do not match the offline snapshot allowlist.')
+    if inventory_mode and resource_tags != configured_tags:
+        raise ValueError('Offline capacity inventory tags differ from shared configuration.')
     template = config.get('template', '0') == '1'
     def positive_number(field, default=None):
         value = config.get(field, default)
@@ -310,10 +338,14 @@ def offline_config_snapshot(request, policy, *, get, read_bytes, now=None):
     if (len(node_after) != 1 or node_after[0].get('status') != 'offline' or
             identity_before != identity_after or raw_before != raw_after):
         raise ValueError('Offline node or shared guest config changed during snapshot.')
+    if inventory_mode:
+        require_quorum()
     import hashlib
     captured_at = time.time() if now is None else now
     return {'guest_node': guest_node, 'kind': kind, 'vmid': vmid, 'status': 'offline',
-            'tags': sorted(required), 'template': template, 'memory_bytes': memory_bytes,
+            'tags': sorted(configured_tags if inventory_mode else required),
+            **({'scope': 'cluster-capacity'} if inventory_mode else {}),
+            'template': template, 'memory_bytes': memory_bytes,
             'cpu_cores': float(cpu_cores), 'disk_bytes': disk_bytes,
             'config_sha256': hashlib.sha256(raw_before).hexdigest(), 'captured_at': captured_at}
 

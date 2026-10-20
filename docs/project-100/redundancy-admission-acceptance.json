@@ -1,0 +1,30 @@
+{
+  "discovery_seconds": 112.233,
+  "verified_at": 1792452677.491698,
+  "router_only_nodes": [
+    "proxmox1"
+  ],
+  "proxmox2_regular_workloads_allowed": true,
+  "online_nodes": [
+    "proxmox2",
+    "proxmox3",
+    "proxmox4",
+    "proxmox5",
+    "proxmox6"
+  ],
+  "offline_nodes": [
+    "proxmox1"
+  ],
+  "router_bootstrap_candidates": [
+    "proxmox1",
+    "proxmox2",
+    "proxmox3",
+    "proxmox5",
+    "proxmox6"
+  ],
+  "dry_run_router_target": "proxmox6",
+  "dry_run_datastore": "local-hdd",
+  "provider_mutations": false,
+  "new_reservations_created": false,
+  "policy_revision": "container-cache-04e01dec55fd4bca86b186ad476051fa+network-b97ac6c00b78+network-59c090aff3c4+network-31924344f79d+network-d5db2e231472+network-1a07f519280c+network-b95d95503cf1+network-050cdf4a9afa+roles-p1-router-only-v1"
+}

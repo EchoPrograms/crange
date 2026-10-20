@@ -3,6 +3,35 @@
 Updated October 19, 2026 (UTC). Historical diagnostics and job evidence are in
 [platform-progress.md](platform-progress.md).
 
+## October 19 — redundancy implementation in progress
+
+The owner clarified that only Proxmox1 should be limited to routers; Proxmox2
+remains available for normal workloads. Admission now enforces that role across
+new scenario/jump-box placement, installers and capture destinations. Automatic
+router bootstrap can ignore an offline unused candidate instead of requiring
+all candidate nodes to be online. All 26 modeled zero-to-three non-core failure
+sets pass new router/scenario placement checks with available images/capacity.
+The full Python suite ran 1,077 cases successfully, with one skipped.
+The protected offline capacity reader now supports unrelated services as well as
+lab guests, withholding raw configuration and checking quorum and exact offline
+identity. This removes the project-specific allowlist from capacity discovery.
+Cache planning now uses published image sizing without requiring the original
+template host to be online. A live read-only admission check discovered the
+remaining nodes and selected Proxmox6/local-hdd for a new router; it created no
+guests or reservations. Discovery took 112 seconds, so its latency still needs
+attention. See [admission acceptance](redundancy-admission-acceptance.json).
+
+The reviewed quorum design gives Proxmox4 two votes and all other nodes one:
+seven expected votes, quorum four. Corosync accepted the candidate configuration.
+The change is live at configuration version 23 and verified on all five online
+members; no host networking or node power state was changed. See
+[quorum acceptance](redundancy-quorum-acceptance.json). This does not establish
+router HA or end-to-end creation during outages. Scoped Terraform admission and
+completion are now deployed with unchanged-team-state verification and fewer
+router dependencies; live outage review is in progress. Safe creation retries
+and fenced router runtime recovery remain unfinished. See
+[redundancy implementation status](../redundancy.md).
+
 ## October 19 — staging snapshot and power acceptance
 
 The staging CI container (CT124 on Proxmox2, 10.100.254.50) passed actual
@@ -52,7 +81,7 @@ confirmed this was not planned maintenance. Tailscale diagnostic ping also
 failed. The remaining five nodes retain quorum. The reviewed workstation plan
 contained guest changes on Proxmox6, no host network changes or node reboots.
 Root cause remains unproven until console/recovered system logs are available.
-No quorum overrides, host network changes, or forced guest migrations were made.
+During that outage investigation, no quorum overrides, host network changes, or forced guest migrations were made.
 
 The protected controller API gateway now verifies cluster identity and quorum
 before failing over to another configured cluster member. Actual reads succeeded

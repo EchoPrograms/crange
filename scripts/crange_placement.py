@@ -26,6 +26,20 @@ def _number(value, label, minimum=0):
     return value
 
 
+def workload_node_allowed(policy, node_name, resource_key, kind):
+    """Restrict new workload admission without moving existing allocations."""
+    restricted = policy.get('router_only_nodes', [])
+    if (not isinstance(restricted, list) or
+            any(not isinstance(name, str) or not name for name in restricted) or
+            len(restricted) != len(set(restricted)) or
+            not set(restricted) <= (set(policy.get('allowed_nodes', [])) |
+                                    set(policy.get('expected_cluster_nodes', [])))):
+        raise PlacementError('router_only_nodes must be distinct enrolled cluster node names')
+    return (node_name not in restricted or
+            (kind == 'container' and isinstance(resource_key, str) and
+             resource_key.startswith('router:')))
+
+
 def capacity_window(node, policy, node_name, storage=None, clone_mode='linked'):
     """Configured commitment limits with a live physical-pressure gate.
 
@@ -175,6 +189,8 @@ def schedule_batch(requests, inventory, catalog, policy, reservations=(), now=No
                 allowed = intent.get('allowed_nodes', policy['allowed_nodes'])
                 if name not in policy['allowed_nodes'] or name not in allowed or intent.get('pinned_node', name) != name:
                     raise PlacementError('excluded by hard node constraint')
+                if not workload_node_allowed(policy, name, r['resource_key'], r['kind']):
+                    raise PlacementError('node reserved for router containers')
                 if not node.get('online') or node.get('draining'):
                     raise PlacementError('node offline or draining')
                 if node.get('load', 0) > policy.get('max_load', 1):
@@ -311,6 +327,8 @@ class ReservationLedger:
             raise PlacementError('stale capacity inventory; refresh before creating an installer')
         node = inventory.get('nodes', {}).get(node_name, {})
         storage = node.get('storages', {}).get(datastore_id, {})
+        if not workload_node_allowed(policy, node_name, 'installer:' + build_id, 'vm'):
+            raise PlacementError('installer node is reserved for router containers')
         if (node_name not in policy.get('allowed_nodes', []) or not node.get('online') or
                 node.get('draining') or node.get('load', 0) > policy.get('max_load', 1) or
                 not node.get('management_verified')):

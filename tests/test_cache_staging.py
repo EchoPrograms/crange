@@ -14,6 +14,35 @@ from crange_jobs import command
 from test_placement import fixtures
 
 class CacheStagingTests(unittest.TestCase):
+    def test_archive_cache_preview_does_not_depend_on_offline_original_template(self):
+        from crange_distribution import DistributionError
+        from unittest.mock import Mock
+        for published_sizing in (True, False):
+            with self.subTest(published_sizing=published_sizing):
+                _,inv,cat,pol=fixtures();pol['enabled']=True;inv['captured_at']=time.time()
+                inv['nodes']['n1']['online']=False
+                image=cat['images']['base-v1'];image['disk_gb']=20
+                image['replicas']=[image['replicas'][0]]
+                if published_sizing:image.update(memory_mb=2048,cpu_cores=2)
+                row={'resource_key':'vm:web','image':'base-v1','kind':'vm',
+                     'box':{'template':'base','node_name':'auto','memory_mb':4096,'cores':2},
+                     'reference':{'profile':{'cpu_type':'x86-64-v2-AES'}},'networks':['p003t254']}
+                api=Mock();api.request.side_effect=AssertionError('Offline template must not be contacted')
+                with tempfile.TemporaryDirectory() as directory:
+                    path=Path(directory)/'project-003';path.mkdir()
+                    with patch.object(scheduling,'DATA',Path(directory)/'distribution'), \
+                         patch.object(scheduling,'read_settings',return_value=(pol,cat)), \
+                         patch.object(scheduling,'declarations',return_value=[row]), \
+                         patch.object(scheduling,'applied_resources',return_value={}), \
+                         patch.object(scheduling,'discover',return_value=inv):
+                        if published_sizing:
+                            fills=scheduling.required_preparations(path,{'project_id':3},api=api)
+                            self.assertEqual([fill['node'] for fill in fills],['n2'])
+                        else:
+                            with self.assertRaisesRegex(DistributionError,'defensible'):
+                                scheduling.required_preparations(path,{'project_id':3},api=api)
+                api.request.assert_not_called()
+
     def test_acceptance_policy_requires_root_owned_exact_node_and_storage(self):
         from crange_cache_jobs import acceptance_policy
         from crange_distribution import DistributionError

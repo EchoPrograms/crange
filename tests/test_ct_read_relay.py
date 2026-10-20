@@ -416,6 +416,44 @@ class RelayTests(unittest.TestCase):
         self.assertTrue(snapshot['template'])
         self.assertEqual(snapshot['disk_bytes'],20*1024**3)
 
+    def test_cluster_capacity_scope_accounts_unrelated_offline_guests_without_exposing_config(self):
+        policy={'peer_uid':101000,'offline_config_reader_node':'proxmox4',
+                'offline_config_inventory_nodes':['proxmox1']}
+        request={'node':'proxmox4','guest_node':'proxmox1','kind':'lxc','vmid':100,
+                 'command':'offline-config-snapshot'}
+        validate_request(request,policy,101000)
+        for mutation in ({'path':'/etc/shadow'}, {'guest_node':'proxmox4'}, {'vmid':True}):
+            with self.subTest(mutation=mutation), self.assertRaises(ValueError):
+                validate_request({**request,**mutation},policy,101000)
+        with self.assertRaises(ValueError):validate_request(request,policy,0)
+        resource={'node':'proxmox1','type':'lxc','vmid':100,'tags':'home-lan;monitoring','status':'unknown'}
+        def get(path,*args):
+            return ({'/nodes':[{'node':'proxmox1','status':'offline'}],
+                     '/cluster/resources':[resource],
+                     '/cluster/status':[{'type':'cluster','quorate':1}]})[path]
+        raw=(b'cores: 2\nmemory: 4000\nrootfs: local-lvm:vm-100-disk-0,size=70G\n'
+             b'tags: home-lan;monitoring\ndescription: MUST_NOT_RETURN_THIS\n'
+             b'lxc.mount.entry: first\nlxc.mount.entry: second\n'
+             b'[old-snapshot]\nmemory: 32000\ncores: 8\n')
+        snapshot=offline_config_snapshot(request,policy,get=get,read_bytes=lambda _:raw,now=1000)
+        self.assertEqual(snapshot['scope'],'cluster-capacity')
+        self.assertEqual(snapshot['memory_bytes'],4000*1024**2)
+        self.assertEqual(snapshot['cpu_cores'],2)
+        self.assertEqual(snapshot['disk_bytes'],70*1024**3)
+        self.assertNotIn('MUST_NOT_RETURN_THIS',json.dumps(snapshot))
+        with self.assertRaisesRegex(ValueError,'duplicate fields'):
+            offline_config_snapshot(request,policy,get=get,
+                read_bytes=lambda _:raw.replace(b'memory: 4000',b'memory: 4000\nmemory: 8000'),now=1000)
+        for replacement in ([{'type':'cluster','quorate':0}], []):
+            def no_quorum(path,*args):return replacement if path=='/cluster/status' else get(path,*args)
+            with self.assertRaisesRegex(ValueError,'quorum'):
+                offline_config_snapshot(request,policy,get=no_quorum,read_bytes=lambda _:raw,now=1000)
+        resource['tags']='different'
+        with self.assertRaisesRegex(ValueError,'tags differ'):
+            offline_config_snapshot(request,policy,get=get,read_bytes=lambda _:raw,now=1000)
+        with self.assertRaisesRegex(ValueError,'protected offline snapshot policy'):
+            offline_config_snapshot(request,{},get=get,read_bytes=lambda _:raw,now=1000)
+
     def test_offline_snapshot_dispatch_is_local_fixed_read_and_never_ssh_or_exec(self):
         from unittest.mock import patch
         policy={'peer_uid':101000,'offline_config_reader_node':'proxmox4',
