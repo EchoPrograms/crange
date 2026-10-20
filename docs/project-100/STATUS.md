@@ -3,6 +3,40 @@
 Updated October 20, 2026 (UTC). Historical diagnostics and job evidence are in
 [platform-progress.md](platform-progress.md).
 
+## October 20 — remaining workstations deploying during the node outage
+
+Release health job `a56c0959c0974a6e87a911bd2a9cec7e` passed all 18 servers in
+Teams 2, 3 and 4. The interrupted older workstation apply had left 13 declared
+guests missing. Project-wide review now uses a local comparison to select
+changed resources, followed by a normally refreshed saved provider plan; it does
+not refresh unrelated guests on offline Proxmox1. Unknown resource types still
+block review, and an empty comparison retains a non-guest target.
+
+The first review exposed boot-order drift from an advanced base profile. The
+pinned provider would reboot the existing Windows guests to remove the empty
+installer drive, so that plan was not applied. Existing VM boot order is now
+retained alongside placement and machine type. The next normal dashboard review,
+`f6fabee6549c4500b3045ea8585da15b`, succeeded in 95.5 seconds and proposed only
+13 workstation creates, no updates/replacements/deletions. Its saved scope
+fingerprints all 50 prior guests. Apply job `0177140121fc4850ba16cbe3473b3528`
+is running from plan `e783624a740e453fe67b6b5d5ee7e9f1`. Do not replay that
+plan or claim workstation/service acceptance until configuration checks finish.
+The Python suite passes 1,099 tests, one skipped; changed Terraform files pass
+format checking, and the live review validates the updated resource schema.
+
+The dedicated `crange-router-ha` NFS disk store now runs on Proxmox4, backed by
+a new 96 GiB thin volume. No existing disks were formatted. Maximum volume growth
+still leaves about 130.5 GiB of physical pool headroom at installation time.
+All five online nodes passed shared-file read/write checks; Proxmox1 is configured
+as a client but could not be tested. See [storage evidence](router-core-storage-acceptance.json).
+A network-isolated disposable CT is testing native HA migration; production
+router disks/enrollment and Terraform node adoption remain unfinished.
+
+Runtime failover remains **routers only**, as explicitly confirmed by the owner.
+Ordinary team guests stay on their assigned nodes. Proxmox1 is still unreachable;
+its two unmanaged router identities are not recovered elsewhere without positive
+fencing or a verified shutdown. That also limits Team 1/5 network acceptance.
+
 ## October 20 — account-menu alignment deployed
 
 Preferences and Logout inherited 3.5-pixel native button margins, shifting them

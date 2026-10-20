@@ -604,6 +604,10 @@ def freeze(row, live, previous=None):
     values['node_name'] = live['node_name']
     if live.get('machine'):
         values['machine'] = live['machine']
+    if row.get('kind') == 'vm' and live.get('boot_order'):
+        # Advancing a base profile must not reboot existing guests merely to
+        # remove an empty installer drive from their boot order.
+        values['boot_order'] = copy.deepcopy(live['boot_order'])
     clone = live.get('clone') or []
     if clone:
         values.update(template_id=clone[0].get('vm_id'), template_node=clone[0].get('node_name') or live['node_name'],

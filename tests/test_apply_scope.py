@@ -10,7 +10,7 @@ from unittest.mock import Mock, patch
 from types import SimpleNamespace
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'scripts'))
-from crange_apply_scope import guest_key, reviewed_distribution, verify_untouched
+from crange_apply_scope import guest_key, reviewed_distribution, verify_untouched, changed_project_targets
 from crange_placement import PlacementError
 import crange_scheduling as scheduling
 import crange
@@ -37,6 +37,14 @@ class ApplyScopeTests(unittest.TestCase):
         self.assertEqual(guest_key('module.project_router.proxmox_virtual_environment_container.router'), 'router:project')
         self.assertEqual(guest_key('module.scenario_box["test0.1.0-vm"].proxmox_virtual_environment_vm.scenario'), 'vm:test0.1.0-vm')
         self.assertIsNone(guest_key('module.team_router["1"].proxmox_virtual_environment_vm.router'))
+
+    def test_existing_vm_keeps_boot_order_when_base_profile_advances(self):
+        row = {'resource_key': 'vm:healthy', 'kind': 'vm'}
+        live = {'node_name': 'proxmox6', 'boot_order': ['sata0', 'ide2']}
+        frozen = scheduling.freeze(row, live)
+        self.assertEqual(frozen['resolved']['boot_order'], ['sata0', 'ide2'])
+        frozen['resolved']['boot_order'].pop()
+        self.assertEqual(live['boot_order'], ['sata0', 'ide2'])
 
     def test_plan_binding_excludes_unrelated_router_but_detects_state_drift(self):
         prepared, detail, actual = self.fixture()
@@ -161,6 +169,54 @@ class ApplyScopeTests(unittest.TestCase):
         self.assertNotIn('-refresh=false', plans[1])
         self.assertIn('-target=module.scenario_container["new"]', plans[1])
         self.assertNotIn('-target=module.scenario_container["offline"]', plans[1])
+
+    def test_project_comparison_preserves_deletion_and_network_changes_without_offline_noops(self):
+        detail = {'resource_changes': [
+            {'address': 'module.team_router["1"].proxmox_virtual_environment_container.router',
+             'change': {'actions': ['no-op']}},
+            {'address': 'module.jumpbox["new"].proxmox_virtual_environment_vm.jump',
+             'change': {'actions': ['create']}},
+            {'address': 'module.scenario_box["removed"].proxmox_virtual_environment_vm.scenario',
+             'change': {'actions': ['delete']}},
+            {'address': 'proxmox_sdn_vnet.team["2"]', 'change': {'actions': ['update']}},
+            {'address': 'data.unrelated.example', 'mode': 'data', 'change': {'actions': ['read']}}]}
+        self.assertEqual(changed_project_targets(detail), [
+            'module.jumpbox["new"]', 'module.scenario_box["removed"]',
+            'proxmox_sdn_vnet.team["2"]', 'proxmox_sdn_vnet.transit'])
+        self.assertEqual(changed_project_targets({'resource_changes': []}), ['proxmox_sdn_vnet.transit'])
+        detail['resource_changes'].append({'address': 'module.unowned.proxmox_virtual_environment_vm.vm',
+                                            'change': {'actions': ['create']}})
+        with self.assertRaisesRegex(PlacementError, 'unrecognized project resource'):
+            changed_project_targets(detail)
+
+    def test_project_command_refreshes_selected_new_guest_and_sdn_repair(self):
+        changed = {'address': 'module.jumpbox["new"].proxmox_virtual_environment_vm.jump',
+                   'change': {'actions': ['create'], 'before': None, 'after': {}}}
+        comparison = {'resource_changes': [
+            {'address': 'module.team_router["1"].proxmox_virtual_environment_container.router',
+             'change': {'actions': ['no-op']}}, changed]}
+        cfg = {'project_id': 100, 'custom_networks': {}}
+        def terraform(path, args, **kwargs):
+            if args[0] == 'show':
+                detail = comparison if 'scope-comparison.tfplan' in args[-1] else {'resource_changes': [changed]}
+                return SimpleNamespace(stdout=json.dumps(detail))
+            return SimpleNamespace(stdout='')
+        with tempfile.TemporaryDirectory() as directory, \
+             patch.object(crange, 'project_dir', return_value=Path(directory)), \
+             patch.object(crange, 'json_config', return_value=cfg), \
+             patch.object(scheduling, 'read_settings', return_value=({'enabled': False}, {})), \
+             patch.object(scheduling, 'prepare', return_value=None), \
+             patch('crange_templates.media_tf_overrides', return_value={}), \
+             patch.object(crange, 'tf_run', side_effect=terraform) as tf:
+            crange.cmd_plan(SimpleNamespace(project='100', retain=False, replace_sdn_applier=True))
+        plans = [call.args[1] for call in tf.call_args_list if call.args[1][0] == 'plan']
+        self.assertEqual(len(plans), 2)
+        self.assertIn('-refresh=false', plans[0])
+        self.assertNotIn('-refresh=false', plans[1])
+        self.assertIn('-target=module.jumpbox["new"]', plans[1])
+        self.assertNotIn('-target=module.team_router["1"]', plans[1])
+        self.assertIn('-target=proxmox_sdn_applier.apply', plans[1])
+        self.assertIn('-replace=proxmox_sdn_applier.apply', plans[1])
 
 
 if __name__ == '__main__':

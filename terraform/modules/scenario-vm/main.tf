@@ -30,7 +30,7 @@ resource "proxmox_virtual_environment_vm" "scenario" {
   bios          = var.template_profile.bios
   machine       = var.box.machine != null ? var.box.machine : var.template_profile.machine
   scsi_hardware = var.template_profile.scsi_hardware
-  boot_order    = var.template_profile.boot_order
+  boot_order    = var.box.boot_order != null ? var.box.boot_order : var.template_profile.boot_order
 
   clone {
     vm_id        = var.box.template_id

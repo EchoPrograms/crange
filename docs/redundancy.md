@@ -45,6 +45,13 @@ Approved image storage and existing image ownership are not rewritten.
   succeeded with Proxmox1 offline, no resource changes and all 50 existing guest
   states untouched. This is planning acceptance, not creation/failover proof.
   See [staging review evidence](project-100/redundancy-staging-review-acceptance.json).
+- Ordinary project review now uses the same two-step approach: a local comparison
+  selects only fixed project resource addresses, then a normally refreshed saved
+  provider plan reviews those changes. Bootstrap and selected-release boundaries
+  remain separate. Existing VM boot order is retained when a base profile advances,
+  avoiding unrelated reboots. A live dashboard review proposed only 13 missing
+  workstation creates and preserved all 50 existing guest state fingerprints.
+  Its apply is still in progress; this is not guest health or failover acceptance.
 - Six-node quorum is modeled with two votes for Proxmox4 and one for every other
   member. Seven expected votes require four present votes. Proxmox4 plus any two
   other nodes has four, so all 26 combinations of zero through three non-core
@@ -89,8 +96,15 @@ native fencing authority before allowing another instance of a router identity.
 The current `crange-library` NFS server is on Proxmox5, so it is not sufficient as
 the sole live router disk store under a three-non-core-node failure requirement.
 Router disks need storage on the designated surviving core, or another store
-with equivalent verified availability. Proxmox4 currently has free thin-pool
-space; no new export, volume move or HA enrollment has been performed.
+with equivalent verified availability. The operator-only
+`scripts/setup-core-router-storage.py` installed a dedicated 96 GiB thin volume
+and NFSv4.2 export on Proxmox4, with a fixed six-host client allowlist. It preserves
+existing volumes and refuses uncertain retries. All five online nodes passed
+shared read/write checks; Proxmox1 remains untested. See
+[storage evidence](project-100/router-core-storage-acceptance.json).
+Only a disposable, network-isolated container is enrolled for migration testing.
+No production router disk has been moved or enrolled, so production runtime
+recovery is not yet established.
 
 Provider v0.104.0 also makes a container's `node_name` replacement-only, and reads
 its configuration through the node recorded in Terraform state. Native HA

@@ -11,6 +11,7 @@ variable "resolved_placements" {
     disk_gb              = optional(number)
     image_id             = optional(string, "")
     machine              = optional(string)
+    boot_order           = optional(list(string))
   }))
   default = {}
   validation {

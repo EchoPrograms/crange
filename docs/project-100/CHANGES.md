@@ -1,5 +1,22 @@
 # Project 100 changes and fixes
 
+## 2026-10-20 — outage-safe project review and core router storage
+
+- Extended changed-resource review to ordinary infrastructure plans. The local
+  comparison only selects targets; the saved plan still refreshes selected
+  resources and checks untouched-state fingerprints before/after applying.
+- Retained existing VM boot order so an updated base profile does not reboot
+  healthy guests during an unrelated deployment. A live dashboard review now
+  proposes exactly the 13 missing workstation creates and no existing updates.
+- Added an operator-only, journaled core-router storage installer. It checks the
+  exact thin pool, physical headroom and quorum, refuses to format an existing
+  device, and never replays an interrupted installation. Proxmox4's new store
+  passed shared read/write checks on every online node. Production HA enrollment
+  and Terraform node adoption still require separate acceptance.
+- Verified all 18 release servers in Teams 2/3/4 through the normal health job.
+  The remaining workstation deployment is running; full lab readiness is not
+  yet established.
+
 ## 2026-10-20 — align Guacamole account-menu rows
 
 - Removed inherited native button margins from Preferences and Logout so their

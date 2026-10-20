@@ -9,6 +9,7 @@ variable "box" {
     datastore_id  = optional(string, "local-lvm")
     image_id      = optional(string, "")
     machine       = optional(string)
+    boot_order    = optional(list(string))
     node_name     = string
     template_id   = number
     template_node = string

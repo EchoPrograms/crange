@@ -38,6 +38,33 @@ def _digest(value):
     return hashlib.sha256(json.dumps(value, sort_keys=True, separators=(',', ':')).encode()).hexdigest()
 
 
+def changed_project_targets(detail):
+    """Select a live review from a local comparison, never authorize an apply.
+
+    Unchanged guests need not be contacted just to create another guest while
+    their host is unavailable. Terraform still refreshes every selected change
+    and its dependencies in the subsequent saved plan. Accept only the fixed
+    project resources, including removed guests, and keep a nonempty target set
+    so a no-op comparison cannot accidentally request a full project refresh.
+    """
+    targets = {'proxmox_sdn_vnet.transit'}
+    roots = re.compile(
+        r'(?:proxmox_sdn_applier\.(?:apply|finalizer)|terraform_data\.sdn_revision|'
+        r'proxmox_sdn_vnet\.(?:transit|staging|(?:team|custom)\["[^"\\]+"\]))'
+    )
+    for resource in detail.get('resource_changes', []):
+        if resource.get('mode') == 'data' or resource.get('change', {}).get('actions') == ['no-op']:
+            continue
+        address = resource.get('address', '')
+        if guest_key(address):
+            targets.add(address.split('.proxmox_virtual_environment_', 1)[0])
+        elif roots.fullmatch(address):
+            targets.add(address)
+        else:
+            raise PlacementError('Local comparison contains an unrecognized project resource: ' + address)
+    return sorted(targets)
+
+
 def reviewed_distribution(prepared, detail, actual):
     """Exclude untouched guests without discarding or refreshing their state.
 

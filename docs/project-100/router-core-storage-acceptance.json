@@ -1,0 +1,53 @@
+{
+  "checked_at": "2026-10-20T13:19:00Z",
+  "core_node": "proxmox4",
+  "storage": "crange-router-ha",
+  "volume": "pve/crange_router_ha",
+  "size_gib": 96,
+  "filesystem_uuid": "13f2a585-99f7-4e53-af70-47ebed561bf2",
+  "physical_pool_headroom_before_gib": 226.54,
+  "physical_pool_headroom_after_max_volume_growth_gib": 130.54,
+  "mount": "/srv/crange-router-ha",
+  "server": "10.0.0.104",
+  "nfs_version": "4.2",
+  "nfs_mount_policy": "hard",
+  "client_allowlist": [
+    "10.0.0.101",
+    "10.0.0.102",
+    "10.0.0.103",
+    "10.0.0.104",
+    "10.0.0.105",
+    "10.0.0.106"
+  ],
+  "read_write_checks": [
+    {
+      "node": "proxmox2",
+      "passed": true
+    },
+    {
+      "node": "proxmox3",
+      "passed": true
+    },
+    {
+      "node": "proxmox4",
+      "passed": true
+    },
+    {
+      "node": "proxmox5",
+      "passed": true
+    },
+    {
+      "node": "proxmox6",
+      "passed": true
+    }
+  ],
+  "offline_node": "proxmox1",
+  "offline_node_tested": false,
+  "production_router_disks_moved": false,
+  "production_routers_enrolled_in_ha": false,
+  "operator_receipt": "/root/crange-resilience/router-storage/receipt.json",
+  "boundaries": [
+    "This verifies shared storage, not production runtime failover.",
+    "Existing router identities on unreachable Proxmox1 were not started or recovered elsewhere."
+  ]
+}

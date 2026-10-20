@@ -1093,6 +1093,17 @@ def cmd_plan(args: argparse.Namespace) -> None:
                 except ValueError as exc:
                     raise CrangeError(str(exc)) from exc
                 plan_args += ['-target=' + target for target in targets]
+            elif not bootstrap_node:
+                from crange_apply_scope import changed_project_targets
+                comparison = Path(tmp) / 'scope-comparison.tfplan'
+                print('Selecting changed project resources from local state; live provider review follows.', flush=True)
+                tf_run(path, ['plan', '-input=false', '-refresh=false', '-out', str(comparison),
+                              '-var-file', str(overrides)])
+                comparison_detail = json.loads(tf_run(path, ['show', '-json', str(comparison)], capture=True).stdout)
+                targets = changed_project_targets(comparison_detail)
+                if getattr(args, 'replace_sdn_applier', False):
+                    targets = sorted(set(targets) | {'proxmox_sdn_applier.apply'})
+                plan_args += ['-target=' + target for target in targets]
             if getattr(args, 'replace_sdn_applier', False):
                 plan_args.append('-replace=proxmox_sdn_applier.apply')
             tf_run(path, plan_args)
