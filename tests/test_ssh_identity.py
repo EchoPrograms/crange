@@ -62,6 +62,18 @@ class GuestSSHIdentityTests(unittest.TestCase):
             self.assertEqual(refresh_created_guests(path, 254, home=home, output=guests, api=api), [])
             api.request.assert_not_called()
 
+    def test_post_apply_scope_does_not_contact_another_created_staging_guest(self):
+        with tempfile.TemporaryDirectory() as directory:
+            home, path, manifest, guests, api = self.setup_case(directory)
+            guests['scenario_containers']['value']['team'].update(team_id=254, address='10.100.254.41')
+            api.request.side_effect = lambda method, endpoint: ({'tags': 'p100;p100t254;scenario',
+                'net0': 'bridge=p100t254,ip=10.100.254.40/24'} if endpoint.endswith('/124/config')
+                else self.fail('Unrelated offline guest contacted'))
+            refreshed = refresh_created_guests(path, 254, home=home, output=guests, api=api,
+                runner=Mock(), resource_keys=['container:stage'])
+            self.assertEqual(refreshed, ['10.100.254.40'])
+            api.request.assert_called_once_with('GET', '/nodes/proxmox1/lxc/124/config')
+
     def custom_router_case(self, directory):
         home, path, manifest, guests, api = self.setup_case(directory)
         resource = 'module.custom_router["test-primary"].router'

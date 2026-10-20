@@ -6,7 +6,7 @@ import re
 import subprocess
 
 
-def refresh_created_guests(path, network_id, *, api=None, output=None, home=None, runner=subprocess.run):
+def refresh_created_guests(path, network_id, *, api=None, output=None, home=None, runner=subprocess.run, resource_keys=None):
     from crange import ProxmoxAPI, output_json
     from crange_scheduling import atomic_json
     project = int(path.name.split('-')[-1])
@@ -31,6 +31,8 @@ def refresh_created_guests(path, network_id, *, api=None, output=None, home=None
         router_match = re.fullmatch(r'module\.custom_router\["([a-z0-9_-]+)"\]\..+', change['address'])
         if router_match:
             key = router_match[1]
+            if resource_keys is not None and 'router:custom:' + key not in resource_keys:
+                continue
             router = output.get('routers', {}).get('value', {}).get('custom_networks', {}).get(key)
             if not router or int(router.get('owner_team_id', -1)) != network_id:
                 continue
@@ -64,6 +66,8 @@ def refresh_created_guests(path, network_id, *, api=None, output=None, home=None
         field, kind, prefix = {'scenario_container': ('scenario_containers', 'lxc', 'container'),
                                'scenario_box': ('scenario_boxes', 'qemu', 'vm'),
                                'jumpbox': ('jump_boxes', 'qemu', 'jumpbox')}[module]
+        if resource_keys is not None and prefix + ':' + key not in resource_keys:
+            continue
         guest = output.get(field, {}).get('value', {}).get(key)
         if not guest or int(guest['team_id']) != network_id:
             continue

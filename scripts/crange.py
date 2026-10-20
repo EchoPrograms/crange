@@ -1285,6 +1285,9 @@ def cmd_apply_saved(args: argparse.Namespace, path: Path) -> None:
     record_release_apply(path)
     plan.unlink()
     record['applied_at'] = datetime.now(timezone.utc).isoformat()
+    from crange_apply_scope import guest_key
+    args.applied_guest_keys = sorted({key for item in record.get('changes', [])
+                                     if (key := guest_key(item['address'])) is not None})
     manifest.write_text(json.dumps(record, indent=2) + '\n')
     from crange_scheduling import atomic_json
     atomic_json(path / '.crange-plans' / f'{args.plan_id}.json', {k:record[k] for k in ('plan_id','created','changes','placements','reservation_ids','policy_revision','apply_scope','applied_at','bootstrap','bootstrap_node','bootstrap_nodes','bootstrap_router_nodes','bootstrap_networks','network_foundation') if k in record},0o640)
@@ -1479,10 +1482,10 @@ def cmd_configure_team(args: argparse.Namespace) -> None:
     if team != 254 and str(team) not in {str(item) for item in cfg.get("team_ids", [])}:
         raise CrangeError(f"Team {team} is not configured.")
     from crange_ssh_identity import refresh_created_guests
-    refreshed = refresh_created_guests(path, team)
+    resource_keys = getattr(args, 'guest_keys', None)
+    refreshed = refresh_created_guests(path, team, **({'resource_keys': resource_keys} if resource_keys is not None else {}))
     if refreshed:
         print("Refreshed SSH identities for newly applied guests: " + ", ".join(refreshed), flush=True)
-    cmd_route_sync(args)
     inventory_path = ROOT / "ansible" / "inventory" / "generated" / f"project-{int(args.project):03d}.json"
     run([sys.executable, str(ROOT / "scripts" / "generate-project-inventory.py"), "--terraform-dir", str(path), "--output", str(inventory_path)])
     try:
@@ -1491,6 +1494,29 @@ def cmd_configure_team(args: argparse.Namespace) -> None:
         router_groups = groups["routers"]["children"]
     except (OSError, json.JSONDecodeError, KeyError, TypeError) as exc:
         raise CrangeError(f"Cannot read generated project inventory: {exc}") from exc
+    if resource_keys is not None:
+        from crange_configure_scope import configuration_inventory
+        try:
+            inventory, needs_path = configuration_inventory(inventory, cfg, team, resource_keys)
+        except ValueError as exc:
+            raise CrangeError(str(exc)) from exc
+        if not needs_path:
+            print('No surviving guest configuration changes in the reviewed plan.', flush=True)
+            return
+        with tempfile.TemporaryDirectory(prefix='crange-configure-scope-') as directory:
+            private = Path(directory) / 'inventory.json'
+            private.write_text(json.dumps(inventory))
+            private.chmod(0o600)
+            scoped_args = argparse.Namespace(**{**vars(args), 'inventory_path': private})
+            cmd_route_sync(scoped_args)
+            _configure_team_inventory(scoped_args, cfg, team, inventory['all']['children'])
+        return
+    cmd_route_sync(args)
+    _configure_team_inventory(args, cfg, team, groups)
+
+
+def _configure_team_inventory(args, cfg, team, groups):
+    router_groups = groups['routers']['children']
     # The project router has the shared return routes; avoid touching other team routers.
     for host in router_groups.get("project_routers", {}).get("hosts", {}):
         ansible(args, "router-routes.yml", [host])
@@ -1514,7 +1540,8 @@ def cmd_configure_team(args: argparse.Namespace) -> None:
     ansible(args, "vm-swap.yml", [vm_group])
     if any(str(cfg.get("scenario_boxes", {}).get(values.get("crange_box_key"), {}).get("team_id")) == str(team)
            for values in groups.get("windows_guests", {}).get("hosts", {}).values()):
-        cmd_configure(argparse.Namespace(project=args.project, target="windows", yes=True, team_scope=team))
+        cmd_configure(argparse.Namespace(project=args.project, target="windows", yes=True, team_scope=team,
+                                        **({'inventory_path': args.inventory_path} if getattr(args, 'inventory_path', None) else {})))
 
 
 def enforce_staging_plan(detail: dict, cfg: dict) -> None:
@@ -1535,7 +1562,8 @@ def cmd_stage_deploy(args: argparse.Namespace) -> None:
         return
     print("Infrastructure applied. Phase 2/2: configuring routes, routers, and jump boxes", flush=True)
     try:
-        cmd_configure_team(argparse.Namespace(project=args.project, team=0, yes=True))
+        cmd_configure_team(argparse.Namespace(project=args.project, team=0, yes=True,
+                                             **({'guest_keys': args.applied_guest_keys} if hasattr(args, 'applied_guest_keys') else {})))
     except CrangeError as exc:
         raise CrangeError(f"Infrastructure deployment succeeded, but post-deploy configuration failed: {exc}") from exc
     print("Staging deployment and configuration completed.", flush=True)
@@ -1589,7 +1617,7 @@ def cmd_inventory(args: argparse.Namespace) -> None:
 
 def ansible(args: argparse.Namespace, playbook: str, limit: list[str], *, tags: list[str] | None = None) -> None:
     path = project_dir(args.project)
-    output = ROOT / "ansible" / "inventory" / "generated" / f"project-{int(args.project):03d}.json"
+    output = getattr(args, 'inventory_path', None) or ROOT / "ansible" / "inventory" / "generated" / f"project-{int(args.project):03d}.json"
     if not output.exists():
         raise CrangeError(f"Inventory is missing. Run: crange inventory {args.project}")
     try:
@@ -1758,8 +1786,9 @@ def cmd_configure(args: argparse.Namespace) -> None:
     path = project_dir(args.project)
     if not args.yes:
         raise CrangeError("Configuration applies Ansible changes; pass --yes after reviewing the playbook.")
-    output = ROOT / "ansible" / "inventory" / "generated" / f"project-{int(args.project):03d}.json"
-    run([sys.executable, str(ROOT / "scripts" / "generate-project-inventory.py"), "--terraform-dir", str(path), "--output", str(output)])
+    output = getattr(args, 'inventory_path', None) or ROOT / "ansible" / "inventory" / "generated" / f"project-{int(args.project):03d}.json"
+    if not getattr(args, 'inventory_path', None):
+        run([sys.executable, str(ROOT / "scripts" / "generate-project-inventory.py"), "--terraform-dir", str(path), "--output", str(output)])
     windows_inventory = None
     windows_credentials = {}
     windows_context = {}
