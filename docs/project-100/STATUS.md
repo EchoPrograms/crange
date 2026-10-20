@@ -11,7 +11,7 @@ new scenario/jump-box placement, installers and capture destinations. Automatic
 router bootstrap can ignore an offline unused candidate instead of requiring
 all candidate nodes to be online. All 26 modeled zero-to-three non-core failure
 sets pass new router/scenario placement checks with available images/capacity.
-The full Python suite ran 1,077 cases successfully, with one skipped.
+The full Python suite ran 1,079 cases successfully, with one skipped.
 The protected offline capacity reader now supports unrelated services as well as
 lab guests, withholding raw configuration and checking quorum and exact offline
 identity. This removes the project-specific allowlist from capacity discovery.
@@ -27,9 +27,12 @@ The change is live at configuration version 23 and verified on all five online
 members; no host networking or node power state was changed. See
 [quorum acceptance](redundancy-quorum-acceptance.json). This does not establish
 router HA or end-to-end creation during outages. Scoped Terraform admission and
-completion are now deployed with unchanged-team-state verification and fewer
-router dependencies; live outage review is in progress. Safe creation retries
-and fenced router runtime recovery remain unfinished. See
+completion are deployed with unchanged-team-state verification and fewer router
+dependencies. A live staging review now succeeds with Proxmox1 offline: the
+final plan has no resource changes and preserves all 50 existing guest states.
+See [staging review acceptance](redundancy-staging-review-acceptance.json).
+Actual creation/configuration still needs outage acceptance; post-deploy Ansible
+scope, safe creation retries and fenced router runtime recovery remain unfinished. See
 [redundancy implementation status](../redundancy.md).
 
 ## October 19 — staging snapshot and power acceptance

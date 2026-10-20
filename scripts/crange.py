@@ -1080,9 +1080,19 @@ def cmd_plan(args: argparse.Namespace) -> None:
                 from crange_rollouts import review_targets
                 plan_args += ['-target=' + target for target in review_targets(full_cfg, release_teams)]
             elif getattr(args, 'staging', False):
-                from crange_staging import staging_targets
+                from crange_staging import staging_targets, changed_staging_targets
                 state = json.loads(tf_run(path, ['show', '-json'], capture=True).stdout)
-                plan_args += ['-target=' + target for target in staging_targets(full_cfg, state)]
+                comparison = Path(tmp) / 'scope-comparison.tfplan'
+                print('Selecting changed staging resources from local state; live provider review follows.', flush=True)
+                tf_run(path, ['plan', '-input=false', '-refresh=false', '-out', str(comparison),
+                              '-var-file', str(overrides),
+                              *['-target=' + target for target in staging_targets(full_cfg, state)]])
+                comparison_detail = json.loads(tf_run(path, ['show', '-json', str(comparison)], capture=True).stdout)
+                try:
+                    targets = changed_staging_targets(comparison_detail, full_cfg)
+                except ValueError as exc:
+                    raise CrangeError(str(exc)) from exc
+                plan_args += ['-target=' + target for target in targets]
             if getattr(args, 'replace_sdn_applier', False):
                 plan_args.append('-replace=proxmox_sdn_applier.apply')
             tf_run(path, plan_args)

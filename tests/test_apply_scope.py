@@ -7,11 +7,14 @@ import sys
 import tempfile
 import unittest
 from unittest.mock import Mock, patch
+from types import SimpleNamespace
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'scripts'))
 from crange_apply_scope import guest_key, reviewed_distribution, verify_untouched
 from crange_placement import PlacementError
 import crange_scheduling as scheduling
+import crange
+from crange_staging import changed_staging_targets
 
 
 class ApplyScopeTests(unittest.TestCase):
@@ -111,6 +114,53 @@ class ApplyScopeTests(unittest.TestCase):
             with self.assertRaisesRegex(PlacementError, 'deletion is incomplete'):
                 scheduling.finish_apply(Path('/tmp/project-100'), scoped, succeeded=True, api=Mock())
         verify_untouched(scoped, {'router:team:1': actual['router:team:1']})
+
+    def test_local_comparison_targets_changes_and_deletions_but_not_unchanged_offline_guests(self):
+        cfg = {'project_id': 100, 'scenario_containers': {'new': {'team_id': '254'}},
+               'custom_networks': {}}
+        def guest(key, actions):
+            value = {'network_interface': [{'bridge': 'p100t254'}]}
+            return {'address': f'module.scenario_container["{key}"].proxmox_virtual_environment_container.scenario',
+                    'change': {'actions': actions, 'before': None if actions == ['create'] else value,
+                               'after': None if actions == ['delete'] else value}}
+        detail = {'resource_changes': [guest('offline', ['no-op']), guest('new', ['create']),
+                                       guest('removed', ['delete'])]}
+        self.assertEqual(changed_staging_targets(detail, cfg), [
+            'module.scenario_container["new"]', 'module.scenario_container["removed"]',
+            'proxmox_sdn_vnet.staging'])
+        self.assertEqual(changed_staging_targets({'resource_changes': []}, cfg), ['proxmox_sdn_vnet.staging'])
+        detail['resource_changes'][1]['change']['after']['network_interface'][0]['bridge'] = 'p100t001'
+        with self.assertRaisesRegex(ValueError, 'outside staging'):
+            changed_staging_targets(detail, cfg)
+
+    def test_staging_command_uses_live_refresh_for_the_final_selected_plan(self):
+        value = {'network_interface': [{'bridge': 'p100t254'}]}
+        def guest(key, actions):
+            return {'address': f'module.scenario_container["{key}"].proxmox_virtual_environment_container.scenario',
+                    'change': {'actions': actions, 'before': None, 'after': value}}
+        changed = guest('new', ['create'])
+        comparison = {'resource_changes': [guest('offline', ['no-op']), changed]}
+        cfg = {'project_id': 100, 'scenario_containers': {
+            key: {'team_id': '254'} for key in ('new', 'offline')}, 'custom_networks': {}}
+        def terraform(path, args, **kwargs):
+            if args[0] == 'show':
+                detail = comparison if 'scope-comparison.tfplan' in args[-1] else {'resource_changes': [changed]}
+                return SimpleNamespace(stdout=json.dumps(detail))
+            return SimpleNamespace(stdout='')
+        with tempfile.TemporaryDirectory() as directory, \
+             patch.object(crange, 'project_dir', return_value=Path(directory)), \
+             patch.object(crange, 'json_config', return_value=cfg), \
+             patch.object(scheduling, 'read_settings', return_value=({'enabled': False}, {})), \
+             patch.object(scheduling, 'prepare', return_value=None), \
+             patch('crange_templates.media_tf_overrides', return_value={}), \
+             patch.object(crange, 'tf_run', side_effect=terraform) as tf:
+            crange.cmd_plan(SimpleNamespace(project='100', staging=True, retain=False))
+        plans = [call.args[1] for call in tf.call_args_list if call.args[1][0] == 'plan']
+        self.assertEqual(len(plans), 2)
+        self.assertIn('-refresh=false', plans[0])
+        self.assertNotIn('-refresh=false', plans[1])
+        self.assertIn('-target=module.scenario_container["new"]', plans[1])
+        self.assertNotIn('-target=module.scenario_container["offline"]', plans[1])
 
 
 if __name__ == '__main__':

@@ -38,8 +38,13 @@ Approved image storage and existing image ownership are not rewritten.
   outside the reviewed scope are rejected. Existing placement/image records for
   unrelated guests remain intact without contacting their offline hosts.
   Guest modules depend on SDN bridge application, not every other router module;
-  Ansible still enforces router configuration order. This change is deployed,
-  with live outage review still being checked.
+  Ansible still enforces router configuration order. A local, unrefreshed
+  comparison selects only changed staging targets; the final saved review uses
+  normal provider refresh. An empty comparison retains the staging VNet target
+  instead of accidentally planning the whole project. Live Project 100 review
+  succeeded with Proxmox1 offline, no resource changes and all 50 existing guest
+  states untouched. This is planning acceptance, not creation/failover proof.
+  See [staging review evidence](project-100/redundancy-staging-review-acceptance.json).
 - Six-node quorum is modeled with two votes for Proxmox4 and one for every other
   member. Seven expected votes require four present votes. Proxmox4 plus any two
   other nodes has four, so all 26 combinations of zero through three non-core
@@ -56,10 +61,11 @@ is needed for this vote change.
 
 ## Remaining work — not yet established
 
-1. Verify the deployed scoped staging review/apply through the normal web
-   workflow while unrelated project guests are on an unavailable node. Python
-   admission/completion tests pass and Terraform validates; these checks alone
-   do not establish real provider outage acceptance.
+1. Scope post-deploy configuration to affected staging boxes and their required
+   router path. It currently configures the whole staging environment, including
+   unchanged boxes on an offline host. Then verify actual creation, configuration
+   and cleanup through the normal web workflow during an outage. Live planning
+   and Python admission/completion acceptance alone do not prove those steps.
 2. Retry placement and cache preparation after a destination is lost during
    creation. A fresh review is required for a different target; uncertain provider
    writes must be reconciled rather than replayed. Existing team machines stay
@@ -73,6 +79,27 @@ is needed for this vote change.
    under the required outage sets. Scheduler simulations and vote arithmetic do
    not establish that full end-to-end behavior. Resource capacity, accepted
    networks and surviving images remain requirements on each chosen target.
+
+## Router runtime recovery prerequisites
+
+Proxmox HA supports containers, shared storage and watchdog fencing. Use the
+native fencing authority before allowing another instance of a router identity.
+The current `crange-library` NFS server is on Proxmox5, so it is not sufficient as
+the sole live router disk store under a three-non-core-node failure requirement.
+Router disks need storage on the designated surviving core, or another store
+with equivalent verified availability. Proxmox4 currently has free thin-pool
+space; no new export, volume move or HA enrollment has been performed.
+
+Provider v0.104.0 also makes a container's `node_name` replacement-only, and reads
+its configuration through the node recorded in Terraform state. Native HA
+relocation therefore needs a separately verified state-adoption path before a
+subsequent Terraform plan. Adding HA alone could otherwise cause an accidental
+replacement after recovery. Preserve exact VMID, project/router ownership,
+shared disk identity, state lineage and unrelated resource state during adoption.
+Ordinary team workloads remain excluded from this recovery/adoption mechanism.
+
+Sources: [Proxmox HA documentation](https://github.com/proxmox/pve-docs/blob/master/ha-manager.adoc),
+[pinned provider container implementation](https://github.com/bpg/terraform-provider-proxmox/blob/v0.104.0/proxmoxtf/resource/container/container.go).
 
 ## Rollback and operational evidence
 

@@ -276,7 +276,7 @@ No guest deployment, power or network configuration was changed. Evidence:
 - Fixed automatic router bootstrap requiring offline unused candidates to be
   available. Exact pins still fail when their target is unavailable.
 - Added 26-case placement and quorum models plus conflicting-policy rejection.
-  The full Python suite passed 1,077 tests (one skipped), including subsequent
+  The full Python suite passed 1,079 tests (one skipped), including subsequent
   scoped-apply checks.
 - Installed configuration version 23 with two votes for Proxmox4 and one for
   each other node. Verified configuration and live quorum on all five online
@@ -301,5 +301,13 @@ No guest deployment, power or network configuration was changed. Evidence:
   dependencies on every team router while retaining SDN and Ansible ordering.
   Tests verify an unrelated offline router is untouched, while affected-node
   outages, unreviewed reservations and unrelated state drift remain errors.
-  Terraform validation and formatting passed. Live staging outage review is
-  running; no infrastructure apply is implied by this source deployment.
+  Terraform validation and formatting passed.
+- The first live review avoided unrelated team routers but still tried every
+  staging guest, failing on the three staging guests on Proxmox1. A local-only
+  comparison now selects changed targets before a separate normally refreshed
+  provider plan. The final review succeeded in 106.6s, with no resource changes
+  and all 50 existing guest states untouched. No guest creation/apply was done.
+  Post-deploy configuration scoping, creation retries and fenced HA remain open.
+- Pinned provider source inspection confirms container node changes force
+  replacement, so native router HA needs verified Terraform state adoption as
+  well as shared surviving storage. No router migration/HA enrollment was made.

@@ -59,6 +59,33 @@ def staging_targets(cfg, state):
     return sorted(targets)
 
 
+def changed_staging_targets(detail, cfg):
+    """Use an unrefreshed comparison only to choose the subsequent live review.
+
+    Including every unchanged staging guest would still contact unavailable
+    hosts. This comparison never authorizes an apply; selected resources must
+    pass a fresh provider plan, normal scope checks and saved-plan verification.
+    """
+    blockers = staging_blockers(detail, cfg)
+    if blockers:
+        raise ValueError('Staging comparison affects resources outside staging: ' + ', '.join(blockers))
+    # An empty -target list means the entire project to Terraform. Always retain
+    # this owned non-guest target even for metadata-only staging changes.
+    targets = {'proxmox_sdn_vnet.staging'}
+    for resource in detail.get('resource_changes', []):
+        if resource.get('mode') == 'data' or resource.get('change', {}).get('actions') == ['no-op']:
+            continue
+        address = resource['address']
+        if address.startswith('module.'):
+            match = re.fullmatch(r'(module\.(?:staging_router|(?:jumpbox|scenario_box|scenario_container|custom_router)\["[^"\\]+"\]))\..+', address)
+            if not match:
+                raise ValueError('Unrecognized staging guest target.')
+            targets.add(match[1])
+        else:
+            targets.add(address)
+    return sorted(targets)
+
+
 def staging_blockers(detail, cfg):
     project = f"p{int(cfg['project_id']):03d}"
     staging = project + 't254'
