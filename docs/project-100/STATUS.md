@@ -3,7 +3,25 @@
 Updated October 20, 2026 (UTC). Historical diagnostics and job evidence are in
 [platform-progress.md](platform-progress.md).
 
-## October 20 — remaining workstations deploying during the node outage
+## October 20 — team tables display actual guest status
+
+Both Jump boxes and Scenario machines now show **Status**, using recorded guest
+identities and batched live Proxmox inventory. Undeployed declarations say
+**Undeployed**, with no assigned node or usable power action. Running and Stopped
+reflect observed power; offline hosts and unavailable observations never inherit
+the configured `started` value. The dashboard refreshes this view automatically
+and preserves table nodes when status is unchanged. The authenticated endpoint
+and local broker both enforce current project-manager scope; status collection
+runs no Terraform and makes no per-guest requests.
+
+The five changed runtime/UI files are deployed. Public assets contain both Status
+headers. A normal Project 100 manager request returned 56 declared boxes: 53
+running and three staging guests with unverifiable live identity, in 60 ms.
+Desktop/mobile fixture checks cover all display states, disabled controls,
+inventory failure/recovery and stable polling. The Python suite ran 1,119 tests,
+one skipped, with no failures. See [status evidence](team-runtime-status-acceptance.json).
+
+## October 20 — workstations deployed; configuration acceptance remains
 
 Release health job `a56c0959c0974a6e87a911bd2a9cec7e` passed all 18 servers in
 Teams 2, 3 and 4. The interrupted older workstation apply had left 13 declared
@@ -19,8 +37,12 @@ retained alongside placement and machine type. The next normal dashboard review,
 `f6fabee6549c4500b3045ea8585da15b`, succeeded in 95.5 seconds and proposed only
 13 workstation creates, no updates/replacements/deletions. Its saved scope
 fingerprints all 50 prior guests. Apply job `0177140121fc4850ba16cbe3473b3528`
-is running from plan `e783624a740e453fe67b6b5d5ee7e9f1`. Do not replay that
-plan or claim workstation/service acceptance until configuration checks finish.
+completed from plan `e783624a740e453fe67b6b5d5ee7e9f1`; all 13 newly created
+workstations are running. Configuration repaired the Parrot Btrfs swap-file
+layout, then stopped on missing applied image bindings left by the older partial
+Windows deployment. That reconciliation and the remaining team configuration
+checks are still pending. Do not replay the completed infrastructure plan or
+claim full workstation/service acceptance.
 The Python suite passes 1,099 tests, one skipped; changed Terraform files pass
 format checking, and the live review validates the updated resource schema.
 

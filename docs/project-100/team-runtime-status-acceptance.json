@@ -1,0 +1,62 @@
+{
+  "checked_at": "2026-10-20T14:34:38.835036+00:00",
+  "problem": "Team machine tables showed configured started intent as if it were observed guest power. Undeployed boxes appeared Running.",
+  "change": "Both team tables show observed Status from exact recorded guest identities matched to batched live inventory. Desired power remains a configuration setting.",
+  "states": [
+    "Running",
+    "Stopped",
+    "Undeployed",
+    "Host offline",
+    "Unknown",
+    "Checking\u2026"
+  ],
+  "browser_fixture": {
+    "viewports": [
+      1440,
+      390
+    ],
+    "actual_stopped_overrides_started_true": true,
+    "undeployed_has_no_assigned_node": true,
+    "power_disabled_for": [
+      "undeployed",
+      "host offline",
+      "unknown"
+    ],
+    "unchanged_poll_preserves_table_nodes": true,
+    "failed_inventory_read_clears_running_labels": true,
+    "recovery_after_failed_read": true,
+    "page_errors": []
+  },
+  "authorization": {
+    "unauthenticated_status": 401,
+    "other_project_manager_status": 403,
+    "broker_rechecks_current_manager_access": true
+  },
+  "live_project": {
+    "project_id": 100,
+    "declared_boxes": 56,
+    "running": 53,
+    "unknown": 3,
+    "response_seconds": 0.06,
+    "note": "Three staging guests on the unavailable node have no verifiable live identity; they are not reported Running. Routers are outside these box tables."
+  },
+  "deployment": {
+    "backup": "/home/crange/.local/state/crange/ui-backups/20261020T143220Z",
+    "services_active": 4,
+    "public_app_verified": true,
+    "sha256": {
+      "gui/app.js": "418826f54ff82f1ccc0ea9abf229662059a5aacc81559bbe40bf4ecc69a18069",
+      "gui/users.js": "b7fd94f7af25f51ad082c02a309483097c42f0d05ab062cf1520135da74c6c97",
+      "scripts/crange_live_status.py": "c8de701d578d357b47bf6d1998b2f9eb139befee9b11a0c161caffec579b4b98",
+      "scripts/crange_guac_broker.py": "6fee20d30b6ef0be8d5dcd7fdb16568bbc4a2bd6250929d19cc2327d93e7d647",
+      "scripts/crange_server.py": "74cb4d8747e4594ad4683e491c15477b34186e86f7994310bc689fe8f73671d8"
+    }
+  },
+  "validation": {
+    "python_tests_run": 1119,
+    "skipped": 1,
+    "result": "passed",
+    "javascript_syntax": "passed",
+    "guacamole_settings_regression": "passed"
+  }
+}

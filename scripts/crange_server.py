@@ -187,6 +187,22 @@ def serve(host='127.0.0.1', port=8000):
                         except CrangeError as exc:
                             projects.append({'project_id': int(project), 'error': str(exc)})
                 return self.reply(200, {'projects': projects})
+            if path == '/api/project-status':
+                user = auth.session(self.token())
+                if not user:
+                    return self.reply(401, {'error':'Sign in required.'})
+                values = parse_qs(urlsplit(self.path).query, keep_blank_values=True).get('project', [])
+                if len(values) != 1 or not values[0].isdigit() or not 1 <= int(values[0]) <= 255:
+                    return self.reply(400, {'error':'Invalid project.'})
+                project = int(values[0])
+                if not user['admin'] and str(project) not in user['managed_projects']:
+                    return self.reply(403, {'error':'Project manager access required.'})
+                from crange_guac_ticket import request_broker, TicketError
+                try:
+                    return self.reply(200, request_broker({'operation':'project-power-status',
+                        'project':project,'session':self.token()}))
+                except (OSError, ValueError, TicketError):
+                    return self.reply(503, {'error':'Current project status is unavailable.'})
             if path == '/api/cluster':
                 user = auth.session(self.token())
                 if not user:

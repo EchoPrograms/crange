@@ -99,7 +99,7 @@ class ProjectRoleAPITests(unittest.TestCase):
         self.assertEqual(status, 200)
         self.assertEqual(data['projects'], [{'project_id': 3, 'participant': True, 'display_name': 'Project 3'},
                                            {'project_id': 4, 'participant': True, 'display_name': 'Project 4'}])
-        for path in ('/api/jobs', '/api/users', '/api/audit', '/api/guac-users?project=3','/api/templates','/api/cluster'):
+        for path in ('/api/jobs', '/api/users', '/api/audit', '/api/guac-users?project=3','/api/templates','/api/cluster','/api/project-status?project=3'):
             self.assertEqual(self.request(path)[0], 403)
         for operation in ('plan', 'configure-team', 'guac-apply', 'project-init','template-create','template-publish','template-upload','template-memory-reserve-set','network-verify'):
             self.assertEqual(self.request('/api/jobs', {'project': 3, 'operation': operation})[0], 403)
@@ -113,6 +113,9 @@ class ProjectRoleAPITests(unittest.TestCase):
 
     def test_manager_permission_is_checked_per_project_and_on_demotion(self):
         self.login('manager')
+        self.assertEqual(self.request('/api/project-status?project=4')[0],403)
+        for query in ('','?project=3&project=4','?project=null','?project=0'):
+            self.assertEqual(self.request('/api/project-status'+query)[0],400)
         self.assertEqual(self.request('/api/templates')[0],403)
         self.assertEqual(self.request('/api/cluster')[0],403)
         self.assertEqual(self.request('/api/jobs',{'project':0,'operation':'template-cluster-refresh','options':{}})[0],403)

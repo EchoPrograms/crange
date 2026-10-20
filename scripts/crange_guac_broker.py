@@ -77,6 +77,21 @@ def box_status(data, *, auth, root):
     return {k:row.get(k) for k in ('resource_key','state','power_error','observed_at')}
 
 
+def project_power_status(data, *, auth):
+    project = data.get('project')
+    if isinstance(project, bool) or not isinstance(project, int) or not 1 <= project <= 255:
+        raise TicketError('Invalid project.')
+    session = auth.session(data.get('session'))
+    if not session or (not session['admin'] and str(project) not in session['managed_projects']):
+        raise TicketError('Project manager access required.')
+    from crange import project_dir, json_config
+    from crange_project_lifecycle import require_active
+    from crange_live_status import project_box_states
+    path = project_dir(str(project))
+    require_active(path)
+    return project_box_states(path, json_config(path))
+
+
 
 def console_ticket(data, *, auth, root, secret_hex):
     from crange_guac_bridge import _project_rows
@@ -308,6 +323,10 @@ def serve():
                 session_token = data.get('session')
                 if not isinstance(session_token, str) or not 32 <= len(session_token) <= 256:
                     raise TicketError('Sign in required.')
+                if operation == 'project-power-status':
+                    reply = project_power_status(data, auth=auth)
+                    self.wfile.write(json.dumps(reply, separators=(',', ':')).encode() + b'\n')
+                    return
                 if operation == 'template-readiness':
                     session = auth.session(session_token)
                     if not session or (not session['admin'] and str(project_id) not in session['managed_projects']):

@@ -1,5 +1,19 @@
 # Project 100 changes and fixes
 
+## October 20 — observed team guest status
+
+- Replaced Desired state with live Status in both team machine tables. Declared
+  guests without applied resources show Undeployed rather than Running.
+- Power actions follow verified current power and are disabled for undeployed,
+  offline or unverified guests. Actual assigned nodes replace pending-placement
+  text when live identity is available.
+- Added a project-scoped, authenticated batch-status endpoint and broker read.
+  Failed inventory reads clear running labels; unchanged polling keeps the table
+  intact. No Terraform execution or per-guest queries are needed for this view.
+- Deployed to the controller; public assets and a real scoped API request passed.
+  Browser fixtures and the 1,119-test Python suite passed (one skipped).
+
+
 ## 2026-10-20 — outage-safe project review and core router storage
 
 - Extended changed-resource review to ordinary infrastructure plans. The local

@@ -95,7 +95,7 @@ function teamJumpRows(p,team){
   for(const [name,box] of Object.entries(p[field]||{})){
    if(Number(box.team_id)!==Number(team)||(kind!=='jumpbox'&&!box.is_jumpbox))continue;
    const address=kind==='jumpbox'?jumpAddress(p.project_id,box):`10.${p.project_id}.${box.network_id??box.team_id}.${box.ip_last_octet}`;
-   rows.push({kind,name,box,started:box.started!==false,cells:[box.display_name||box.name||name,address,teamSubnet(p.project_id,box.network_id??box.team_id),appliedNode(p,kind,name,box),box.started===false?'Stopped':'Running']});
+   rows.push({kind,name,box,cells:[box.display_name||box.name||name,address,teamSubnet(p.project_id,box.network_id??box.team_id),machineNode(p,kind,name,box),machineRuntime(p,kind,name).label]});
   }
  }
  return rows;
@@ -105,7 +105,7 @@ function teamJumpActions(item){
  if(item.kind!=='jumpbox'){
   const box=item.box;actions.push(optionAction('Edit',item.kind==='vm'?'scenario-edit':'container-edit',{name:item.name,team_id:box.team_id,template:box.template,node:box.node_name,actual_node:appliedNode(project(),item.kind,item.name,box),cores:box.cores,memory:box.memory_mb,health:JSON.stringify(box.health_checks||[],null,2),guac_protocol:box.guac_protocol||'ssh',ip:box.ip_last_octet,network:box.network_key||''}));
  }
- actions.push(optionAction(item.started?'Stop':'Start',item.kind==='jumpbox'?'box-state':'machine-state',{name:item.name,...(item.kind==='jumpbox'?{}:{kind:item.kind}),state:item.started?'stop':'start'}));
+ actions.push(machinePowerAction(project(),item.kind,item.name));
  actions.push(optionAction('Remove',item.kind==='jumpbox'?'box-remove':item.kind==='vm'?'scenario-remove':'container-remove',{name:item.name},'quiet'));
  return actions;
 }
