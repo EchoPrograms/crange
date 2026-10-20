@@ -1,12 +1,18 @@
 {
-  "verified_at": "2026-10-20T05:31:33.593693+00:00",
-  "public_url": "https://crguac.brogano.dev/",
-  "public_bundle_http": 200,
-  "public_bundle_sha256": "ff2a9f9fc7db7c496f58cb5056f241923d2d54f5efe84d98699e40acf6207134",
+  "verified_at": 1792476401.7408946,
+  "public_url": "https://range.brogano.dev/",
   "controller_link_served": true,
   "custom_settings_served": true,
-  "mounted_extension_entries": 25,
   "extension_content_matches_current_local_build": true,
-  "service_restart_performed": false,
-  "verification": "Compared every JAR entry at the running Docker bind source /opt/guacamole/extensions/crange-theme.jar with the local build; no changed, missing or extra entries."
+  "verification": "Compared every JAR entry at the running Docker bind source /opt/guacamole/extensions/crange-theme.jar with the local build; no changed, missing or extra entries.",
+  "jar_sha256": "ed288511b594305819e3bc7432ae28b2479e68dc171a2c718338ca4bb54bf0a8",
+  "login_template_served": true,
+  "preferences_in_account_menu": true,
+  "shared_login_css_served": true,
+  "history_search_layout_served": true,
+  "public_bundle_http": 200,
+  "public_bundle_sha256": "26cfc3dd0a72938eec5e4c02f100fee9cb55737edc0e6a949850b715df66f88c",
+  "public_bundle_bytes": 101611,
+  "mounted_extension_entries": 27,
+  "service_restart_performed": true
 }

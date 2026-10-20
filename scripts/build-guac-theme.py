@@ -47,6 +47,7 @@ with tempfile.TemporaryDirectory(prefix='crange-guac-build-') as directory:
                         '-d', str(classes), *(str(path) for path in sources)], check=True)
 
     with zipfile.ZipFile(TARGET, "w", compression=zipfile.ZIP_DEFLATED) as archive:
+        archive.write(ROOT / 'gui' / 'login.css', 'login.css')
         for path in sorted(SOURCE.rglob("*")):
             if path.is_file() and 'java' not in path.relative_to(SOURCE).parts:
                 archive.write(path, path.relative_to(SOURCE))

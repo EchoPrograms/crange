@@ -3,6 +3,21 @@
 Updated October 20, 2026 (UTC). Historical diagnostics and job evidence are in
 [platform-progress.md](platform-progress.md).
 
+## October 20 — portal login, navigation and settings deployed
+
+Control and Access share one sign-in stylesheet, with distinct names/logos and
+reciprocal links. Both public screens have identical card geometry and controls
+at desktop and phone sizes. The Access address is now `https://range.brogano.dev/`;
+controller launch/console URL defaults and the Control login link use it.
+Preferences is in the account dropdown, the Control link sits after the account
+menu, and Settings returns to the originating Projects list or server view.
+History search controls and native sort/action icon contrast are corrected.
+Native invalid-password handling, successful login, Preferences navigation,
+Settings return and logout passed browser checks at the public host. The running
+Guacamole extension matches all 27 entries of the built package. See
+[portal acceptance](portal-login-navigation-acceptance.json) and
+[deployment verification](guacamole-deployment-verification-2026-10-20.json).
+
 ## October 20 — scoped staging deployment verified
 
 Post-deploy configuration now uses a temporary private inventory containing only
@@ -31,11 +46,9 @@ are deployed. Fenced router recovery and destination-loss retry remain pending.
 The owner knows only that Proxmox1 is unreachable, so its existing unmanaged
 router identities remain untouched.
 
-The live Guacamole extension was checked at its actual Docker bind source,
-`/opt/guacamole/extensions/crange-theme.jar`: every one of its 25 entries matches
-the current build. The public site serves the custom Settings interface and
-CRANGE Control link. No restart was necessary. See
-[Guacamole deployment verification](guacamole-deployment-verification-2026-10-20.json).
+The later portal update above supersedes the initial 25-entry extension check.
+The current 27-entry package is deployed at the actual Docker bind source,
+`/opt/guacamole/extensions/crange-theme.jar`.
 
 ## October 19 — redundancy implementation in progress
 

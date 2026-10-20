@@ -94,7 +94,7 @@ def console_ticket(data, *, auth, root, secret_hex):
     payload={'username':username,'expires':int((time.time()+45)*1000),
              'connections':{'Console':{'protocol':connection['protocol'],'parameters':connection['parameters']}}}
     token=encrypt_ticket(payload,secret_hex)
-    origin=os.environ.get('CRANGE_GUAC_PUBLIC_URL','https://crguac.brogano.dev').rstrip('/')
+    origin=os.environ.get('CRANGE_GUAC_PUBLIC_URL','https://range.brogano.dev').rstrip('/')
     identifier=base64.b64encode(b'Console\x00c\x00json').decode()
     return {'url':origin+'/#/client/'+identifier+'?'+urlencode({'data':token,'token':''})}
 

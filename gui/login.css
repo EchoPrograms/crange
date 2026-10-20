@@ -1,0 +1,137 @@
+/* Shared by Control and Access. The Guacamole build packages this same file. */
+#login.cr-login, .login-ui.cr-login {
+  box-sizing: border-box;
+  display: grid;
+  place-items: center;
+  width: 100%;
+  min-height: 100vh;
+  min-height: 100dvh;
+  height: auto;
+  padding: 24px 16px;
+  background: #0b0b0b !important;
+  color: #ededed;
+  font-family: "IBM Plex Sans", "Helvetica Neue", Arial, sans-serif !important;
+  font-size: 14px;
+  line-height: 1.5;
+  text-align: left;
+}
+.cr-login *, .cr-login *::before, .cr-login *::after { box-sizing: border-box; }
+.cr-login .cr-login-card {
+  width: min(380px, 100%);
+  min-width: 0;
+  border: 1px solid #444;
+  border-radius: 0;
+  background: #141414;
+}
+.cr-login .cr-login-form { display: block; margin: 0; padding: 26px; }
+.cr-login .cr-login-brand { display: flex; align-items: center; gap: 12px; margin: 0 0 26px; }
+.cr-login .cr-login-logo { display: block; flex: none; width: 36px; height: 36px; margin: 0; padding: 0; object-fit: contain; }
+.cr-login .cr-login-brand h1 {
+  margin: 0;
+  padding: 0;
+  color: #ededed !important;
+  font: 600 22px/1.25 "IBM Plex Sans", "Helvetica Neue", Arial, sans-serif;
+  letter-spacing: -.025em;
+}
+.cr-login .cr-login-fields, .cr-login .login-fields {
+  margin: 0 !important;
+  padding: 0 !important;
+  border: 0 !important;
+  background: transparent !important;
+  box-shadow: none !important;
+  text-align: left;
+}
+.cr-login .cr-login-fields > label,
+.cr-login .login-fields .labeled-field {
+  display: block;
+  margin: 0 0 18px;
+  padding: 0;
+}
+.cr-login .cr-login-fields > label:last-child,
+.cr-login .login-fields .labeled-field:last-child { margin-bottom: 0; }
+.cr-login .cr-login-fields > label,
+.cr-login .login-fields .field-header label {
+  color: #d0d0d0 !important;
+  font-size: 13px;
+  font-weight: 500;
+  line-height: 1.5;
+}
+.cr-login .login-fields .labeled-field .field-header {
+  position: static !important;
+  margin: 0 0 6px !important;
+  padding: 0 !important;
+  opacity: 1 !important;
+}
+.cr-login .cr-login-fields > label > input { margin-top: 6px; }
+.cr-login input:not([type=submit]):not([type=checkbox]):not([type=radio]),
+.cr-login select, .cr-login textarea {
+  display: block;
+  width: 100%;
+  max-width: none;
+  min-width: 0;
+  min-height: 36px;
+  margin-bottom: 0;
+  padding: 6px 9px !important;
+  border: 1px solid #737373 !important;
+  border-radius: 0 !important;
+  background: #111 !important;
+  color: #ededed !important;
+  font: inherit;
+  caret-color: #fff;
+  box-shadow: none !important;
+}
+.cr-login .cr-login-form .cr-login-primary {
+  display: block;
+  width: 100%;
+  min-height: 36px;
+  margin: 24px 0 0;
+  padding: 6px 9px;
+  border: 1px solid #ededed !important;
+  border-radius: 0 !important;
+  background: #ededed !important;
+  color: #0b0b0b !important;
+  font: 600 14px/1.5 "IBM Plex Sans", "Helvetica Neue", Arial, sans-serif;
+  cursor: pointer;
+  text-align: center;
+  text-shadow: none !important;
+  box-shadow: none !important;
+}
+.cr-login .cr-login-form .cr-login-primary:hover { background: #fff !important; border-color: #fff !important; color: #000 !important; }
+.cr-login .cr-login-form .cr-login-primary:disabled {
+  background: #202020 !important;
+  border-color: #484848 !important;
+  color: #999 !important;
+  cursor: not-allowed;
+}
+.cr-login .cr-login-footer { margin: 0; padding: 14px 26px; border-top: 1px solid #343434; }
+.cr-login .cr-login-footer a {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  min-height: 24px;
+  color: #c4c4c4 !important;
+  font-size: 13px;
+  font-weight: 500;
+  text-decoration: none;
+}
+.cr-login .cr-login-footer a:hover { color: #fff !important; text-decoration: underline; text-underline-offset: 3px; }
+.cr-login .cr-login-footer svg { display: block; flex: none; width: 16px; height: 16px; }
+.cr-login .cr-login-error, .cr-login .cr-login-help { margin: 18px 0 0; padding: 0; font-size: 13px; line-height: 1.5; overflow-wrap: anywhere; }
+.cr-login .cr-login-error { color: #f29494 !important; }
+.cr-login .cr-login-error:empty { display: none; }
+.cr-login .cr-login-help { margin: 0 0 18px; color: #adadad !important; }
+.cr-login input:focus-visible, .cr-login button:focus-visible,
+.cr-login select:focus-visible, .cr-login textarea:focus-visible, .cr-login a:focus-visible {
+  outline: 2px solid #eee !important;
+  outline-offset: 2px;
+}
+.cr-login ::selection { background: #3e3e3e; color: #fff; }
+.cr-login.initial .continue-login, .cr-login.continuation .login { display: none; }
+@media (max-width: 480px), (pointer: coarse) {
+  .cr-login .cr-login-form .cr-login-primary, .cr-login input:not([type=submit]):not([type=checkbox]):not([type=radio]),
+  .cr-login select { min-height: 44px; }
+  .cr-login .cr-login-footer a { min-height: 32px; }
+  .cr-login .cr-login-form { padding: 24px; }
+  .cr-login .cr-login-footer { padding: 14px 24px; }
+}

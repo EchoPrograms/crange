@@ -266,7 +266,7 @@ def serve(host='127.0.0.1', port=8000):
                 except (OSError, ValueError):
                     status = {}
                 return self.reply(200, {'configured': bool(status.get('configured', False)),
-                                        'url': os.environ.get('CRANGE_GUAC_PUBLIC_URL', 'https://crguac.brogano.dev'),
+                                        'url': os.environ.get('CRANGE_GUAC_PUBLIC_URL', 'https://range.brogano.dev'),
                                         'state': status.get('state', 'pending_configuration')})
             if path == '/api/guac-ticket':
                 session_token = self.token()
@@ -277,7 +277,7 @@ def serve(host='127.0.0.1', port=8000):
                     # Dashboard and native Guacamole administrators are separate
                     # identities. Preserve the browser's native login (guacadmin)
                     # instead of replacing it with a JSON-auth dashboard ticket.
-                    origin = os.environ.get('CRANGE_GUAC_PUBLIC_URL', 'https://crguac.brogano.dev').rstrip('/')
+                    origin = os.environ.get('CRANGE_GUAC_PUBLIC_URL', 'https://range.brogano.dev').rstrip('/')
                     if not origin.startswith(('https://','http://')):
                         return self.reply(503, {'error':'Guacamole public URL is not configured.'})
                     return self.reply(200, {'url': origin + '/', 'authentication':'native', 'credentials':[]})
@@ -322,7 +322,7 @@ def serve(host='127.0.0.1', port=8000):
                 if not user['admin']:
                     return self.reply(403, {'error': 'Administrator access required.'})
                 return self.reply(200, {'events': auth.list_audit()})
-            names = {'/': 'index.html', '/app.js': 'app.js', '/lifecycle.js': 'lifecycle.js', '/accounts.js': 'accounts.js', '/styles.css': 'styles.css', '/users.js': 'users.js', '/templates.js':'templates.js', '/favicon.svg':'favicon.svg', **{f'/fonts/IBMPlexMono-{weight}.woff2': f'fonts/IBMPlexMono-{weight}.woff2' for weight in ('Regular',)}, **{f'/fonts/IBMPlexSans-{weight}.woff2': f'fonts/IBMPlexSans-{weight}.woff2' for weight in ('Regular', 'Medium', 'SemiBold', 'Bold')}}
+            names = {'/': 'index.html', '/app.js': 'app.js', '/lifecycle.js': 'lifecycle.js', '/accounts.js': 'accounts.js', '/styles.css': 'styles.css', '/login.css': 'login.css', '/users.js': 'users.js', '/templates.js':'templates.js', '/favicon.svg':'favicon.svg', **{f'/fonts/IBMPlexMono-{weight}.woff2': f'fonts/IBMPlexMono-{weight}.woff2' for weight in ('Regular',)}, **{f'/fonts/IBMPlexSans-{weight}.woff2': f'fonts/IBMPlexSans-{weight}.woff2' for weight in ('Regular', 'Medium', 'SemiBold', 'Bold')}}
             if path not in names:
                 return self.reply(404, {'error': 'Not found.'})
             file = ROOT / 'gui' / names[path]

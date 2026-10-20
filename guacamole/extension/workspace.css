@@ -197,7 +197,16 @@
 .cr-settings-content .toolbar .action-buttons { display: flex; flex-wrap: wrap; align-items: center; gap: 7px; margin: 0 !important; }
 .cr-settings-content .toolbar .action-buttons .button { display: inline-flex; align-items: center; min-height: 34px; padding: 6px 10px; font-size: 13px; line-height: 1.5; text-decoration: none; }
 .cr-settings-content .toolbar .filter { flex: 1 1 220px; max-width: 460px; margin: 0 !important; }
-.cr-settings-content .filter input { width: 100%; min-height: 34px; font-size: 14px; }
+.cr-settings-content .filter input:not([type=submit]) { width: 100%; min-height: 34px; font-size: 14px; }
+.cr-settings-content .connectionHistory form.filter { display: grid; grid-template-columns: minmax(180px, 1fr) auto auto; align-items: center; gap: 8px; margin: 0 0 16px; }
+.cr-settings-content .connectionHistory .filter .search-string { min-width: 0; margin: 0; }
+.cr-settings-content .connectionHistory .filter .search-button,
+.cr-settings-content .connectionHistory .filter button { width: auto; min-width: 88px; min-height: 34px; margin: 0; }
+.cr-settings-content .filter .search-string { background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 20 20'%3E%3Cg fill='none' stroke='%23d0d0d0' stroke-width='2.2'%3E%3Ccircle cx='8' cy='8' r='5'/%3E%3Cpath d='m12 12 5 5'/%3E%3C/g%3E%3C/svg%3E") !important; background-repeat: no-repeat !important; background-position: 10px center !important; background-size: 16px 16px !important; padding-left: 34px !important; }
+.cr-settings-content table.sorted th.sort-primary::after { width: 12px; height: 12px; margin-left: 6px; background-image: none !important; background-color: currentColor; mask: url(images/arrows/down.svg) center / contain no-repeat; }
+.cr-settings-content table.sorted th.sort-primary.sort-descending::after { mask-image: url(images/arrows/up.svg); }
+.cr-settings-content .action-buttons .button::before,
+.cr-settings-content a.history-session-recording::after { filter: brightness(0) invert(1); }
 .cr-settings-content .connection-list { background: transparent !important; }
 .cr-settings-content .connection-list .list-item > .caption { padding: 0 8px; min-height: 40px; border-bottom: 1px solid var(--cr-line); }
 .cr-settings-content a.settings-connection, .cr-settings-content a.settings-connection-group, .cr-settings-content a.settings-sharing-profile { display: inline-flex; align-items: center; gap: 10px; padding: 8px 4px; min-height: 40px; box-sizing: border-box; vertical-align: middle; font-size: 14px; line-height: 1.5; text-decoration: none; }
@@ -233,7 +242,7 @@
 .cr-home .cr-box-list { padding: 0 18px 28px; box-sizing: border-box; }
 .cr-home-header button, .cr-home-header select { min-height: 32px; }
 .cr-header-actions .cr-project-select { background: var(--cr-field) !important; }
-.cr-controller-link { display: inline-flex; align-items: center; gap: 6px; flex: none; min-height: 32px; padding: 4px 3px; font-size: 13px; line-height: 1.5; font-weight: 500; color: var(--cr-blue) !important; text-decoration: none; white-space: nowrap; }
+.cr-controller-link { display: inline-flex; align-items: center; gap: 6px; flex: none; min-height: 32px; margin-left: 9px; padding: 4px 0 4px 16px; border-left: 1px solid var(--cr-line); font-size: 13px; line-height: 1.5; font-weight: 500; color: var(--cr-blue) !important; text-decoration: none; white-space: nowrap; }
 .cr-controller-link:hover { color: #c7def5 !important; text-decoration: underline; text-underline-offset: 3px; }
 .cr-controller-link svg { width: 14px; height: 14px; display: block; flex: none; }
 .cr-home .cr-title-loading { color: var(--cr-muted); }
@@ -243,13 +252,16 @@
  .cr-home .cr-box-list { padding: 0 12px 24px; }
  .cr-settings-layout { padding: 0 12px; }
  .cr-header-actions .cr-project-select { flex: 1 1 180px; max-width: 100%; width: auto; }
- .cr-controller-link { margin-left: auto; }
+ .cr-controller-link { margin-left: auto; padding-left: 0; border-left: 0; }
  .cr-header-actions .user-menu { margin-left: 0; }
 }
 
 .cr-settings-content .toolbar > guac-group-list-filter, .cr-settings-content .toolbar > guac-filter { flex: 1 1 220px; max-width: 460px; }
 .cr-settings-content .settings > .action-buttons { display: flex; justify-content: flex-start; gap: 8px; margin: 0 0 12px; }
 @media (max-width: 560px) {
+ .cr-settings-content .connectionHistory form.filter { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+ .cr-settings-content .connectionHistory .filter .search-string { grid-column: 1 / -1; min-height: 44px; }
+ .cr-settings-content .connectionHistory .filter .search-button, .cr-settings-content .connectionHistory .filter button { width: 100%; min-height: 44px; }
  .cr-settings-header { display: grid; grid-template-columns: minmax(0,1fr) auto; }
  .cr-settings-header-actions { display: contents; }
  .cr-settings-header-actions > guac-user-menu, .cr-settings-header-actions > .user-menu { grid-column: 2; grid-row: 1; }

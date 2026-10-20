@@ -4,10 +4,12 @@
   "namespace": "crange-theme",
   "css": [
     "theme.css",
-    "workspace.css"
+    "workspace.css",
+    "login.css"
   ],
   "js": [
     "auth-launch.js",
+    "login.js",
     "native-inventory.js",
     "ui.js",
     "workspace.js",

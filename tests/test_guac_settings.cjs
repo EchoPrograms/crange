@@ -12,9 +12,15 @@ vm.runInNewContext(fs.readFileSync('guacamole/extension/settings.js','utf8'),{an
 assert.match(templates['app/navigation/templates/guacUserMenu.html'],/pages="pages"/);
 assert.match(templates['app/navigation/templates/guacUserMenu.html'],/action\.callback\(\)/);
 for(const tab of ['users','userGroups','connections','history','sessions','preferences'])assert.ok(templates['app/settings/templates/settings.html'].includes("activeTab === '"+tab+"'"));
-const scope={$evalAsync(f){f();},$on(){}};
-directives.crangeAccountMenu(window).link(scope,{0:root});scope.accountMenu.toggle();assert.equal(menu.open,true);assert.equal(menu.style.left,'740px');assert.equal(menu.style.top,'56px');
+let preferenceRoute;const scope={$evalAsync(f){f();},$on(){}};
+directives.crangeAccountMenu(window,{url(v){preferenceRoute=v;}},{getDataSource(){return'mysql';}}).link(scope,{0:root});scope.accountMenu.toggle();assert.equal(menu.open,true);assert.equal(menu.style.left,'740px');assert.equal(menu.style.top,'56px');
 listeners.keydown({target:trigger,key:'ArrowDown',preventDefault(){},stopPropagation(){}});assert.equal(document.activeElement,items[0]);
 listeners.keydown({target:items[0],key:'Escape',preventDefault(){},stopPropagation(){}});assert.equal(menu.open,false);assert.equal(document.activeElement,trigger);
-let destination,returned;const settingsScope={};directives.crangeSettingsShell({url(v){destination=v;}},{localStorage:{getItem(){return'100';}},sessionStorage:{setItem(k,v){returned=v;}}}).link(settingsScope);settingsScope.settingsBack();assert.equal(destination,'/');assert.equal(returned,'100');
+scope.accountMenu.preferences();assert.equal(preferenceRoute,'/settings/mysql/preferences');assert.equal(menu.open,false);
+let homePage;scope.$parent={cr:{navigate(v){homePage=v;}}};scope.accountMenu.preferences();assert.equal(homePage,'preferences');
+function backFrom(context){let destination;const stored={},settingsScope={};directives.crangeSettingsShell({url(v){destination=v;}},{localStorage:{setItem(k,v){stored[k]=v;}},sessionStorage:{getItem(){return JSON.stringify(context);},setItem(k,v){stored[k]=v;}}}).link(settingsScope);settingsScope.settingsBack();assert.equal(destination,'/');return {stored,label:settingsScope.settingsBackLabel};}
+let back=backFrom({page:'servers',project:'100'});assert.equal(back.label,'Back to project');assert.equal(back.stored['crange-return-project'],'100');assert.equal(back.stored['crange-return-view'],'servers');
+back=backFrom({page:'projects',project:'100'});assert.equal(back.label,'Back to projects');assert.equal(back.stored['crange-return-project'],undefined);assert.equal(back.stored['crange-return-view'],'projects');
+back=backFrom({page:'servers',project:'all'});assert.equal(back.label,'Back to all servers');assert.equal(back.stored['crange-return-view'],'servers');assert.equal(back.stored['crange-return-project'],undefined);
+back=backFrom(null);assert.equal(back.label,'Back to projects');assert.equal(back.stored['crange-return-view'],'projects');
 console.log('Guacamole settings: native tabs, permission-filtered pages, action callbacks, menu positioning, keyboard dismissal and project return passed.');

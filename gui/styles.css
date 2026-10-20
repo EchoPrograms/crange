@@ -237,11 +237,6 @@ td:first-child { color: #f0f0f0; }
 .cluster-node .error { white-space: normal; }
 .capacity-policy-field { min-width: 142px; }
 .button-tooltip { position: fixed; z-index: 10000; width: max-content; max-width: min(360px,calc(100vw - 16px)); padding: 8px 10px; background: #222; color: #eee; border: 1px solid #777; border-radius: var(--radius); box-shadow: 0 6px 24px #0008; font-size: 12px; line-height: 1.6; white-space: normal; }
-#login { min-height: 100dvh; display: grid; place-items: center; padding: 16px; background: #0b0b0b; }
-#login form { width: min(360px,100%); border: 1px solid #444; border-radius: var(--radius); padding: 26px; background: var(--panel); display: grid; gap: 15px; }
-#login h1 { font-size: 23px; margin: 0; letter-spacing: -.03em; }
-#login .brand-mark { width: 34px; height: 34px; }
-#login .muted { margin: -6px 0 5px; font-size: 12px; }
 @media(min-width:1300px) {
   #content[data-view=scenario] { grid-template-columns: repeat(2,minmax(0,1fr)); }
   #content[data-view=scenario] > .scenario-step { grid-column: 1/-1; }
@@ -443,7 +438,7 @@ pre, code { font-family: "IBM Plex Mono", ui-monospace, Consolas, monospace; }
 .deleted-projects { margin-top: 32px; padding-top: 20px; border-top: 1px solid var(--line, #515151); }
 .deleted-projects > h3 { margin: 0 0 8px; }
 .deleted-projects .user-error { max-width: 60ch; margin: 6px 0 0; }
-.deleted-projects .action-row { margin: 0; flex-wrap: wrap; }
+.deleted-projects .action-row { margin: 0; flex-wrap: wrap; align-items: center; }
 
 .nav-icon, .action-icon { stroke-width: 2.2; }
 

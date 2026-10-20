@@ -1,6 +1,9 @@
 {
   "APP": {
-    "NAME": "CRANGE",
+    "NAME": "CRANGE Access",
     "ACTION_LOGIN_AGAIN": "Sign in again"
+  },
+  "LOGIN": {
+    "ACTION_LOGIN": "Sign in"
   }
 }

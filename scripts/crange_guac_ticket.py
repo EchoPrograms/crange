@@ -108,7 +108,7 @@ def issue_ticket(session_token: str, project_id: int, *, auth, secret_hex: str,
         raise TicketError('No currently applied Guacamole connections are assigned to this account.')
 
     try:
-        url = os.environ.get('CRANGE_GUAC_PUBLIC_URL', 'https://crguac.brogano.dev').rstrip('/')
+        url = os.environ.get('CRANGE_GUAC_PUBLIC_URL', 'https://range.brogano.dev').rstrip('/')
     except (KeyError, TypeError):
         raise TicketError('Guacamole connector is not configured.')
     if not status.get('configured') or not url.startswith(('http://', 'https://')):

@@ -8,8 +8,11 @@ Guacamole 1.6.0, matching the live range deployment. Update the version field
 when the Guacamole host is upgraded.
 
 The extension registers `assets/remote-access.svg` as a web resource and sets
-it as the browser favicon. The login-page logo remains Guacamole's own markup;
-the existing dark theme and authentication flow are unchanged.
+it as the browser favicon and Access sign-in logo. Both sign-in pages use
+`gui/login.css`; the build packages that exact file as `login.css` in the JAR.
+Control and Access retain their own names and logos, with reciprocal public
+portal links. `login.js` replaces only Guacamole's login template and preserves
+its native credential fields, submission, errors and continuation flow.
 
 The interface uses Guacamole's current session token to call its same-origin
 `/api/ext/crange-control/control` endpoint. The Guacamole server verifies that

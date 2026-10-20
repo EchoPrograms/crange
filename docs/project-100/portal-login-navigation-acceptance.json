@@ -1,0 +1,53 @@
+{
+  "verified_at": 1792476466.7170281,
+  "public_access_url": "https://range.brogano.dev/",
+  "public_control_url": "https://crange.brogano.dev/",
+  "matching_login_layouts": {
+    "desktop": {
+      "x": 450,
+      "y": 215,
+      "width": 380,
+      "height": 370
+    },
+    "mobile": {
+      "x": 16,
+      "y": 223,
+      "width": 358,
+      "height": 398
+    },
+    "same_typeface_and_controls": true,
+    "distinct_names_and_logos": true,
+    "reciprocal_links": true,
+    "viewport_overflow": false
+  },
+  "native_sign_in": {
+    "invalidPasswordErrorVisible": true,
+    "successfulNativeLogin": true,
+    "heading": "Projects \n\u21bb"
+  },
+  "live_navigation": {
+    "publicHost": "range.brogano.dev",
+    "login": true,
+    "preferencesViaAccountMenu": true,
+    "preferencesBack": true,
+    "settingsBackToProjects": true,
+    "controllerLinkAtFarRight": true,
+    "logout": true
+  },
+  "history_fixture": {
+    "source": "Upstream Guacamole 1.6.0 History template and native CSS with isolated sample data",
+    "desktop_and_mobile_layout_passed": true,
+    "native_search_and_download_callbacks_preserved": true,
+    "sort_indicator_uses_visible_mask": true
+  },
+  "python_suite": {
+    "tests": 1093,
+    "skipped": 1,
+    "passed": true
+  },
+  "javascript_suites": [
+    "test_guac_ui.cjs",
+    "test_guac_settings.cjs",
+    "test_guac_workspace.cjs"
+  ]
+}

@@ -1,5 +1,22 @@
 # Project 100 changes and fixes
 
+## 2026-10-20 — consistent sign-in and Guacamole navigation
+
+- Shared Control/Access sign-in geometry, type, fields, errors and responsive
+  controls through `gui/login.css`; retained separate branding and added links
+  in both directions. Native Guacamole credentials/continuation remain native.
+- Moved Preferences into the account dropdown and separated the controller link
+  at the far right. Settings back navigation now uses tab-local Projects/server
+  context, including all-server and individual-project views.
+- Corrected History search/input sizing and mobile wrapping; made native search,
+  sort and action artwork visible against dark surfaces. Search/download retain
+  their native handlers.
+- Changed all repository references and deployed public URL defaults to
+  `https://range.brogano.dev/`. Internal Guacamole connector addressing is unchanged.
+- Deployed and checked the 27-entry Guacamole package. Browser checks passed for
+  native sign-in/errors, dropdown Preferences, back navigation and logout. Full
+  Python suite: 1,093 tests, one skipped; three Guacamole JS suites passed.
+
 ## 2026-10-20 — scoped configuration and outage acceptance
 
 - Deployed post-apply private inventory filtering, SSH identity refresh scope

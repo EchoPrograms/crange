@@ -29,7 +29,7 @@
         '<div class="cr-home" ng-class="{loading: !isLoaded()}">',
         '  <header class="cr-home-header">',
         '    <div class="cr-brand"><img class="cr-home-logo" src="app/ext/crange-theme/assets/remote-access.svg?v=3" alt="CRANGE"><div><h1>{{cr.page === "preferences" ? "Preferences" : cr.page === "projects" ? "Projects" : cr.projectTitle()}} <span class="cr-title-loading" ng-class="{active: cr.loading || cr.nativeLoading}" role="status" aria-label="Refreshing" aria-live="polite"><span aria-hidden="true">↻</span></span></h1></div></div>',
-        '    <div class="cr-header-actions"><button type="button" ng-click="cr.navigate(\'projects\')" ng-if="cr.page !== \'projects\'">Projects</button><button type="button" ng-click="cr.navigate(\'preferences\')" ng-if="cr.page !== \'preferences\'">Preferences</button><select ng-if="cr.page === \'servers\'" class="cr-project-select" aria-label="Project" ng-model="cr.selectedProject" ng-options="project.id as project.label for project in cr.projects"></select><button type="button" class="cr-icon-button" ng-click="cr.refresh()" ng-disabled="cr.loading" aria-label="Refresh servers" crange-help="Refresh server access and power status"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M16.7 8a7 7 0 1 1-2.1-3.2M16.8 2.5V7h-4.5"/></svg></button><a class="cr-controller-link" href="https://crange.brogano.dev/" target="_blank" rel="noopener noreferrer">CRANGE Control<svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2.2" aria-hidden="true"><path d="M11 3h6v6m0-6-8 8M8 4H4v12h12v-4"/></svg></a><guac-user-menu></guac-user-menu></div>',
+        '    <div class="cr-header-actions"><button type="button" ng-click="cr.navigate(\'projects\')" ng-if="cr.page !== \'projects\'">Projects</button><select ng-if="cr.page === \'servers\'" class="cr-project-select" aria-label="Project" ng-model="cr.selectedProject" ng-options="project.id as project.label for project in cr.projects"></select><button type="button" class="cr-icon-button" ng-click="cr.refresh()" ng-disabled="cr.loading" aria-label="Refresh servers" crange-help="Refresh server access and power status"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M16.7 8a7 7 0 1 1-2.1-3.2M16.8 2.5V7h-4.5"/></svg></button><guac-user-menu></guac-user-menu><a class="cr-controller-link" href="https://crange.brogano.dev/" target="_blank" rel="noopener noreferrer">CRANGE Control<svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2.2" aria-hidden="true"><path d="M11 3h6v6m0-6-8 8M8 4H4v12h12v-4"/></svg></a></div>',
         '  </header>',
         '  <crange-box-list connection-groups="rootConnectionGroups"></crange-box-list>',
         '</div>'
@@ -421,8 +421,8 @@
                 scope.projectOptionsReady = false;
                 var selectedProject = '';
                 try { selectedProject = window.localStorage.getItem('crange-selected-project') || 'all'; } catch (ignored) { selectedProject = 'all'; }
-                var returningProject=null;
-                try{returningProject=window.sessionStorage.getItem('crange-return-project');window.sessionStorage.removeItem('crange-return-project');}catch(ignored){}
+                var returningProject=null, returningView=null;
+                try{returningProject=window.sessionStorage.getItem('crange-return-project');window.sessionStorage.removeItem('crange-return-project');returningView=window.sessionStorage.getItem('crange-return-view');window.sessionStorage.removeItem('crange-return-view');}catch(ignored){}
                 if(returningProject && /^(?:[1-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])$/.test(returningProject))selectedProject=returningProject;else returningProject=null;
                 var initialProjects = [{id: 'all', label: 'All projects'}];
                 if (/^(?:[1-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])$/.test(selectedProject))
@@ -430,9 +430,10 @@
                 else if (selectedProject === 'other')
                     initialProjects.push({id: 'other', label: 'Other connections'});
                 else selectedProject = 'all';
-                scope.cr = scope.$parent.cr = {page: returningProject ? 'servers' : 'projects', layout: preferenceService && preferenceService.preferences.crangeMachineLayout === 'list' ? 'list' : 'grid', refresh: function () { scope.refresh(); }, loading: false, nativeLoading: true, projects: initialProjects, selectedProject: selectedProject};
+                scope.cr = scope.$parent.cr = {page: returningProject || returningView==='servers' ? 'servers' : 'projects', layout: preferenceService && preferenceService.preferences.crangeMachineLayout === 'list' ? 'list' : 'grid', refresh: function () { scope.refresh(); }, loading: false, nativeLoading: true, projects: initialProjects, selectedProject: selectedProject};
                 scope.$watch('cr.search', function (value) { scope.search = value || ''; });
-                scope.cr.navigate = function (page) { scope.closeMenu(); if(page==='preferences')scope.cr.previousPage=scope.cr.page;scope.cr.page = page; };
+                function rememberHome(){if(scope.cr.page==='preferences')return;try{window.sessionStorage.setItem('crange-home-context',JSON.stringify({page:scope.cr.page,project:scope.cr.selectedProject}));}catch(ignored){}}
+                scope.cr.navigate = function (page) { scope.closeMenu(); if(page==='preferences')scope.cr.previousPage=scope.cr.page;scope.cr.page = page;rememberHome(); };
                 scope.cr.back = function () { scope.cr.navigate(scope.cr.previousPage || (scope.cr.selectedProject==='all'?'projects':'servers')); };
                 scope.cr.openProject = function (id) { scope.cr.selectedProject = String(id); scope.cr.navigate('servers'); };
                 scope.cr.projectTitle = function () { var selected = scope.cr.projects.find(function (p) { return p.id === scope.cr.selectedProject; }); return selected ? selected.label : 'Remote access'; };
@@ -441,7 +442,9 @@
                 scope.$watch('cr.selectedProject', function (value) {
                     scope.menuBox = null;
                     try { window.localStorage.setItem('crange-selected-project', value || 'all'); } catch (ignored) {}
+                    rememberHome();
                 });
+                rememberHome();
                 function groupBoxes() {
                     var groups = Object.create(null), projects = Object.create(null);
                     scope.boxes.forEach(function (box) {

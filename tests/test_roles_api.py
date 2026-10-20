@@ -261,7 +261,7 @@ class ProjectRoleAPITests(unittest.TestCase):
         code, result=self.request('/api/guac-ticket?project=0')
         self.assertEqual(code,200)
         self.assertEqual(result['authentication'],'native')
-        self.assertEqual(result['url'],'https://crguac.brogano.dev/')
+        self.assertEqual(result['url'],'https://range.brogano.dev/')
         self.assertEqual(result['credentials'],[])
         self.assertNotIn('data=', result['url'])
         self.assertNotIn('token=', result['url'])

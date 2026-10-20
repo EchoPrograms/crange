@@ -162,13 +162,7 @@ th .sort-order.ascending, th .sort-order.descending { filter: brightness(0) inve
 .settings tbody tr:nth-child(even), .page tbody tr:nth-child(even) { background-color: #181818 !important; }
 .settings tbody tr:hover, .page tbody tr:hover { background-color: #242424 !important; }
 .settings thead, .settings th, .page thead, .page th { background-color: var(--cr-panel-2) !important; }
-.login-ui .app-version, .login-ui .version-number, .login-ui .logo { display: none !important; }
-.login-ui .app-name { display: block !important; color: var(--cr-text) !important; }
-.login-ui .login-dialog { border: 1px solid var(--cr-line) !important; border-radius: var(--cr-radius); box-shadow: 0 16px 50px #0009 !important; }
-.login-ui .login-fields { box-shadow: none !important; }
-/* Keep labels visible after a value is entered. */
-.login-ui .login-fields .labeled-field .field-header { position: static !important; z-index: auto !important; opacity: 1 !important; margin: 1em 0 .4em !important; color: var(--cr-text) !important; }
-.login-ui p.login-error, .notification.error { background: var(--cr-panel-2) !important; color: var(--cr-text) !important; border-color: var(--cr-line-strong) !important; }
+.notification.error { background: var(--cr-panel-2) !important; color: var(--cr-text) !important; border-color: var(--cr-line-strong) !important; }
 .client-tile-disconnect, .close-other-connection img, .client-panel .close-other-connection img,
 .client-tile-header img[src$="/x.svg"] { filter: brightness(0) invert(1) !important; opacity: 1 !important; background: transparent !important; }
 .client-panel .close-other-connection { background-color: #242424 !important; border: 1px solid var(--cr-line-strong) !important; border-radius: var(--cr-radius) !important; opacity: 1 !important; }

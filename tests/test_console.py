@@ -35,7 +35,7 @@ class ConsoleTests(unittest.TestCase):
              patch('crange_guac_boxes.resolve',return_value=(None,None,None,api,'vm','proxmox1',128,None)), \
              patch.object(console,'launch',return_value={'protocol':'vnc','parameters':{'hostname':'10.60.0.20','port':'54321'}}):
             result=broker.console_ticket({'project':100,'username':'guacadmin','resource_key':'vm:box'},auth=Mock(),root=Path('/tmp'),secret_hex='00'*16)
-        self.assertIn('https://crguac.brogano.dev/#/client/',result['url'])
+        self.assertIn('https://range.brogano.dev/#/client/',result['url'])
         from urllib.parse import urlsplit
         self.assertEqual(urlsplit(result['url']).query, '')
         self.assertIn('?data=',urlsplit(result['url']).fragment)

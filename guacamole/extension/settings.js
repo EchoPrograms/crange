@@ -9,7 +9,7 @@
   <button type="button" class="cr-account-trigger" ng-click="accountMenu.toggle()" aria-label="Account menu for {{username}}" aria-haspopup="menu" aria-expanded="{{accountMenu.open}}">${accountIcon}<span>{{username}}</span>${chevron}</button>
   <div class="cr-account-popover" popover="manual" role="menu" aria-label="Account menu">
     <div class="cr-account-profile" ng-if="fullName"><a ng-if="userURL" ng-href="{{userURL}}">{{fullName}}</a><strong ng-if="!userURL">{{fullName}}</strong><span ng-if="role">{{role}}</span><span ng-if="organization">{{organization}}</span></div>
-    <div class="cr-account-local" ng-if="localActions.length"><button type="button" role="menuitem" ng-repeat="action in localActions" ng-click="accountMenu.close(); action.callback()" ng-class="action.className">{{action.name | translate}}</button></div>
+    <div class="cr-account-local"><button type="button" role="menuitem" ng-click="accountMenu.preferences()">Preferences</button><button type="button" role="menuitem" ng-repeat="action in localActions" ng-click="accountMenu.close(); action.callback()" ng-class="action.className">{{action.name | translate}}</button></div>
     <div class="cr-account-pages" ng-click="accountMenu.close()"><guac-page-list pages="pages"></guac-page-list></div>
     <div class="cr-account-actions"><button type="button" role="menuitem" ng-repeat="action in actions" ng-click="accountMenu.close(); action.callback()" ng-class="action.className">{{action.name | translate}}</button></div>
   </div>
@@ -18,7 +18,7 @@
 <div class="settings-view view cr-admin-settings" crange-settings-shell>
   <header class="cr-settings-header">
     <div class="cr-settings-heading"><img src="app/ext/crange-theme/assets/remote-access.svg?v=3" alt="" width="32" height="32"><h1>{{'SETTINGS.SECTION_HEADER_SETTINGS' | translate}}</h1></div>
-    <div class="cr-settings-header-actions"><button type="button" class="cr-settings-back" ng-click="settingsBack()"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2.2" aria-hidden="true"><path d="M16 10H4m5-5-5 5 5 5"/></svg><span>Back to project</span></button><a class="cr-controller-link" href="https://crange.brogano.dev/" target="_blank" rel="noopener noreferrer">CRANGE Control<svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2.2" aria-hidden="true"><path d="M11 3h6v6m0-6-8 8M8 4H4v12h12v-4"/></svg></a><guac-user-menu></guac-user-menu></div>
+    <div class="cr-settings-header-actions"><button type="button" class="cr-settings-back" ng-click="settingsBack()"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2.2" aria-hidden="true"><path d="M16 10H4m5-5-5 5 5 5"/></svg><span>{{settingsBackLabel}}</span></button><guac-user-menu></guac-user-menu><a class="cr-controller-link" href="https://crange.brogano.dev/" target="_blank" rel="noopener noreferrer">CRANGE Control<svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2.2" aria-hidden="true"><path d="M11 3h6v6m0-6-8 8M8 4H4v12h12v-4"/></svg></a></div>
   </header>
   <div class="cr-settings-layout">
     <nav class="cr-settings-nav" aria-label="Settings sections"><guac-page-list pages="settingsPages"></guac-page-list></nav>
@@ -41,10 +41,16 @@
         }]);
     }]).run(['$templateCache', function (cache) {
         Object.keys(templates).forEach(function (key) { cache.put(key, templates[key]); });
-    }]).directive('crangeAccountMenu', ['$window', function ($window) {
+    }]).directive('crangeAccountMenu', ['$window', '$location', 'authenticationService', function ($window, $location, authenticationService) {
         return {restrict: 'A', link: function (scope, element) {
             var root=element[0], trigger=root.querySelector('.cr-account-trigger'), menu=root.querySelector('.cr-account-popover');
             var state=scope.accountMenu={open:false};
+            state.preferences=function(){
+                state.close();
+                var parent=scope.$parent;
+                while(parent){if(parent.cr&&typeof parent.cr.navigate==='function'){parent.cr.navigate('preferences');return;}parent=parent.$parent;}
+                $location.url('/settings/'+encodeURIComponent(authenticationService.getDataSource())+'/preferences');
+            };
             function choices(){return Array.prototype.filter.call(menu.querySelectorAll('a[href],button:not(:disabled)'),function(item){return item.getClientRects().length;});}
             state.close=function(focus){state.open=false;if(menu.hidePopover && menu.matches(':popover-open'))menu.hidePopover();menu.style.display='none';if(focus)trigger.focus();};
             state.toggle=function(){
@@ -78,9 +84,21 @@
         }};
     }]);
     angular.module('settings').directive('crangeSettingsShell', ['$location', '$window', function ($location,$window) {
-        return {restrict:'A',link:function(scope){scope.settingsBack=function(){
-            try{var project=$window.localStorage.getItem('crange-selected-project');if(/^\d{1,3}$/.test(project))$window.sessionStorage.setItem('crange-return-project',project);}catch(ignored){}
-            $location.url('/');
-        };}};
+        return {restrict:'A',link:function(scope){
+            var context={page:'projects',project:'all'};
+            try{
+                var saved=JSON.parse($window.sessionStorage.getItem('crange-home-context')||'null');
+                if(saved&&['projects','servers'].indexOf(saved.page)>=0&&/^(?:all|other|[1-9][0-9]{0,2})$/.test(saved.project))context=saved;
+            }catch(ignored){}
+            scope.settingsBackLabel=context.page==='projects'?'Back to projects':context.project==='all'?'Back to all servers':context.project==='other'?'Back to other connections':'Back to project';
+            scope.settingsBack=function(){
+                try{
+                    $window.localStorage.setItem('crange-selected-project',context.project);
+                    $window.sessionStorage.setItem('crange-return-view',context.page);
+                    if(context.page==='servers'&&/^\d{1,3}$/.test(context.project))$window.sessionStorage.setItem('crange-return-project',context.project);
+                }catch(ignored){}
+                $location.url('/');
+            };
+        }};
     }]);
 }());
