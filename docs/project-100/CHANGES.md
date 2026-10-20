@@ -11,11 +11,14 @@
   Deployed guest-disk storage filtering and four concurrent read-only guest
   configuration requests; provider mutations remain sequential. The next
   dashboard API review succeeded and proposed only the disposable staging CT.
-  Its deploy job is running; do not claim creation/configuration acceptance yet.
+  Deployment, router-local ping and controller SSH passed. Reviewed cleanup
+  deleted only the probe and revoked its managed Guacamole SSH permission.
+  All 50 prior guest states stayed identical; the temporary manager and sessions
+  were removed. See redundancy-staging-deployment-acceptance.json.
 - Added tests/fixes for preserving unchanged guests' exact image/storage
   metadata and retaining unavailable snapshot-cache journals/reservations while
-  allowing planning on surviving nodes. Those follow-ups are pending deployment
-  until the current worker job finishes. Full suite: 1,092 tests, one skipped.
+  allowing planning on surviving nodes. Those fixes and scoped deletion access
+  cleanup are deployed. Full suite: 1,093 tests, one skipped.
 - Verified the actual mounted Guacamole extension matches the current build
   entry-for-entry and the public JS serves the custom Settings UI/controller
   link. An unused host path was not mistaken for the running Docker mount.

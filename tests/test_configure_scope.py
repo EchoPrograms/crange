@@ -8,7 +8,7 @@ from unittest.mock import patch
 import copy
 sys.path.insert(0,str(Path(__file__).resolve().parents[1]/'scripts'))
 import crange
-from crange_configure_scope import configuration_inventory
+from crange_configure_scope import configuration_inventory, configuration_resources
 
 class ConfigureScopeTests(unittest.TestCase):
     def fixture(self):
@@ -59,11 +59,24 @@ class ConfigureScopeTests(unittest.TestCase):
         cfg, inventory = self.fixture()
         for keys in ([], ['container:removed']):
             result, needed = configuration_inventory(inventory, cfg, 254, keys)
-            self.assertFalse(needed)
-            self.assertEqual(result['all']['children']['routers']['children']['project_routers']['hosts'], {})
+            self.assertEqual(needed, bool(keys))
+            groups = result['all']['children']
+            self.assertEqual(bool(groups['routers']['children']['project_routers']['hosts']), bool(keys))
+            self.assertEqual(groups['scenario_containers']['hosts'], {})
         result, needed = configuration_inventory(inventory, cfg, 254, ['router:custom:removed'])
         self.assertTrue(needed)
         self.assertEqual(result['all']['children']['routers']['children']['custom_routers']['hosts'], {})
+
+    def test_deleted_custom_guest_revokes_only_its_surviving_router_path(self):
+        cfg, inventory = self.fixture()
+        detail={'resource_changes':[{'address': 'module.scenario_container["removed"].proxmox_virtual_environment_container.scenario',
+            'change':{'actions':['delete'],'before':{'network_interface':[{'bridge':'p003c101'}]},'after':None}}]}
+        keys=configuration_resources(detail,cfg)
+        self.assertEqual(keys,['container:removed','router:custom:net'])
+        result,needed=configuration_inventory(inventory,cfg,254,keys)
+        self.assertTrue(needed)
+        self.assertEqual(set(result['all']['children']['routers']['children']['custom_routers']['hosts']), {'p003c101_router'})
+        self.assertEqual(result['all']['children']['scenario_containers']['hosts'], {})
 
     def test_invalid_or_cross_team_scope_fails(self):
         cfg, inventory = self.fixture()

@@ -1,0 +1,135 @@
+{
+  "verified_at": 1792475232.6986084,
+  "project": 100,
+  "workflow": "Normal authenticated dashboard API and controller queue",
+  "outage_nodes_at_start": {
+    "proxmox6": "online",
+    "proxmox3": "online",
+    "proxmox5": "online",
+    "proxmox1": "offline",
+    "proxmox4": "online",
+    "proxmox2": "online"
+  },
+  "probe": {
+    "resource_key": "t254-resilience-check",
+    "guest_id": 227,
+    "node": "proxmox6",
+    "datastore": "local-hdd",
+    "address": "10.100.254.99"
+  },
+  "jobs": [
+    {
+      "id": "04cfe69ce0d64647a8253dc3181e1a6e",
+      "operation": "container-add",
+      "status": "succeeded",
+      "created": 1792455126.5629034,
+      "finished": 1792455127.251328
+    },
+    {
+      "id": "bb9b8d45dd1f49c8b0eed059dbf4faa0",
+      "operation": "stage-changes",
+      "status": "succeeded",
+      "created": 1792455156.6026335,
+      "finished": 1792455350.144939
+    },
+    {
+      "id": "7801502f45654612b21ea68e9d953b9b",
+      "operation": "stage-changes",
+      "status": "failed",
+      "created": 1792473637.5286262,
+      "finished": 1792473893.46751
+    },
+    {
+      "id": "df6235e8cc364d3389780cb6e28a6863",
+      "operation": "stage-changes",
+      "status": "succeeded",
+      "created": 1792473994.2318485,
+      "finished": 1792474166.1355338
+    },
+    {
+      "id": "4e0047426678427392267a49b6f33f13",
+      "operation": "stage-deploy",
+      "status": "succeeded",
+      "created": 1792474204.261591,
+      "finished": 1792474531.0953784
+    },
+    {
+      "id": "543cbb35f8d64383ace6b1d3020ba39e",
+      "operation": "container-health",
+      "status": "succeeded",
+      "created": 1792474739.2332437,
+      "finished": 1792474742.3843675
+    },
+    {
+      "id": "2fc1b8902c364c57afbd824b1b6c9c2f",
+      "operation": "container-remove",
+      "status": "succeeded",
+      "created": 1792474811.9306712,
+      "finished": 1792474812.5551987
+    },
+    {
+      "id": "3c9428f393b14d9ebb3579e0f581a30f",
+      "operation": "stage-changes",
+      "status": "succeeded",
+      "created": 1792474844.267809,
+      "finished": 1792474932.2887285
+    },
+    {
+      "id": "c6b0b6bde3e24265aa44a44e5aefdcc4",
+      "operation": "stage-deploy",
+      "status": "succeeded",
+      "created": 1792474995.0800798,
+      "finished": 1792475193.8896644
+    }
+  ],
+  "reviews": [
+    {
+      "plan_id": "11071cb64c93dc44ae11be1e498c9e19",
+      "changes": [
+        {
+          "address": "module.scenario_container[\"t254-resilience-check\"].proxmox_virtual_environment_container.scenario",
+          "actions": [
+            "create"
+          ]
+        }
+      ],
+      "untouched_guests": 50
+    },
+    {
+      "plan_id": "8c38d91e4f801791a0fad570a8c5da92",
+      "changes": [
+        {
+          "address": "module.scenario_container[\"t254-resilience-check\"].proxmox_virtual_environment_container.scenario",
+          "actions": [
+            "delete"
+          ]
+        }
+      ],
+      "untouched_guests": 50
+    }
+  ],
+  "access": {
+    "verified_at": 1792474827.649032,
+    "guest_id": 227,
+    "node": "proxmox6",
+    "address": "10.100.254.99",
+    "status": "running",
+    "router_ping_passed": true,
+    "controller_root_ssh_passed": true,
+    "untouched_guest_states_verified": 50
+  },
+  "cleanup": {
+    "provider_guest_absent": true,
+    "desired_guest_absent": true,
+    "terraform_guest_absent": true,
+    "guacamole_connection_absent": true,
+    "untouched_guest_states_verified": 50,
+    "temporary_manager_account_removed": true,
+    "temporary_manager_sessions_removed": true
+  },
+  "limitations": [
+    "No node was powered off or fenced for this acceptance.",
+    "Only the existing Proxmox1 outage was exercised.",
+    "Router runtime failover and destination-loss retry are separate unfinished acceptance gates."
+  ]
+}

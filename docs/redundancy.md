@@ -61,11 +61,13 @@ is needed for this vote change.
 
 ## Remaining work — not yet established
 
-1. Scope post-deploy configuration to affected staging boxes and their required
-   router path. It currently configures the whole staging environment, including
-   unchanged boxes on an offline host. Then verify actual creation, configuration
-   and cleanup through the normal web workflow during an outage. Live planning
-   and Python admission/completion acceptance alone do not prove those steps.
+1. Scoped staging creation, configuration, health checks and cleanup now passed
+   through the normal dashboard API/queue with Proxmox1 offline. Both reviewed
+   plans changed only the disposable container; all 50 existing guest states
+   stayed identical. Deleting it revoked its Guacamole firewall permission and
+   removed its native connection. The temporary manager and sessions were also
+   deleted. This establishes the observed single-node outage, not every failure
+   set. See [deployment evidence](project-100/redundancy-staging-deployment-acceptance.json).
 2. Retry placement and cache preparation after a destination is lost during
    creation. A fresh review is required for a different target; uncertain provider
    writes must be reconciled rather than replayed. Existing team machines stay
@@ -107,6 +109,9 @@ The live quorum review, original configuration, tested candidate and verificatio
 receipts are retained under `/root/crange-resilience/quorum-review` on Proxmox4.
 A rollback must advance `config_version` beyond the currently installed value;
 never copy an old lower-version backup over the live file without review.
+The owner could confirm only that Proxmox1 is unreachable, not physically off.
+Its existing unmanaged router identities remain untouched until positive fencing
+or a verified shutdown; loss of connectivity is not fencing evidence.
 A returning Proxmox1 must synchronize cluster configuration before it is trusted
 for any future router recovery. Changing the node count requires reviewing the
 voting model again.

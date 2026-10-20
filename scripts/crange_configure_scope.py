@@ -2,6 +2,26 @@
 import copy
 
 
+def configuration_resources(detail, cfg):
+    """Include a deleted guest's surviving custom router to revoke access."""
+    from crange_apply_scope import guest_key
+    keys = set()
+    custom_bridges = {f'p{int(cfg["project_id"]):03d}c{int(net["network_id"]):03d}': name
+                      for name, net in cfg.get('custom_networks', {}).items()}
+    for item in detail.get('resource_changes', []):
+        change = item.get('change', {})
+        key = guest_key(item.get('address', ''))
+        if key is None or change.get('actions') == ['no-op']:
+            continue
+        keys.add(key)
+        if 'delete' in change.get('actions', []) and key.startswith(('vm:', 'container:', 'jumpbox:')):
+            before = change.get('before') or {}
+            for nic in before.get('network_device', before.get('network_interface', [])):
+                if nic.get('bridge') in custom_bridges:
+                    keys.add('router:custom:' + custom_bridges[nic['bridge']])
+    return sorted(keys)
+
+
 def configuration_inventory(inventory, cfg, network_id, resource_keys):
     if not isinstance(resource_keys, (list, tuple)) or any(not isinstance(k, str) for k in resource_keys):
         raise ValueError('Configuration resource scope must be a list of reviewed guest keys.')
@@ -26,6 +46,7 @@ def configuration_inventory(inventory, cfg, network_id, resource_keys):
             raise ValueError('Unrecognized reviewed configuration resource.')
         box = cfg.get(fields[kind], {}).get(name)
         if box is None:  # Reviewed deletions have no surviving guest to configure.
+            needs_path = True  # Revoke the removed endpoint on its parent path.
             continue
         if str(box.get('team_id')) != str(network_id):
             raise ValueError('Guest is outside the selected configuration team.')

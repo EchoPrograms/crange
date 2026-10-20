@@ -3,7 +3,7 @@
 Updated October 20, 2026 (UTC). Historical diagnostics and job evidence are in
 [platform-progress.md](platform-progress.md).
 
-## October 20 — scoped staging deployment acceptance in progress
+## October 20 — scoped staging deployment verified
 
 Post-deploy configuration now uses a temporary private inventory containing only
 the reviewed changed guests and their required project/staging/custom router
@@ -18,8 +18,18 @@ slow serial capacity discovery exceeded the inventory freshness window. Storage
 queries now request guest-disk content and online configuration reads use at
 most four concurrent readers. The subsequent review succeeded and proposed only
 the disposable CT on Proxmox6/local-hdd, while Proxmox1 remains offline. Deployment
-job `4e0047426678427392267a49b6f33f13` is running; guest access and cleanup acceptance
-are not yet established. The full Python suite ran 1,092 tests, one skipped.
+job `4e0047426678427392267a49b6f33f13` succeeded. The guest passed the normal
+queued ping check and controller root-key SSH. Cleanup job
+`c6b0b6bde3e24265aa44a44e5aefdcc4` deleted only that guest, revoked its managed
+SSH firewall permission and refreshed Guacamole access. Provider inventory,
+Terraform state, desired configuration and native connections all confirm its
+removal. The temporary manager and sessions were removed. Both reviews
+preserved all 50 prior guest states. The full Python suite ran 1,093 tests, one
+skipped. See [deployment evidence](redundancy-staging-deployment-acceptance.json).
+The unchanged metadata/cache-retention fixes and scoped deletion access cleanup
+are deployed. Fenced router recovery and destination-loss retry remain pending.
+The owner knows only that Proxmox1 is unreachable, so its existing unmanaged
+router identities remain untouched.
 
 The live Guacamole extension was checked at its actual Docker bind source,
 `/opt/guacamole/extensions/crange-theme.jar`: every one of its 25 entries matches

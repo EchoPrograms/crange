@@ -1267,6 +1267,9 @@ def cmd_apply_saved(args: argparse.Namespace, path: Path) -> None:
         from crange_scheduling import applied_resources
         detail = json.loads(tf_run(path, ['show', '-json', str(plan)], capture=True).stdout)
         placement = reviewed_distribution(placement, detail, applied_resources(path))
+    if getattr(args, 'staging_only', False):
+        from crange_configure_scope import configuration_resources
+        args.applied_guest_keys = configuration_resources(detail, json_config(path))
     nodes = {p['resolved']['node_name'] for p in (placement or {}).get('placements', [])}
     nodes.update(identity['node_name'] for identity in (placement or {}).get('apply_scope', {}).get('removed_guests', {}).values())
     retiring = []
@@ -1285,9 +1288,6 @@ def cmd_apply_saved(args: argparse.Namespace, path: Path) -> None:
     record_release_apply(path)
     plan.unlink()
     record['applied_at'] = datetime.now(timezone.utc).isoformat()
-    from crange_apply_scope import guest_key
-    args.applied_guest_keys = sorted({key for item in record.get('changes', [])
-                                     if (key := guest_key(item['address'])) is not None})
     manifest.write_text(json.dumps(record, indent=2) + '\n')
     from crange_scheduling import atomic_json
     atomic_json(path / '.crange-plans' / f'{args.plan_id}.json', {k:record[k] for k in ('plan_id','created','changes','placements','reservation_ids','policy_revision','apply_scope','applied_at','bootstrap','bootstrap_node','bootstrap_nodes','bootstrap_router_nodes','bootstrap_networks','network_foundation') if k in record},0o640)
