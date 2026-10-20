@@ -1,0 +1,42 @@
+{
+  "schema_version": 1,
+  "login": "p100-t002u01",
+  "method": "Existing participant password authenticated against Guacamole; all three permitted native connections rendered stable five-second displays through public WebSocket; no remote input sent",
+  "tested": 3,
+  "passed": 3,
+  "connections": [
+    {
+      "source": "postgresql",
+      "identifier": "98",
+      "name": "P100 \u00b7 Team 2 \u00b7 MHL-T02-Linux-01",
+      "protocol": "ssh",
+      "team_id": "2",
+      "result": "connected",
+      "width": 1024,
+      "height": 768,
+      "lastState": 5
+    },
+    {
+      "source": "postgresql",
+      "identifier": "99",
+      "name": "P100 \u00b7 Team 2 \u00b7 MHL-T02-Linux-01 \u00b7 RDP",
+      "protocol": "rdp",
+      "team_id": "2",
+      "result": "connected",
+      "width": 1024,
+      "height": 768,
+      "lastState": 5
+    },
+    {
+      "source": "postgresql",
+      "identifier": "116",
+      "name": "P100 \u00b7 Team 2 \u00b7 VM \u00b7 Windows workstation 1",
+      "protocol": "rdp",
+      "team_id": "2",
+      "result": "connected",
+      "width": 1024,
+      "height": 768,
+      "lastState": 5
+    }
+  ]
+}

@@ -449,3 +449,8 @@ No guest deployment, power or network configuration was changed. Evidence:
   guests on online nodes and required management routers.
 - Limited additional Linux swap to available space while retaining a 2 GiB data
   reserve and allocation overhead; Team 3's first Parrot guest now has active swap.
+- Completed Team 3 configuration after recovering never-run cloud-init on its
+  second Parrot guest. All 12 Team 3 entries, three available staging entries and
+  all three permitted entries for a regular Team 2 participant rendered correctly.
+- Rechecked all 24 Team 1/5 SSH/RDP ports from the Guacamole source; they remain
+  unreachable behind unfenced Proxmox1 routers. Kept those old identities intact.

@@ -1,0 +1,240 @@
+{
+  "schema_version": 1,
+  "recorded_at": "2026-10-20T21:08:24.253446+00:00",
+  "project_id": 100,
+  "native_entries": 67,
+  "rendered_connections": 40,
+  "rendered_by_scope": {
+    "team_2": 12,
+    "team_3": 12,
+    "team_4": 12,
+    "online_staging": 3,
+    "controller": 1
+  },
+  "participant_permission_checks": {
+    "login": "p100-t002u01",
+    "native_entries": 3,
+    "rendered": 3
+  },
+  "outage_blocked_entries": 27,
+  "blocked_by_router_on_proxmox1": {
+    "team_ids": [
+      1,
+      5
+    ],
+    "native_connections": 24,
+    "router_vmids": [
+      120,
+      121
+    ],
+    "port_probe_source": "10.60.0.10",
+    "method": "Bound source TCP connection, three-second timeout, eight concurrent sockets",
+    "tcp_open": 0,
+    "connections": [
+      {
+        "name": "P100 \u00b7 CT \u00b7 r0.1.2-mhl-db01-t001",
+        "team": "1",
+        "address": "10.100.1.30",
+        "protocol": "ssh",
+        "port": 22,
+        "tcp_open": false
+      },
+      {
+        "name": "P100 \u00b7 Team 5 \u00b7 MHL-T05-Linux-01",
+        "team": "5",
+        "address": "10.100.5.11",
+        "protocol": "ssh",
+        "port": 22,
+        "tcp_open": false
+      },
+      {
+        "name": "P100 \u00b7 Team 5 \u00b7 MHL-T05-Linux-01 \u00b7 RDP",
+        "team": "5",
+        "address": "10.100.5.11",
+        "protocol": "rdp",
+        "port": 3389,
+        "tcp_open": false
+      },
+      {
+        "name": "P100 \u00b7 Team 5 \u00b7 MHL-T05-Linux-02",
+        "team": "5",
+        "address": "10.100.5.13",
+        "protocol": "ssh",
+        "port": 22,
+        "tcp_open": false
+      },
+      {
+        "name": "P100 \u00b7 Team 5 \u00b7 MHL-T05-Linux-02 \u00b7 RDP",
+        "team": "5",
+        "address": "10.100.5.13",
+        "protocol": "rdp",
+        "port": 3389,
+        "tcp_open": false
+      },
+      {
+        "name": "P100 \u00b7 Team 1 \u00b7 VM \u00b7 Windows workstation 1",
+        "team": "1",
+        "address": "10.100.1.12",
+        "protocol": "rdp",
+        "port": 3389,
+        "tcp_open": false
+      },
+      {
+        "name": "P100 \u00b7 CT \u00b7 r0.1.2-mhl-db01-t005",
+        "team": "5",
+        "address": "10.100.5.30",
+        "protocol": "ssh",
+        "port": 22,
+        "tcp_open": false
+      },
+      {
+        "name": "P100 \u00b7 Team 1 \u00b7 MHL-T01-Linux-01",
+        "team": "1",
+        "address": "10.100.1.11",
+        "protocol": "ssh",
+        "port": 22,
+        "tcp_open": false
+      },
+      {
+        "name": "P100 \u00b7 Team 1 \u00b7 MHL-T01-Linux-01 \u00b7 RDP",
+        "team": "1",
+        "address": "10.100.1.11",
+        "protocol": "rdp",
+        "port": 3389,
+        "tcp_open": false
+      },
+      {
+        "name": "P100 \u00b7 Team 1 \u00b7 MHL-T01-Linux-02",
+        "team": "1",
+        "address": "10.100.1.13",
+        "protocol": "ssh",
+        "port": 22,
+        "tcp_open": false
+      },
+      {
+        "name": "P100 \u00b7 Team 1 \u00b7 MHL-T01-Linux-02 \u00b7 RDP",
+        "team": "1",
+        "address": "10.100.1.13",
+        "protocol": "rdp",
+        "port": 3389,
+        "tcp_open": false
+      },
+      {
+        "name": "P100 \u00b7 Team 5 \u00b7 VM \u00b7 Windows workstation 1",
+        "team": "5",
+        "address": "10.100.5.12",
+        "protocol": "rdp",
+        "port": 3389,
+        "tcp_open": false
+      },
+      {
+        "name": "P100 \u00b7 Team 1 \u00b7 VM \u00b7 Windows workstation 2",
+        "team": "1",
+        "address": "10.100.1.14",
+        "protocol": "rdp",
+        "port": 3389,
+        "tcp_open": false
+      },
+      {
+        "name": "P100 \u00b7 Team 5 \u00b7 VM \u00b7 Windows workstation 2",
+        "team": "5",
+        "address": "10.100.5.14",
+        "protocol": "rdp",
+        "port": 3389,
+        "tcp_open": false
+      },
+      {
+        "name": "P100 \u00b7 VM \u00b7 r0.1.2-mhl-dc01-t001",
+        "team": "1",
+        "address": "10.100.1.10",
+        "protocol": "rdp",
+        "port": 3389,
+        "tcp_open": false
+      },
+      {
+        "name": "P100 \u00b7 VM \u00b7 r0.1.2-mhl-dc01-t005",
+        "team": "5",
+        "address": "10.100.5.10",
+        "protocol": "rdp",
+        "port": 3389,
+        "tcp_open": false
+      },
+      {
+        "name": "P100 \u00b7 VM \u00b7 r0.1.2-mhl-file01-t001",
+        "team": "1",
+        "address": "10.100.1.20",
+        "protocol": "rdp",
+        "port": 3389,
+        "tcp_open": false
+      },
+      {
+        "name": "P100 \u00b7 VM \u00b7 r0.1.2-mhl-file01-t005",
+        "team": "5",
+        "address": "10.100.5.20",
+        "protocol": "rdp",
+        "port": 3389,
+        "tcp_open": false
+      },
+      {
+        "name": "P100 \u00b7 CT \u00b7 r0.1.2-mhl-app01-t001",
+        "team": "1",
+        "address": "10.100.1.40",
+        "protocol": "ssh",
+        "port": 22,
+        "tcp_open": false
+      },
+      {
+        "name": "P100 \u00b7 CT \u00b7 r0.1.2-mhl-app01-t005",
+        "team": "5",
+        "address": "10.100.5.40",
+        "protocol": "ssh",
+        "port": 22,
+        "tcp_open": false
+      },
+      {
+        "name": "P100 \u00b7 CT \u00b7 r0.1.2-mhl-bkp01-t001",
+        "team": "1",
+        "address": "10.100.1.60",
+        "protocol": "ssh",
+        "port": 22,
+        "tcp_open": false
+      },
+      {
+        "name": "P100 \u00b7 CT \u00b7 r0.1.2-mhl-bkp01-t005",
+        "team": "5",
+        "address": "10.100.5.60",
+        "protocol": "ssh",
+        "port": 22,
+        "tcp_open": false
+      },
+      {
+        "name": "P100 \u00b7 CT \u00b7 r0.1.2-mhl-ci01-t001",
+        "team": "1",
+        "address": "10.100.1.50",
+        "protocol": "ssh",
+        "port": 22,
+        "tcp_open": false
+      },
+      {
+        "name": "P100 \u00b7 CT \u00b7 r0.1.2-mhl-ci01-t005",
+        "team": "5",
+        "address": "10.100.5.50",
+        "protocol": "ssh",
+        "port": 22,
+        "tcp_open": false
+      }
+    ]
+  },
+  "guests_on_proxmox1": [
+    127,
+    128,
+    129
+  ],
+  "proxmox1_fenced": false,
+  "ordinary_guests_relocated": false,
+  "remaining_acceptance": [
+    "Physical host-failure and fencing/rejoin acceptance has not been performed.",
+    "New router provisioning is not yet automatically enrolled in the shared-storage native HA policy.",
+    "Existing unfenced Proxmox1 router identities cannot safely be recreated elsewhere."
+  ]
+}

@@ -1,0 +1,60 @@
+{
+  "schema_version": 1,
+  "endpoint": "https://range.brogano.dev",
+  "method": "Chromium Guacamole Client over public WebSocket; rendered display stable five seconds, no remote input",
+  "configure_job": "256a249f4c404421a1e25453a8c2d2de",
+  "passed": 3,
+  "total_online_staging": 3,
+  "offline_staging_vmids": [
+    127,
+    128,
+    129
+  ],
+  "connections": [
+    {
+      "source": "postgresql",
+      "identifier": "45",
+      "name": "P100 \u00b7 CT \u00b7 t254-mhl-app01",
+      "protocol": "ssh",
+      "resource_key": "container:t254-mhl-app01",
+      "team_id": "254",
+      "address": "10.100.254.40",
+      "guest_id": null,
+      "node": null,
+      "result": "connected",
+      "width": 1024,
+      "height": 768,
+      "lastState": 5
+    },
+    {
+      "source": "postgresql",
+      "identifier": "46",
+      "name": "P100 \u00b7 CT \u00b7 t254-mhl-bkp01",
+      "protocol": "ssh",
+      "resource_key": "container:t254-mhl-bkp01",
+      "team_id": "254",
+      "address": "10.100.254.60",
+      "guest_id": null,
+      "node": null,
+      "result": "connected",
+      "width": 1024,
+      "height": 768,
+      "lastState": 5
+    },
+    {
+      "source": "postgresql",
+      "identifier": "47",
+      "name": "P100 \u00b7 CT \u00b7 t254-mhl-ci01",
+      "protocol": "ssh",
+      "resource_key": "container:t254-mhl-ci01",
+      "team_id": "254",
+      "address": "10.100.254.50",
+      "guest_id": null,
+      "node": null,
+      "result": "connected",
+      "width": 1024,
+      "height": 768,
+      "lastState": 5
+    }
+  ]
+}

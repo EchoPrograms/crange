@@ -102,5 +102,12 @@
       "template": 1,
       "tags": "crange-cache;crange-image"
     }
-  ]
+  ],
+  "sealed_windows_source": {
+    "vmid": 8912,
+    "before_sha256": "5e9fdb9337ec631b74100dc1c1f47ffdfb02f8873b32ee6119b49bc7cef27e9d",
+    "after_sha256": "5e9fdb9337ec631b74100dc1c1f47ffdfb02f8873b32ee6119b49bc7cef27e9d",
+    "unchanged": true
+  },
+  "second_preview_online_changes": 0
 }

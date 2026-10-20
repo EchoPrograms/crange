@@ -26,8 +26,33 @@ five seconds. See [Team 2 evidence](guacamole-team2-connection-acceptance.json).
 Team 4 configuration also completed and all 12 entries passed the same real
 browser rendering check; the controller SSH entry passed too. See
 [Team 4 evidence](guacamole-team4-connection-acceptance.json).
+Staging job `256a249f4c404421a1e25453a8c2d2de` completed while correctly skipping
+offline VMIDs 127–129. All three online staging containers rendered stable SSH
+sessions; see [staging evidence](guacamole-staging-online-acceptance.json).
+Participant `p100-t002u01` also authenticated with its unchanged existing
+password and rendered all three permitted connections (Linux SSH/RDP and Windows
+RDP); see [participant evidence](guacamole-participant-connection-acceptance.json).
 The initial 67-entry audit below is historical baseline evidence, not current
-acceptance. Team 3 and staging repairs and remaining connection checks continue.
+acceptance. Team 3 configuration completed and all 12 entries passed rendered
+browser checks, including the two newly initialized Windows workstations; see
+[Team 3 evidence](guacamole-team3-connection-acceptance.json).
+
+The current native inventory has 67 entries: 40 rendered successfully across
+Teams 2/3/4, online staging and controller SSH. A separate participant session
+passed all three permitted entries. All 24 Team 1/5 SSH/RDP ports were rechecked
+from Guacamole's `10.60.0.10` source and remained unreachable. Those teams depend
+on unfenced Proxmox1 routers 120/121. Three staging entries also belong to guests
+on Proxmox1. These 27 entries remain outage-blocked, not accepted as working.
+See [current audit summary](guacamole-connection-audit-summary.json).
+
+Team 3 Parrot VM 231 had never run cloud-init and used DHCP `10.100.3.211`
+instead of its declared static address. After exact native identity checks,
+the missed cloud-init target was started. Its active interface could not be
+renamed during initialization, so one reboot was issued. That command's response
+timed out; native task history was inspected instead of replaying it. The VM
+started successfully and QGA confirmed `eth0` at `10.100.3.13/24`. Normal Team 3
+configuration completed as job `3c2cac01baf744b99ebcf63c28f2bbab`. This repairs the
+existing guest; the initial boot-generator interruption remains unexplained.
 
 Guacamole reconciliation now serializes per-project native connection updates
 and defers Windows entries without their private per-VM credential binding.
