@@ -166,7 +166,7 @@
 .cr-account-popover::backdrop { background: transparent; }
 .cr-account-popover .page-list, .cr-account-popover ul { margin: 0 !important; padding: 0 !important; background: transparent !important; list-style: none; }
 .cr-account-popover .page-list li { display: block !important; float: none !important; margin: 0 !important; padding: 0 !important; border: 0 !important; }
-.cr-account-popover a, .cr-account-popover button { display: flex !important; align-items: center; width: 100%; min-height: 36px; padding: 7px 10px !important; box-sizing: border-box; background: transparent !important; background-image: none !important; color: var(--cr-text) !important; border: 0 !important; text-align: left; text-decoration: none; font: inherit; font-weight: 400; }
+.cr-account-popover a, .cr-account-popover button { display: flex !important; align-items: center; justify-content: flex-start; width: 100%; min-height: 36px; margin: 0 !important; padding: 7px 10px !important; box-sizing: border-box; background: transparent !important; background-image: none !important; color: var(--cr-text) !important; border: 0 !important; text-align: left; text-decoration: none; font: inherit; font-weight: 400; }
 .cr-account-popover a:hover, .cr-account-popover button:hover, .cr-account-popover a:focus-visible, .cr-account-popover button:focus-visible { background: #303030 !important; color: #fff !important; }
 .cr-account-popover .page-list a.current { background: #292929 !important; box-shadow: none !important; font-weight: 600; }
 .cr-account-popover .cr-account-actions { margin-top: 4px; padding-top: 4px; border-top: 1px solid var(--cr-line); }

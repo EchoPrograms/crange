@@ -3,6 +3,15 @@
 Updated October 20, 2026 (UTC). Historical diagnostics and job evidence are in
 [platform-progress.md](platform-progress.md).
 
+## October 20 — account-menu alignment deployed
+
+Preferences and Logout inherited 3.5-pixel native button margins, shifting them
+away from Home and Settings. All account-menu rows now use zero margin and the
+same left alignment. Browser checks with native Guacamole CSS passed at 1280px
+and 390px; all row and text edges match. The rebuilt extension is deployed and
+the public Access stylesheet contains the fix. No remote connections were
+active during the restart. See [alignment evidence](guacamole-account-menu-alignment-acceptance.json).
+
 ## October 20 — portal login, navigation and settings deployed
 
 Control and Access share one sign-in stylesheet, with distinct names/logos and

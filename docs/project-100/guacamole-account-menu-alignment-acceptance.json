@@ -1,0 +1,24 @@
+{
+  "checked_at": "2026-10-20T13:15:00Z",
+  "problem": "Native Guacamole button margins offset Preferences and Logout from the Home and Settings links by 3.5 pixels.",
+  "change": "Reset account-menu row margins and explicitly align row content to the left.",
+  "browser_fixture": {
+    "uses_native_guacamole_css": true,
+    "viewports": [1280, 390],
+    "items": ["Preferences", "Home", "Settings", "Logout"],
+    "all_item_left_edges_equal": true,
+    "all_text_left_edges_equal": true,
+    "all_item_widths_equal": true,
+    "all_item_margins_px": 0
+  },
+  "behavior_check": "Existing native navigation, callbacks, keyboard dismissal and return-context tests passed.",
+  "deployment": {
+    "target": "/opt/guacamole/extensions/crange-theme.jar",
+    "sha256": "3dcf69b512ebb94979a4c335ff75d735328e50cfbce8f734da487ea9ca01a802",
+    "backup": "/opt/guacamole/extensions/crange-theme.jar.20261020T131501Z.bak",
+    "active_remote_sessions_at_check": 0,
+    "public_host": "https://range.brogano.dev/",
+    "public_css_contains_margin_reset": true,
+    "public_css_contains_left_alignment": true
+  }
+}

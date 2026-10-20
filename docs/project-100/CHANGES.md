@@ -1,5 +1,13 @@
 # Project 100 changes and fixes
 
+## 2026-10-20 — align Guacamole account-menu rows
+
+- Removed inherited native button margins from Preferences and Logout so their
+  hit areas, highlights and text align with Home and Settings.
+- Verified both desktop and phone geometry with native Guacamole CSS and kept
+  existing menu keyboard/navigation behavior. The fix is deployed at
+  `range.brogano.dev`; the public CSS includes the corrected rule.
+
 ## 2026-10-20 — consistent sign-in and Guacamole navigation
 
 - Shared Control/Access sign-in geometry, type, fields, errors and responsive
