@@ -1108,6 +1108,8 @@ def cmd_plan(args: argparse.Namespace) -> None:
                 plan_args.append('-replace=proxmox_sdn_applier.apply')
             tf_run(path, plan_args)
             detail = json.loads(tf_run(path, ["show", "-json", str(plan)], capture=True).stdout)
+            from crange_router_ha import protect_registered_plan
+            protect_registered_plan(path, detail)
             if network_foundation:
                 from crange_network_foundation import validate_plan
                 validate_plan(detail, full_cfg, network_foundation, placement)
@@ -1261,6 +1263,9 @@ def cmd_apply_saved(args: argparse.Namespace, path: Path) -> None:
         if blockers:
             raise CrangeError('Release deployment cannot change staging, unselected teams or unowned resources: ' + ', '.join(blockers))
     changes = record.get('changes', [])
+    from crange_router_ha import protect_registered_plan
+    protect_registered_plan(path, {'resource_changes':[
+        {'address':item['address'],'change':{'actions':item['actions']}} for item in record.get('changes',[])]})
     guest_changes = [item for item in changes if not (record.get('network_foundation')
                                                     and item['address'] == 'proxmox_sdn_applier.apply')]
     destructive = [item['address'] for item in guest_changes if 'delete' in item.get('actions', [])]
@@ -1548,6 +1553,8 @@ def _configure_team_inventory(args, cfg, team, groups):
     vm_group = "staging_vms" if team == 254 else f"team_{team:03d}_vms"
     for group in (jump_group, container_group, vm_group):
         ansible(args, "root-access.yml", [group])
+    from crange_linux_access import configure as configure_linux_access
+    configure_linux_access(ROOT, cfg, {'all': {'children': groups}}, team=team)
     ansible(args, "vm-swap.yml", [vm_group])
     if any(str(cfg.get("scenario_boxes", {}).get(values.get("crange_box_key"), {}).get("team_id")) == str(team)
            for values in groups.get("windows_guests", {}).get("hosts", {}).values()):
@@ -1888,6 +1895,10 @@ def cmd_configure(args: argparse.Namespace) -> None:
         ansible(args, "containers.yml", ["scenario_containers"])
         for group in ("jumpboxes", "scenario_containers", "scenario_vms"):
             ansible(args, "root-access.yml", [group])
+        from crange_linux_access import configure as configure_linux_access
+        linux_inventory = json.loads(output.read_text())
+        if linux_inventory.get('all', {}).get('children', {}).get('scenario_containers', {}).get('hosts'):
+            configure_linux_access(ROOT, json_config(path), linux_inventory)
         ansible(args, "vm-swap.yml", ["scenario_vms"])
         _run_windows_management_routes(args, windows_inventory)
         _run_windows_guest_baseline(windows_inventory, windows_credentials)

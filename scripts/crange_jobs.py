@@ -597,7 +597,7 @@ class JobStore:
             return
         self._waiting_check = time.monotonic() + 15
         with self.connect() as db:
-            rows=db.execute("SELECT id,waiting_nodes FROM jobs WHERE status='waiting-for-node' AND operation IN ('project-delete','project-purge')").fetchall()
+            rows=db.execute("SELECT id,operation,waiting_nodes FROM jobs WHERE status='waiting-for-node' AND operation IN ('project-delete','project-purge')").fetchall()
         if not rows:
             return
         try:
@@ -610,7 +610,8 @@ class JobStore:
         with self.connect() as db:
             for row in rows:
                 required=json.loads(row['waiting_nodes'])
-                if required and set(required)<=online:
+                ready = bool(set(required) & online) if row['operation'] == 'project-delete' else set(required) <= online
+                if required and ready:
                     db.execute("UPDATE jobs SET status='queued',waiting_nodes='[]',finished=NULL WHERE id=? AND status='waiting-for-node'",(row['id'],))
 
     def run_next(self, force_only=None, *, network_only=False):

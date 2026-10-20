@@ -51,7 +51,8 @@ Approved image storage and existing image ownership are not rewritten.
   remain separate. Existing VM boot order is retained when a base profile advances,
   avoiding unrelated reboots. A live dashboard review proposed only 13 missing
   workstation creates and preserved all 50 existing guest state fingerprints.
-  Its apply is still in progress; this is not guest health or failover acceptance.
+  Its apply completed all 13 creates. Workstation configuration and remote-access
+  acceptance remain in progress; this is not complete guest/failover acceptance.
 - Six-node quorum is modeled with two votes for Proxmox4 and one for every other
   member. Seven expected votes require four present votes. Proxmox4 plus any two
   other nodes has four, so all 26 combinations of zero through three non-core
@@ -81,9 +82,8 @@ is needed for this vote change.
    outside this recovery scope.
 3. Configure router runtime recovery with storage accessible to surviving nodes
    and verified fencing. Never start a second router with the same network
-   identity merely because its previous host cannot be reached. Current cluster
-   HA has no managed resources, and an unreachable previously unmanaged node
-   cannot be assumed fenced.
+   identity merely because its previous host cannot be reached. Native HA now manages the first converted production routers on the core
+   store. An unreachable previously unmanaged node cannot be assumed fenced.
 4. Verify creation, editing and router recovery through the normal web workflows
    under the required outage sets. Scheduler simulations and vote arithmetic do
    not establish that full end-to-end behavior. Resource capacity, accepted
@@ -102,9 +102,14 @@ and NFSv4.2 export on Proxmox4, with a fixed six-host client allowlist. It prese
 existing volumes and refuses uncertain retries. All five online nodes passed
 shared read/write checks; Proxmox1 remains untested. See
 [storage evidence](project-100/router-core-storage-acceptance.json).
-Only a disposable, network-isolated container is enrolled for migration testing.
-No production router disk has been moved or enrolled, so production runtime
-recovery is not yet established.
+The disposable network-isolated fixture completed graceful migrations and
+locked Terraform state adoption with a zero-change refreshed plan, then was
+removed. All five online Project 100 routers (CTs 113, 116–119) now use the core store and native HA with
+`failback=0`. Production CT 119 migrated from Proxmox2 to Proxmox3, and the
+controller adopted its location through a locked state transaction. Actual
+outage/fencing/rejoin acceptance is still outstanding. New router creation
+does not yet automatically enroll in this operator-managed HA policy; do not
+claim new projects have runtime recovery until that enrollment is completed.
 
 Provider v0.104.0 also makes a container's `node_name` replacement-only, and reads
 its configuration through the node recorded in Terraform state. Native HA
@@ -133,3 +138,22 @@ voting model again.
 Run `python3 -m unittest discover -s tests -p test_redundancy.py` for the role
 admission and 26-case placement/quorum models. These tests do not power off nodes
 or claim runtime HA acceptance.
+
+## Reconnecting nodes and deferred deletion
+
+A project deletion now reviews and destroys only its available, exactly owned
+Terraform guests while any required host is offline. Offline guest instances
+remain byte-identical in state; project networks and the aggregate route remain
+until final teardown. Each returning required node requeues cleanup, so another
+still-offline host does not prevent progress. Permanent image deletion retains
+its stricter all-required-nodes preflight. Unknown ownership and foreign pools
+still block rather than authorizing deletion by a project-looking tag.
+
+For enrolled routers, native HA remains the only runtime fencing authority.
+Automatic failback is disabled. Before state adoption, CRANGE checks the unique
+VMID, shared disk/network identity, fresh master/LRM ownership and cluster quorum,
+including when the guest appears on its old recorded node. A returning host
+cannot override a newer recovered owner. State adoption uses a locked, unforced
+Terraform transaction with the original lineage and protected root registration.
+Project deletion retires only those exact registrations through a hash-pinned
+root relay; the worker does not receive general HA administration privileges.

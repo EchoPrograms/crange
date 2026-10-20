@@ -11,6 +11,52 @@ import crange_proxmox_compat as compat
 
 
 class CompatTests(unittest.TestCase):
+    def test_tls_identity_remains_available_when_all_upstream_slots_are_busy(self):
+        from concurrent.futures import ThreadPoolExecutor
+        import socket
+        import ssl
+        import threading
+        from urllib.request import Request, urlopen
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / 'compat.json'
+            with socket.socket() as probe:
+                probe.bind(('127.0.0.1', 0))
+                port = probe.getsockname()[1]
+            config = {**self.config(), 'port': port, 'concurrency': 4}
+            self.write_config(path, config)
+            adapter = compat.Adapter(path)
+            release, full = threading.Event(), threading.Event()
+            lock = threading.Lock()
+            active = 0
+            def blocked_forward(*args):
+                nonlocal active
+                with lock:
+                    active += 1
+                    if active == 4: full.set()
+                if not release.wait(timeout=10): raise RuntimeError('Test upstream wait expired.')
+                return 200, {'Content-Type':'application/json'}, b'{"data":[]}'
+            adapter.forward = blocked_forward
+            server = compat.make_server(adapter)
+            thread = threading.Thread(target=server.serve_forever, daemon=True)
+            thread.start()
+            context = ssl.create_default_context(cafile=str(path.with_suffix('.crt')))
+            def read_api():
+                req = Request(f'https://127.0.0.1:{port}/api2/json/nodes',
+                              headers={'Authorization':'PVEAPIToken=test-fixture'})
+                with urlopen(req, context=context, timeout=12) as response: return response.status
+            try:
+                with ThreadPoolExecutor(max_workers=4) as clients:
+                    pending = [clients.submit(read_api) for _ in range(4)]
+                    try:
+                        self.assertTrue(full.wait(timeout=5), 'All upstream slots must be occupied.')
+                        self.assertEqual(compat.reviewed_identity(path), adapter.identity)
+                    finally:
+                        release.set()
+                    self.assertEqual([request.result(timeout=3) for request in pending], [200]*4)
+            finally:
+                release.set()
+                server.shutdown(); server.server_close(); thread.join(timeout=3)
+
     @classmethod
     def setUpClass(cls):
         cls.materials = tempfile.TemporaryDirectory()

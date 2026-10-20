@@ -1,0 +1,30 @@
+---
+- name: Configure the declared container SSH login for CR Access
+  hosts: all
+  gather_facts: false
+  become: true
+  tasks:
+    - name: Inspect the declared login before changing it
+      ansible.builtin.getent:
+        database: passwd
+        key: '{{ crange_access_login }}'
+        fail_key: false
+      no_log: true
+
+    - name: Refuse to repurpose an operating-system service account
+      ansible.builtin.assert:
+        that:
+          - ansible_facts.getent_passwd[crange_access_login] is none or (ansible_facts.getent_passwd[crange_access_login][1] | int >= 1000 and ansible_facts.getent_passwd[crange_access_login][1] | int < 65534)
+        fail_msg: The declared CR Access login conflicts with an operating-system account.
+      no_log: true
+
+    - name: Ensure the declared login exists with its protected credential
+      ansible.builtin.user:
+        name: '{{ crange_access_login }}'
+        password: '{{ crange_access_password_hash }}'
+        password_lock: false
+        update_password: always
+        shell: /bin/sh
+        create_home: true
+        state: present
+      no_log: true

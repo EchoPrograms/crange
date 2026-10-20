@@ -84,7 +84,7 @@ def _namespace(name, project):
     return bool(re.fullmatch(rf'p{project:03d}(?:tr|[tc][0-9]{{3}})', str(name)))
 
 
-def validate_destroy_plan(detail, project, api):
+def validate_destroy_plan(detail, project, api, *, deferred=None, targets=None):
     """Every destructive target must belong to this project's exact TF state."""
     prefix = f'p{project:03d}'
     resources = api.request('GET', '/cluster/resources', {'type': 'vm'}) or []
@@ -97,6 +97,8 @@ def validate_destroy_plan(detail, project, api):
         actions = item.get('change', {}).get('actions', [])
         if actions == ['no-op']:
             continue
+        if targets is not None and item.get('address') not in targets:
+            raise ValueError('Partial teardown includes a resource outside its online guest targets.')
         if actions != ['delete'] or item.get('type') not in allowed:
             raise ValueError('Teardown plan contains an unsupported or non-deletion action.')
         before = item['change'].get('before') or {}
@@ -131,8 +133,70 @@ def validate_destroy_plan(detail, project, api):
     for resource in resources:
         tags = _tags(resource.get('tags'))
         if prefix in tags and 'crange-image' not in tags and not resource.get('template') and int(resource['vmid']) not in guests:
+            retained = (deferred or {}).get(int(resource['vmid']))
+            if (retained and resource.get('node') == retained['node'] and resource.get('node') not in online
+                    and resource.get('type') == retained['kind'] and resource.get('pool') == 'crange-iac'):
+                continue
             raise ValueError(f'Project guest {resource["vmid"]} is outside the teardown plan; reconcile its Terraform ownership first.')
     return list(guests.values())
+
+
+def partial_teardown_scope(path, project, unavailable):
+    """Select only recorded online guests; retain offline identities verbatim."""
+    from crange_apply_scope import guest_key
+    snapshot = json.loads((path / 'terraform.tfstate').read_text())
+    targets, deferred, preserved = set(), {}, {}
+    seen = set()
+    for resource in snapshot.get('resources', []):
+        if resource.get('mode') == 'data' or resource.get('type') not in (
+                'proxmox_virtual_environment_vm', 'proxmox_virtual_environment_container'):
+            continue
+        prefix = resource.get('module', '')
+        for instance in resource.get('instances', []):
+            address = (prefix + '.' if prefix else '') + resource['type'] + '.' + resource['name']
+            if 'index_key' in instance:
+                address += '[' + json.dumps(instance['index_key']) + ']'
+            value = instance.get('attributes', {})
+            vmid, node = value.get('vm_id'), value.get('node_name')
+            if (not guest_key(address) or type(vmid) is not int or vmid < 100 or vmid in seen or
+                    str(value.get('id')) != str(vmid) or node not in {f'proxmox{i}' for i in range(1, 7)} or
+                    f'p{project:03d}' not in _tags(value.get('tags')) or value.get('template') or
+                    instance.get('deposed') or instance.get('status') == 'tainted'):
+                raise ValueError('Partial teardown requires exact, unique project guest state identities.')
+            seen.add(vmid)
+            if node in unavailable:
+                deferred[vmid] = {'node':node, 'kind':'qemu' if resource['type'].endswith('_vm') else 'lxc'}
+                preserved[address] = instance
+            else:
+                targets.add(address)
+    return targets, deferred, preserved
+
+
+def delete_available_guests(path, project, api, terraform, archive, unavailable, revoke):
+    """Delete an inspected online-only plan, leaving networks and images intact."""
+    targets, deferred, before = partial_teardown_scope(path, project, unavailable)
+    if not targets:
+        raise WaitingForNodes(unavailable)
+    terraform(path, ['init', '-input=false'])
+    plan = archive / 'online-teardown.tfplan'
+    terraform(path, ['plan', '-destroy', '-input=false', '-out=' + str(plan),
+                     *['-target=' + address for address in sorted(targets)]])
+    detail = json.loads(terraform(path, ['show', '-json', str(plan)], capture=True).stdout)
+    guests = validate_destroy_plan(detail, project, api, deferred=deferred, targets=targets)
+    if not guests:
+        raise ValueError('Partial teardown did not review any online guest deletions.')
+    revoke()
+    from crange_router_ha import retire_routers
+    retire_routers(path, {guest['id'] for guest in guests})
+    print(f'Reviewed teardown of {len(guests)} available project guests; offline guests and project networks are retained.', flush=True)
+    terraform(path, ['apply', '-parallelism=1', '-input=false', str(plan)])
+    _, _, after = partial_teardown_scope(path, project, unavailable)
+    if before != after:
+        raise ValueError('Offline guest state changed during partial teardown; retain the deletion fence.')
+    remaining = api.request('GET', '/cluster/resources', {'type':'vm'}) or []
+    if any(row.get('vmid') in {guest['id'] for guest in guests} for row in remaining):
+        raise ValueError('Online teardown guests remain in Proxmox; retain their state and deletion fence.')
+    raise WaitingForNodes(unavailable)
 
 
 def _revoke_connections(root, project, archive):
@@ -252,7 +316,15 @@ def delete_project(project, *, actor='cli', api=None, terraform=None, revoke=Non
         write_state(path, record)
         api = api or ProxmoxAPI(); terraform = terraform or tf_run
         try:
-            require_nodes(api, required_guest_nodes(path, project, api))
+            from crange_router_ha import reconcile_locations, retire_routers
+            reconcile_locations(path,api=api,tf=terraform)
+            try:
+                require_nodes(api, required_guest_nodes(path, project, api))
+            except WaitingForNodes as waiting:
+                if (path / 'terraform.tfstate').exists():
+                    delete_available_guests(path, project, api, terraform, archive, set(waiting.nodes),
+                        lambda: (revoke or _revoke_connections)(ROOT, project, archive))
+                raise
             if (path / 'terraform.tfstate').exists():
                 terraform(path, ['init', '-input=false'])
                 plan = archive / 'teardown.tfplan'
@@ -267,6 +339,7 @@ def delete_project(project, *, actor='cli', api=None, terraform=None, revoke=Non
                 # Revoke access before removing guest disks; retry uses the same
                 # retained ownership files if the connector is unavailable.
                 (revoke or _revoke_connections)(ROOT, project, archive)
+                retire_routers(path, {guest['id'] for guest in targets})
                 terraform(path, ['apply', '-parallelism=1', '-input=false', str(plan)])
                 after = json.loads(terraform(path, ['show', '-json'], capture=True).stdout)
                 def populated(module):

@@ -10,19 +10,21 @@
     get_checksum: false
   register: crange_swap_file
 
-- name: Check the root filesystem before allocating swap
-  ansible.builtin.command:
-    argv: [df, -Pk, /]
-  register: crange_swap_disk
-  changed_when: false
-  when: not crange_swap_file.stat.exists and (ansible_swaptotal_mb | int) < (crange_swap_target_mb | int)
-
-- name: Require room for swap and guest data
+- name: Reject an unexpected managed swap path
   ansible.builtin.assert:
     that:
-      - (crange_swap_disk.stdout_lines[1].split()[3] | int) >= (((crange_swap_target_mb | int) - (ansible_swaptotal_mb | int) + 2048) * 1024)
-    fail_msg: "This VM needs more free disk space for its swap target and a 2 GB data reserve."
-  when: not crange_swap_file.stat.exists and (ansible_swaptotal_mb | int) < (crange_swap_target_mb | int)
+      - not crange_swap_file.stat.exists or (crange_swap_file.stat.isreg and not crange_swap_file.stat.islnk)
+    fail_msg: The managed swap path must be a regular file, never a link or directory.
+
+- name: Read active swap areas
+  ansible.builtin.slurp:
+    src: /proc/swaps
+  register: crange_active_swap
+
+- name: Record the managed swap state
+  ansible.builtin.set_fact:
+    crange_swap_active_now: "{{ '/var/lib/crange/swapfile' in (crange_active_swap.content | b64decode) }}"
+    crange_swap_allocation_mb: "{{ [1, (crange_swap_target_mb | int) - (ansible_swaptotal_mb | int), ((crange_swap_file.stat.size | default(0) | int) // 1048576)] | max }}"
 
 - name: Create the managed guest state directory
   ansible.builtin.file:
@@ -31,17 +33,83 @@
     owner: root
     group: root
     mode: "0700"
-  when: not crange_swap_file.stat.exists and (ansible_swaptotal_mb | int) < (crange_swap_target_mb | int)
+  when: crange_swap_file.stat.exists or (ansible_swaptotal_mb | int) < (crange_swap_target_mb | int)
+
+- name: Detect the managed swap filesystem
+  ansible.builtin.command:
+    argv: [findmnt, -n, -o, FSTYPE, --target, /var/lib/crange]
+  register: crange_swap_filesystem
+  changed_when: false
+  when: crange_swap_file.stat.exists or (ansible_swaptotal_mb | int) < (crange_swap_target_mb | int)
+
+- name: Require native Btrfs swap-file support before changing an inactive file
+  ansible.builtin.command:
+    argv: [btrfs, filesystem, mkswapfile, --help]
+  changed_when: false
+  when:
+    - crange_swap_filesystem.stdout | default('') == 'btrfs'
+    - not crange_swap_active_now
+
+- name: Validate the inactive Btrfs swap layout
+  ansible.builtin.command:
+    argv: [btrfs, inspect-internal, map-swapfile, /var/lib/crange/swapfile]
+  register: crange_swap_btrfs_layout
+  changed_when: false
+  failed_when: crange_swap_btrfs_layout.rc not in [0, 1]
+  when:
+    - crange_swap_filesystem.stdout | default('') == 'btrfs'
+    - crange_swap_file.stat.exists
+    - not crange_swap_active_now
+
+- name: Select safe swap allocation or inactive Btrfs repair
+  ansible.builtin.set_fact:
+    crange_swap_repair_btrfs: "{{ crange_swap_file.stat.exists and not crange_swap_active_now and (crange_swap_filesystem.stdout | default('')) == 'btrfs' and (crange_swap_btrfs_layout.rc | default(0)) == 1 }}"
+
+- name: Remove only an invalid inactive managed Btrfs swap file
+  ansible.builtin.file:
+    path: /var/lib/crange/swapfile
+    state: absent
+  when: crange_swap_repair_btrfs
+
+- name: Commit freed inactive Btrfs swap extents before measuring free space
+  ansible.builtin.command:
+    argv: [btrfs, filesystem, sync, /var/lib/crange]
+  changed_when: false
+  when: crange_swap_repair_btrfs
+
+- name: Check the root filesystem before allocating swap
+  ansible.builtin.command:
+    argv: [df, -Pk, /var/lib/crange]
+  register: crange_swap_disk
+  changed_when: false
+  when: crange_swap_repair_btrfs or (not crange_swap_file.stat.exists and (ansible_swaptotal_mb | int) < (crange_swap_target_mb | int))
+
+- name: Require room for swap and guest data
+  ansible.builtin.assert:
+    that:
+      - (crange_swap_disk.stdout_lines[1].split()[3] | int) >= (((crange_swap_allocation_mb | int) + 2048) * 1024)
+    fail_msg: "This VM needs more free disk space for its swap target and a 2 GB data reserve."
+  when: crange_swap_repair_btrfs or (not crange_swap_file.stat.exists and (ansible_swaptotal_mb | int) < (crange_swap_target_mb | int))
+
+- name: Allocate and format a Btrfs swap file without copy-on-write or holes
+  ansible.builtin.command:
+    argv: [btrfs, filesystem, mkswapfile, --size, "{{ crange_swap_allocation_mb }}M", /var/lib/crange/swapfile]
+    creates: /var/lib/crange/swapfile
+  when:
+    - crange_swap_filesystem.stdout | default('') == 'btrfs'
+    - crange_swap_repair_btrfs or (not crange_swap_file.stat.exists and (ansible_swaptotal_mb | int) < (crange_swap_target_mb | int))
 
 - name: Allocate the additional swap file
   ansible.builtin.command:
     argv:
       - fallocate
       - -l
-      - "{{ (crange_swap_target_mb | int) - (ansible_swaptotal_mb | int) }}M"
+      - "{{ crange_swap_allocation_mb }}M"
       - /var/lib/crange/swapfile
     creates: /var/lib/crange/swapfile
-  when: not crange_swap_file.stat.exists and (ansible_swaptotal_mb | int) < (crange_swap_target_mb | int)
+  when:
+    - crange_swap_filesystem.stdout | default('') != 'btrfs'
+    - not crange_swap_file.stat.exists and (ansible_swaptotal_mb | int) < (crange_swap_target_mb | int)
 
 - name: Restrict the managed swap file
   ansible.builtin.file:
@@ -54,7 +122,9 @@
 - name: Format newly allocated swap
   ansible.builtin.command:
     argv: [mkswap, /var/lib/crange/swapfile]
-  when: not crange_swap_file.stat.exists and (ansible_swaptotal_mb | int) < (crange_swap_target_mb | int)
+  when:
+    - crange_swap_filesystem.stdout | default('') != 'btrfs'
+    - not crange_swap_file.stat.exists and (ansible_swaptotal_mb | int) < (crange_swap_target_mb | int)
 
 - name: Persist managed swap on reboot
   ansible.builtin.lineinfile:
@@ -64,15 +134,9 @@
     state: present
   when: crange_swap_file.stat.exists or (ansible_swaptotal_mb | int) < (crange_swap_target_mb | int)
 
-- name: Read active swap areas
-  ansible.builtin.slurp:
-    src: /proc/swaps
-  register: crange_active_swap
-  when: crange_swap_file.stat.exists or (ansible_swaptotal_mb | int) < (crange_swap_target_mb | int)
-
 - name: Enable managed swap without rebooting
   ansible.builtin.command:
     argv: [swapon, /var/lib/crange/swapfile]
   when:
-    - crange_active_swap is not skipped
-    - "'/var/lib/crange/swapfile' not in (crange_active_swap.content | b64decode)"
+    - crange_swap_file.stat.exists or (ansible_swaptotal_mb | int) < (crange_swap_target_mb | int)
+    - not crange_swap_active_now

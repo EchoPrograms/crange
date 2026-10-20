@@ -1,0 +1,176 @@
+{
+  "schema_version": 1,
+  "project_id": 100,
+  "routers": [
+    {
+      "phase": "enrolled",
+      "project_id": 100,
+      "router_key": "router:project",
+      "vmid": 113,
+      "node": "proxmox2",
+      "eligible_nodes": [
+        "proxmox2",
+        "proxmox3",
+        "proxmox4",
+        "proxmox5",
+        "proxmox6"
+      ],
+      "failback": false
+    },
+    {
+      "phase": "enrolled",
+      "project_id": 100,
+      "router_key": "router:staging",
+      "vmid": 116,
+      "node": "proxmox5",
+      "eligible_nodes": [
+        "proxmox2",
+        "proxmox3",
+        "proxmox4",
+        "proxmox5",
+        "proxmox6"
+      ],
+      "failback": false
+    },
+    {
+      "phase": "enrolled",
+      "project_id": 100,
+      "router_key": "router:team:3",
+      "vmid": 117,
+      "node": "proxmox5",
+      "eligible_nodes": [
+        "proxmox2",
+        "proxmox3",
+        "proxmox4",
+        "proxmox5",
+        "proxmox6"
+      ],
+      "failback": false
+    },
+    {
+      "phase": "enrolled",
+      "project_id": 100,
+      "router_key": "router:team:2",
+      "vmid": 118,
+      "node": "proxmox2",
+      "eligible_nodes": [
+        "proxmox2",
+        "proxmox3",
+        "proxmox4",
+        "proxmox5",
+        "proxmox6"
+      ],
+      "failback": false
+    },
+    {
+      "phase": "enrolled",
+      "project_id": 100,
+      "router_key": "router:team:4",
+      "vmid": 119,
+      "node": "proxmox2",
+      "eligible_nodes": [
+        "proxmox2",
+        "proxmox3",
+        "proxmox4",
+        "proxmox5",
+        "proxmox6"
+      ],
+      "failback": false
+    }
+  ],
+  "services": [
+    {
+      "crm_state": "started",
+      "failback": 0,
+      "id": "service:ct:113",
+      "max_relocate": 4,
+      "max_restart": 1,
+      "node": "proxmox2",
+      "request_state": "started",
+      "sid": "ct:113",
+      "state": "started",
+      "status": "ct:113 (proxmox2, started)",
+      "type": "service"
+    },
+    {
+      "crm_state": "started",
+      "failback": 0,
+      "id": "service:ct:116",
+      "max_relocate": 4,
+      "max_restart": 1,
+      "node": "proxmox5",
+      "request_state": "started",
+      "sid": "ct:116",
+      "state": "started",
+      "status": "ct:116 (proxmox5, started)",
+      "type": "service"
+    },
+    {
+      "crm_state": "started",
+      "failback": 0,
+      "id": "service:ct:117",
+      "max_relocate": 4,
+      "max_restart": 1,
+      "node": "proxmox5",
+      "request_state": "started",
+      "sid": "ct:117",
+      "state": "started",
+      "status": "ct:117 (proxmox5, started)",
+      "type": "service"
+    },
+    {
+      "crm_state": "started",
+      "failback": 0,
+      "id": "service:ct:118",
+      "max_relocate": 4,
+      "max_restart": 1,
+      "node": "proxmox2",
+      "request_state": "started",
+      "sid": "ct:118",
+      "state": "started",
+      "status": "ct:118 (proxmox2, started)",
+      "type": "service"
+    },
+    {
+      "crm_state": "started",
+      "failback": 0,
+      "id": "service:ct:119",
+      "max_relocate": 4,
+      "max_restart": 1,
+      "node": "proxmox3",
+      "request_state": "started",
+      "sid": "ct:119",
+      "state": "started",
+      "status": "ct:119 (proxmox3, started)",
+      "type": "service"
+    }
+  ],
+  "graceful_migration": {
+    "phase": "state-adopted",
+    "vmid": 119,
+    "source": "proxmox2",
+    "target": "proxmox3",
+    "created": 1792523925.827073,
+    "native": {
+      "crm_state": "started",
+      "failback": 0,
+      "id": "service:ct:119",
+      "max_relocate": 4,
+      "max_restart": 1,
+      "node": "proxmox3",
+      "request_state": "started",
+      "sid": "ct:119",
+      "state": "started",
+      "status": "ct:119 (proxmox3, started)",
+      "type": "service"
+    },
+    "adoption": {
+      "adopted": [
+        "module.team_router[\"4\"].proxmox_virtual_environment_container.router"
+      ]
+    }
+  },
+  "physical_failure_tested": false,
+  "rejoin_tested": false,
+  "offline_proxmox1_identities_recovered": false
+}

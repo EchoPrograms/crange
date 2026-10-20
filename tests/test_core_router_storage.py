@@ -58,6 +58,19 @@ class CoreRouterStorageTests(unittest.TestCase):
                     store.install({'existing_storage': {'storage': store.STORE}})
                 run.assert_not_called()
 
+    def test_controller_grant_cannot_expand_a_role_or_touch_other_paths(self):
+        with patch.object(store, 'run', return_value=json.dumps({'Datastore.Audit': 1, 'Sys.Console': 1})) as run:
+            with self.assertRaisesRegex(ValueError, 'unexpected privileges'):
+                store.grant_controller_storage()
+            self.assertEqual(run.call_count, 1)
+        with patch.object(store, 'run', side_effect=[json.dumps({'Datastore.Audit': 1, 'Datastore.AllocateSpace': 1}), '', '']) as run:
+            store.grant_controller_storage()
+            grants = [c.args for c in run.call_args_list[1:]]
+            self.assertEqual(len(grants), 2)
+            for grant in grants:
+                self.assertEqual(grant[:5], ('pvesh', 'set', '/access/acl', '--path', '/storage/crange-router-ha'))
+                self.assertIn('PVEDatastoreUser', grant)
+
 
 if __name__ == '__main__':
     unittest.main()

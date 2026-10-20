@@ -815,6 +815,8 @@ def purge_expired_bootstrap_reviews(path, project_id, owner, api, ledger, now=No
 def prepare(path, cfg, plan_id, owner, api=None, *, bootstrap_node=None, bootstrap_nodes=None, network_foundation=None):
     from crange import ProxmoxAPI, validate_project_quota
     validate_project_quota(path,cfg)
+    from crange_router_ha import reconcile_locations
+    reconcile_locations(path, api=api)
     policy,catalog = read_settings()
     if not policy.get('enabled'):
         boxes = [box for field in ('jump_boxes', 'scenario_boxes', 'scenario_containers', 'custom_networks') for box in cfg.get(field, {}).values()]
@@ -926,6 +928,9 @@ def tf_overrides(prepared):
 
 def begin_apply(path, prepared, api=None):
     from crange import ProxmoxAPI
+    from crange_router_ha import reconcile_locations
+    if reconcile_locations(path, api=api):
+        raise PlacementError('Native HA relocated a router since review; its identity is preserved. Review a fresh plan.')
     policy,catalog=read_settings()
     if policy.get('enabled') and not prepared:
         raise PlacementError('This plan predates capacity reservations; review a fresh plan.')
@@ -1075,7 +1080,41 @@ def reconcile_applied_reservations(path, *, api=None):
             # Reuse the normal apply completion gate: all saved allocations must
             # exist at their reviewed node in Terraform state, have project
             # ownership in PVE, and have no active provider task.
-            prepared = {'plan_id': manifest.stem, 'placements': record['placements'],
+            retained = record['placements']
+            if not record.get('apply_scope'):
+                # Historical full-project manifests also list unrelated frozen
+                # guests. Reconcile only this job's exact allocated resources;
+                # their original immutable source must match provider state.
+                retained = [placements[item['resource_key']] for item in allocations]
+                actual = applied_resources(path)
+                for item in retained:
+                    values = actual.get(item['resource_key'], {})
+                    resolved = item['resolved']
+                    disks = values.get('disk') or values.get('disk_device') or []
+                    clone = values.get('clone') or []
+                    os_config = values.get('operating_system') or []
+                    mode = resolved.get('clone_mode')
+                    source_matches = (
+                        mode in ('linked', 'full') and resolved.get('template_id') is not None and len(clone) == 1
+                        and clone[0].get('vm_id') == resolved['template_id']
+                        and (clone[0].get('node_name') or values.get('node_name')) == resolved.get('template_node')
+                        and bool(clone[0].get('full')) == (mode == 'full')) or (
+                        mode == 'archive' and bool(resolved.get('template_file_id')) and len(os_config) == 1
+                        and os_config[0].get('template_file_id') == resolved['template_file_id'])
+                    storage_matches = bool(disks) and all(
+                        disk.get('datastore_id') == resolved.get('datastore_id') for disk in disks)
+                    if not disks and mode in ('linked', 'full') and item['resource_key'].startswith(('vm:', 'jumpbox:')):
+                        # The pinned provider leaves disk=[] for cloned VMs
+                        # whose disks were inherited rather than declared.
+                        # Prove their actual storage; never fill it from intent.
+                        node, vmid = values.get('node_name'), values.get('vm_id')
+                        if node == resolved.get('node_name') and type(vmid) is int:
+                            config = api.request('GET', f'/nodes/{node}/qemu/{vmid}/config')
+                            allocated = disk_allocations(config)
+                            storage_matches = bool(allocated) and set(allocated) == {resolved.get('datastore_id')}
+                    if not source_matches or not storage_matches:
+                        raise PlacementError('Retained allocation source/storage differs from applied state; reservations retained.')
+            prepared = {'plan_id': manifest.stem, 'placements': retained,
                         'requests': allocations, **({'apply_scope': record['apply_scope']} if 'apply_scope' in record else {})}
             finish_apply(path, prepared, succeeded=True, api=api)
             record.update(reservation_state='released', reservation_reconciled_at=time.time(),

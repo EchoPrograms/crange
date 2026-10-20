@@ -1,5 +1,32 @@
 # Project 100 changes and fixes
 
+## October 20 — reconnect lifecycle, adapter availability and router HA
+
+- Deployed partial project teardown: inspect/delete online owned guests, preserve
+  offline identities and shared project networks, and resume per returning node.
+- Deployed separate adapter connection/upstream bounds; local TLS identity
+  remains available while all four upstream slots are busy.
+- Reconciled the exact 20 historical workstation allocations without contacting
+  unrelated offline routers. Inherited VM disks are checked in live PVE config
+  when the pinned provider reports an empty disk list.
+- Verified native HA migration and locked Terraform state adoption on a disposable
+  fixture; its final normal plan was unchanged and cleanup is confirmed.
+- Converted all five online production routers (113, 116–119) to core shared disks, preserving
+  guest identity and all unrelated state. Enrolled native HA with no automatic
+  failback and strict online-node affinity. Added root-registered state adoption
+  and exact router HA retirement before project teardown.
+- Started the full browser Guacamole connection audit. Initial failures include
+  SSH session aborts and Windows RDP credential rejection; these are not marked
+  resolved or excluded merely because the GUI renders Connect links.
+
+- Verified production CT 119 migration from Proxmox2 to Proxmox3 and locked
+  state adoption, preserving unrelated state and original creation metadata.
+  Fixed Terraform check-set ordering comparisons and retained safe abandoned
+  pre-submit journals without blocking a fresh verified attempt.
+- Added declared SSH login provisioning for Linux containers to normal team
+  configuration. Credentials stay in a private temporary inventory and task
+  output is suppressed; no sudo grant or new listening port is introduced.
+
 ## October 20 — Guacamole workstation discovery and connection links
 
 - Refresh the authenticated Guacamole connection trees alongside CRANGE rows,

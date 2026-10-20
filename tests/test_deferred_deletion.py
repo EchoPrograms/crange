@@ -63,4 +63,16 @@ class DeferredDeletionTests(unittest.TestCase):
             store.resume_waiting(api=api)
             self.assertEqual(store.list([],admin=True)[0]['status'],'waiting-for-node')
 
+    def test_delete_resumes_for_each_returning_node_but_purge_waits_for_all(self):
+        with tempfile.TemporaryDirectory() as directory:
+            store=JobStore(Path(directory)/'jobs.sqlite3')
+            with store.connect() as db:
+                for job, operation in [('delete','project-delete'),('purge','project-purge')]:
+                    db.execute("INSERT INTO jobs(id,actor,project,operation,options,status,created,waiting_nodes) VALUES(?, 'admin',100,?,'{}','waiting-for-node',1,?)",
+                               (job,operation,json.dumps(['proxmox1','proxmox2'])))
+            api=Mock();api.request.return_value=[{'node':'proxmox2','status':'online'}]
+            store.resume_waiting(api=api)
+            self.assertEqual(store.get('delete',[],admin=True)['status'],'queued')
+            self.assertEqual(store.get('purge',[],admin=True)['status'],'waiting-for-node')
+
 if __name__=='__main__':unittest.main()

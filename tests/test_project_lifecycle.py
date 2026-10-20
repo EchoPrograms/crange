@@ -82,12 +82,81 @@ class LifecycleTests(unittest.TestCase):
         self.assertFalse(any(call.args[1][0]=='apply' for call in execute.call_args_list))
 
     def test_offline_guest_defers_before_terraform_or_revocation(self):
-        (self.path/'terraform.tfstate').write_text(json.dumps({'resources':[{'type':'proxmox_virtual_environment_vm','instances':[{'attributes':{'node_name':'proxmox1'}}]}]}))
+        (self.path/'terraform.tfstate').write_text(json.dumps({'resources':[{'mode':'managed','module':'module.scenario_box["offline"]',
+            'type':'proxmox_virtual_environment_vm','name':'scenario','instances':[{'attributes':{
+                'node_name':'proxmox1','vm_id':144,'id':'144','tags':['p100']}}]}]}))
         execute,revoke=Mock(),Mock()
         with self.assertRaises(lifecycle.WaitingForNodes):lifecycle.delete_project(100,api=self.api,terraform=execute,revoke=revoke,route_remove=Mock())
         execute.assert_not_called();revoke.assert_not_called()
         self.assertEqual(lifecycle.state(self.path)['waiting_nodes'],['proxmox1'])
         self.assertEqual(lifecycle.state(self.path)['state'],'deleting')
+
+    def test_partial_teardown_progresses_per_returning_node_and_retains_network_until_final_delete(self):
+        online={'proxmox4'}
+        guests=[(141,'proxmox1'),(142,'proxmox2'),(144,'proxmox4')]
+        snapshot={'version':4,'serial':1,'lineage':'project-100','resources':[]}
+        for vmid,node in guests:
+            snapshot['resources'].append({'mode':'managed','module':f'module.scenario_box["box{vmid}"]',
+                'type':'proxmox_virtual_environment_vm','name':'scenario','instances':[{'attributes':{
+                    'id':str(vmid),'vm_id':vmid,'node_name':node,'tags':['p100'],'name':f'box{vmid}'}}]})
+        state=self.path/'terraform.tfstate';state.write_text(json.dumps(snapshot))
+        self.resources=[{'vmid':vmid,'node':node,'name':f'box{vmid}','type':'qemu','pool':'crange-iac','tags':'p100'} for vmid,node in guests]
+        def read(method,endpoint,params=None):
+            if endpoint=='/nodes':return [{'node':node,'status':'online' if node in online else 'offline'} for node in ('proxmox1','proxmox2','proxmox4')]
+            if endpoint=='/cluster/resources':return copy.deepcopy(self.resources)
+            if endpoint.endswith('/config'):
+                vmid=int(endpoint.split('/')[-2]);return {'name':f'box{vmid}','tags':'p100'}
+            raise AssertionError(endpoint)
+        self.api.request.side_effect=read
+        review={};applied=[]
+        def terraform(path,args,**kwargs):
+            if args[0]=='plan':
+                selected={arg.removeprefix('-target=') for arg in args if arg.startswith('-target=')}
+                entries=[]
+                for resource in json.loads(state.read_text())['resources']:
+                    address=resource['module']+'.'+resource['type']+'.'+resource['name']
+                    if not selected or address in selected:
+                        entries.append({'address':address,'type':resource['type'],
+                            'change':{'actions':['delete'],'before':resource['instances'][0]['attributes']}})
+                if not selected:entries.append({'address':'proxmox_sdn_vnet.transit','type':'proxmox_sdn_vnet',
+                    'change':{'actions':['delete'],'before':{'id':'p100tr','zone':'crange'}}})
+                review['detail']={'resource_changes':entries}
+            elif args[0]=='show':
+                return SimpleNamespace(stdout=json.dumps(review['detail'] if len(args)>2 else {'values':{}}))
+            elif args[0]=='apply':
+                detail=review['detail'];applied.append(copy.deepcopy(detail));removed={entry['change']['before']['vm_id'] for entry in detail['resource_changes'] if 'vm_id' in entry['change']['before']}
+                current=json.loads(state.read_text());current['resources']=[r for r in current['resources'] if r['instances'][0]['attributes']['vm_id'] not in removed];current['serial']+=1;state.write_text(json.dumps(current))
+                self.resources[:]=[r for r in self.resources if r['vmid'] not in removed]
+            return SimpleNamespace(stdout='{}')
+        revoke,route=Mock(),Mock()
+        for returning, expected in [(None,['proxmox1','proxmox2']),('proxmox2',['proxmox1'])]:
+            if returning:online.add(returning)
+            with self.assertRaises(lifecycle.WaitingForNodes):
+                lifecycle.delete_project(100,api=self.api,terraform=terraform,revoke=revoke,route_remove=route)
+            self.assertEqual(lifecycle.state(self.path)['waiting_nodes'],expected)
+            self.assertTrue(all(entry['type']=='proxmox_virtual_environment_vm' for entry in applied[-1]['resource_changes']))
+            route.assert_not_called()
+        self.assertEqual([r['vmid'] for r in self.resources],[141])
+        online.add('proxmox1')
+        with patch('crange_scheduling.DATA',self.root/'distribution'):
+            lifecycle.delete_project(100,api=self.api,terraform=terraform,revoke=revoke,route_remove=route)
+        self.assertEqual(lifecycle.state(self.path)['state'],'deleted')
+        self.assertFalse(self.resources);route.assert_called_once_with(100)
+        self.assertTrue(any(entry['type']=='proxmox_sdn_vnet' for entry in applied[-1]['resource_changes']))
+        self.assertTrue((self.path/'crange.auto.tfvars.json').exists())
+
+    def test_partial_teardown_rejects_network_deletion_and_unowned_deferred_guest(self):
+        plan=self.plan()
+        plan['resource_changes'].append({'address':'proxmox_sdn_vnet.transit','type':'proxmox_sdn_vnet',
+            'change':{'actions':['delete'],'before':{'id':'p100tr','zone':'crange'}}})
+        targets={plan['resource_changes'][0]['address']}
+        with self.assertRaisesRegex(ValueError,'outside its online guest targets'):
+            lifecycle.validate_destroy_plan(plan,100,self.api,targets=targets)
+        plan['resource_changes'].pop()
+        self.resources.append({'vmid':999,'node':'proxmox1','type':'qemu','pool':'foreign','tags':'p100'})
+        with self.assertRaisesRegex(ValueError,'outside the teardown plan'):
+            lifecycle.validate_destroy_plan(plan,100,self.api,targets=targets,
+                deferred={999:{'node':'proxmox1','kind':'qemu'}})
 
     def test_queue_is_fenced_in_both_directions(self):
         store=JobStore(self.root/'jobs.sqlite3');store.submit('manager',100,'plan',{})

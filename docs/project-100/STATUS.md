@@ -3,6 +3,53 @@
 Updated October 20, 2026 (UTC). Historical diagnostics and job evidence are in
 [platform-progress.md](platform-progress.md).
 
+## October 20 — reconnect cleanup and first production HA routers
+
+The controller now completes the available part of a project deletion while
+retaining exact offline guest state and project networks. It resumes whenever
+another required node returns; final network/route removal waits for all guests.
+Immutable images and project configuration remain retained. Tests cover two
+nodes returning separately, forbidden network deletion during partial cleanup,
+and foreign-pool guests. This change is deployed; live destructive outage
+acceptance remains pending.
+
+The Proxmox compatibility adapter keeps TLS/health handling separate from its
+four upstream request slots. A slow/offline upstream can no longer consume every
+slot needed by the local identity check. The deployed adapter passed a real TLS
+test with all upstream slots occupied. Reservation reconciliation job
+`9c803ca2f27a4a299bdc98cc8048be1e` succeeded, restoring the exact original
+workstation image/storage bindings left by the interrupted older apply.
+
+The native HA fixture migrated between online nodes and its state adoption
+preserved lineage and creation metadata; a normal refreshed plan had zero
+changes. The isolated fixture and its HA entry/disk are confirmed deleted.
+Production routers CT 113 (project), CT 116 (staging), and CTs 117–119
+(Teams 3, 2, 4) now use the core's
+`crange-router-ha` disk store and are enrolled in native HA. Their VMIDs, disk
+sizes, addresses and existing guest state were retained. Automatic failback is
+disabled; returning hosts must agree with the current native HA assignment.
+Neither a physical node failure nor a fencing/rejoin test has been performed.
+All five online router conversions are complete. A controlled native migration
+moved CT 119 from Proxmox2 to Proxmox3; CRANGE adopted its location through a
+locked state push while preserving creation metadata and other guest state.
+Terraform check-record ordering is normalized without ignoring changed results.
+See [enrollment evidence](router-ha-enrollment-acceptance.json). Proxmox1 remains
+unreachable and not positively fenced: its old router identities stay untouched.
+
+Team 2 configuration reached its Windows baseline but failed on a transient
+WinRM `Class not registered` response for workstation VM 222. Subsequent
+credential-bound WinRM commands on that same VM succeeded. Full configuration
+acceptance and the other teams' workstation checks remain outstanding.
+The initial Guacamole browser audit exercised all 67 SSH/RDP entries; 14
+rendered usable displays and 53 failed. These are baseline findings, not final
+acceptance. Several reachable containers lacked the declared `user` account.
+The normal configuration workflow now provisions the declared non-system login
+from protected credentials without granting sudo. Team 2 retry job
+`ba7447e2e63b40969d9f0a0d563fbd9a` and Teams 3/4 acceptance jobs are queued or
+running. Offline guests and guests behind Proxmox1 routers remain blocked.
+Native guacadmin portal login was rechecked with zero browser console errors.
+Do not equate visible links or a listening port with successful remote access.
+
 ## October 20 — Guacamole workstation visibility and Connect buttons repaired
 
 The portal was refreshing CRANGE rows while retaining the native connection
@@ -63,7 +110,7 @@ fingerprints all 50 prior guests. Apply job `0177140121fc4850ba16cbe3473b3528`
 completed from plan `e783624a740e453fe67b6b5d5ee7e9f1`; all 13 newly created
 workstations are running. Configuration repaired the Parrot Btrfs swap-file
 layout, then stopped on missing applied image bindings left by the older partial
-Windows deployment. That reconciliation and the remaining team configuration
+Windows deployment. The reconciliation has since succeeded; the remaining team configuration
 checks are still pending. Do not replay the completed infrastructure plan or
 claim full workstation/service acceptance.
 The Python suite passes 1,099 tests, one skipped; changed Terraform files pass

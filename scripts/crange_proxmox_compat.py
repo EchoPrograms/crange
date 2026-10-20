@@ -245,8 +245,8 @@ class Adapter:
         return self._gateway_request(method, path, forwarded, payload if body or method in ('POST', 'PUT') else None)
 
 
-def serve(path=None):
-    adapter = Adapter(path)
+def make_server(adapter):
+    """Keep local health requests independent of slow upstream API requests."""
     class Handler(BaseHTTPRequestHandler):
         def log_message(self, *_args): pass
         def handle_one_request(self):
@@ -276,7 +276,12 @@ def serve(path=None):
                 if not 0 <= length <= 8 * 1024 * 1024: raise CompatError('Provider body exceeds bound.')
                 body = self.rfile.read(length)
                 if len(body) != length: raise CompatError('Incomplete provider body.')
-                status, headers, payload = adapter.forward(self.command, self.path, self.headers, body)
+                if not adapter.slots.acquire(timeout=5):
+                    return self.send_error(503, 'Proxmox request capacity is busy; retry reads later')
+                try:
+                    status, headers, payload = adapter.forward(self.command, self.path, self.headers, body)
+                finally:
+                    adapter.slots.release()
                 self.send_response(status)
                 for name in ('Content-Type', 'Content-Encoding'):
                     if name in headers: self.send_header(name, headers[name])
@@ -291,21 +296,21 @@ def serve(path=None):
         do_GET = do_POST = do_PUT = do_DELETE = do_request
     class BoundedServer(ThreadingHTTPServer):
         request_queue_size = 32
+        # TLS/request handling has a separate bound from upstream concurrency.
+        # Acquiring an upstream slot in the accept loop can stall even the
+        # identity endpoint behind requests to an unavailable cluster node.
+        connections = threading.BoundedSemaphore(32)
         def process_request(self, connection, address):
-            # Terraform refreshes several resources concurrently. Keep work
-            # bounded while queueing its short API requests instead of rejecting
-            # ordinary refresh bursts with a spurious provider-visible 503.
-            if not adapter.slots.acquire(timeout=5):
-                try: connection.sendall(b'HTTP/1.0 503 Service Unavailable\r\nContent-Length: 0\r\n\r\n')
-                finally: self.shutdown_request(connection)
+            if not self.connections.acquire(blocking=False):
+                self.shutdown_request(connection)
                 return
             try: super().process_request(connection, address)
             except Exception:
-                adapter.slots.release()
+                self.connections.release()
                 raise
         def process_request_thread(self, connection, address):
             try: super().process_request_thread(connection, address)
-            finally: adapter.slots.release()
+            finally: self.connections.release()
     server = BoundedServer(('127.0.0.1', adapter.config['port']), Handler)
     server.daemon_threads = True
     certificate, key = tls_paths(adapter.config, adapter.path)
@@ -315,7 +320,12 @@ def serve(path=None):
     # Perform handshakes inside bounded request threads, after their timeout
     # is installed, so a stalled client cannot block the accept loop.
     server.socket = context.wrap_socket(server.socket, server_side=True, do_handshake_on_connect=False)
-    server.serve_forever()
+    return server
+
+
+def serve(path=None):
+    with make_server(Adapter(path)) as server:
+        server.serve_forever()
 
 
 if __name__ == '__main__':

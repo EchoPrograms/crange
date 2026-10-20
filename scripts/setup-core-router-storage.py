@@ -103,9 +103,22 @@ def install(review):
     run('pvesm', 'add', 'nfs', STORE, '--server', '10.0.0.104', '--export', str(MOUNT),
         '--content', 'rootdir', '--options', 'vers=4.2',
         '--nodes', ','.join(f'proxmox{i}' for i in range(1, 7)))
+    receipt['phase'] = 'controller-permissions'
+    save(receipt)
+    grant_controller_storage()
     receipt['phase'] = 'installed'
     save(receipt)
     print(json.dumps(receipt, indent=2))
+
+
+def grant_controller_storage():
+    """Reuse only the existing disk-consumer role on this one new datastore."""
+    role = json.loads(run('pvesh', 'get', '/access/roles/PVEDatastoreUser', '--output-format', 'json'))
+    if {key for key, value in role.items() if value} != {'Datastore.Audit', 'Datastore.AllocateSpace'}:
+        raise ValueError('Storage consumer role has unexpected privileges; grant refused.')
+    for field, principal in (('--users', 'crange-iac@pve'), ('--tokens', 'crange-iac@pve!terraform')):
+        run('pvesh', 'set', '/access/acl', '--path', '/storage/' + STORE,
+            field, principal, '--roles', 'PVEDatastoreUser', '--propagate', '1')
 
 
 if __name__ == '__main__':
