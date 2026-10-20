@@ -1,0 +1,148 @@
+{
+  "verified_at": "2026-10-20T21:45:57.290565+00:00",
+  "cluster": {
+    "members": 6,
+    "quorate": true,
+    "configuration_version": 23,
+    "total_votes": 7,
+    "quorum": 4,
+    "quorum_changed_during_repair": false
+  },
+  "cross_node_ticket_tests": [
+    {
+      "source": "proxmox1",
+      "target": "proxmox1",
+      "http": 200
+    },
+    {
+      "source": "proxmox1",
+      "target": "proxmox4",
+      "http": 200
+    },
+    {
+      "source": "proxmox4",
+      "target": "proxmox1",
+      "http": 200
+    },
+    {
+      "source": "proxmox4",
+      "target": "proxmox4",
+      "http": 200
+    }
+  ],
+  "hosts": [
+    {
+      "hostname": "proxmox1",
+      "management_timer": "active",
+      "rejoin_timer": "active",
+      "units": "Result=success\nExecMainStatus=0\n\nResult=success\nExecMainStatus=0",
+      "quorum": {
+        "quorate": true,
+        "six_members": true
+      },
+      "mitigation_enabled": true,
+      "features": [
+        "tcp-segmentation-offload: off",
+        "generic-segmentation-offload: off"
+      ],
+      "source_sha256": {
+        "crange-management-guard": "c292ab659de76d55eebcfc4184f6d517f3fa7d1eeb2c082fd44fe6220118a8c7",
+        "crange-cluster-rejoin": "c0de0ffb42f2ee9408a06708cad483bf97469af45eb3f23a063d4b8899928b6d"
+      },
+      "trusted_quorate_peers": [
+        "proxmox2",
+        "proxmox3"
+      ],
+      "rejoin_configuration_agrees": true
+    },
+    {
+      "hostname": "proxmox3",
+      "management_timer": "active",
+      "rejoin_timer": "active",
+      "units": "Result=success\nExecMainStatus=0\n\nResult=success\nExecMainStatus=0",
+      "quorum": {
+        "quorate": true,
+        "six_members": true
+      },
+      "mitigation_enabled": false,
+      "features": [
+        "tcp-segmentation-offload: on",
+        "generic-segmentation-offload: on"
+      ],
+      "source_sha256": {
+        "crange-management-guard": "c292ab659de76d55eebcfc4184f6d517f3fa7d1eeb2c082fd44fe6220118a8c7",
+        "crange-cluster-rejoin": "c0de0ffb42f2ee9408a06708cad483bf97469af45eb3f23a063d4b8899928b6d"
+      },
+      "trusted_quorate_peers": [
+        "proxmox1",
+        "proxmox2"
+      ],
+      "rejoin_configuration_agrees": true
+    },
+    {
+      "hostname": "proxmox4",
+      "management_timer": "active",
+      "rejoin_timer": "active",
+      "units": "Result=success\nExecMainStatus=0\n\nResult=success\nExecMainStatus=0",
+      "quorum": {
+        "quorate": true,
+        "six_members": true
+      },
+      "mitigation_enabled": false,
+      "features": [
+        "tcp-segmentation-offload: on",
+        "generic-segmentation-offload: on"
+      ],
+      "source_sha256": {
+        "crange-management-guard": "c292ab659de76d55eebcfc4184f6d517f3fa7d1eeb2c082fd44fe6220118a8c7",
+        "crange-cluster-rejoin": "c0de0ffb42f2ee9408a06708cad483bf97469af45eb3f23a063d4b8899928b6d"
+      },
+      "trusted_quorate_peers": [
+        "proxmox1",
+        "proxmox2"
+      ],
+      "rejoin_configuration_agrees": true
+    },
+    {
+      "hostname": "proxmox5",
+      "management_timer": "active",
+      "rejoin_timer": "active",
+      "units": "Result=success\nExecMainStatus=0\n\nResult=success\nExecMainStatus=0",
+      "quorum": {
+        "quorate": true,
+        "six_members": true
+      },
+      "mitigation_enabled": true,
+      "features": [
+        "tcp-segmentation-offload: off",
+        "generic-segmentation-offload: off"
+      ],
+      "source_sha256": {
+        "crange-management-guard": "c292ab659de76d55eebcfc4184f6d517f3fa7d1eeb2c082fd44fe6220118a8c7",
+        "crange-cluster-rejoin": "c0de0ffb42f2ee9408a06708cad483bf97469af45eb3f23a063d4b8899928b6d"
+      },
+      "trusted_quorate_peers": [
+        "proxmox1",
+        "proxmox2"
+      ],
+      "rejoin_configuration_agrees": true
+    }
+  ],
+  "isolated_namespace_test": {
+    "address_restored": true,
+    "default_route_restored": true,
+    "second_pass_idempotent": true,
+    "host_interfaces_changed": false
+  },
+  "tests": {
+    "focused": 13,
+    "full_suite_run": 1192,
+    "full_suite_skipped": 1,
+    "failed": 0,
+    "reboot_mocked": true
+  },
+  "production_hosts_rebooted": false,
+  "physical_fault_induced": false,
+  "hardware_failure_eliminated_proven": false,
+  "router_ha_automation_deployed_by_this_change": false
+}

@@ -1,0 +1,10 @@
+[Unit]
+Description=Check Proxmox management network recovery every 20 seconds
+
+[Timer]
+OnBootSec=60s
+OnUnitInactiveSec=20s
+AccuracySec=2s
+
+[Install]
+WantedBy=timers.target

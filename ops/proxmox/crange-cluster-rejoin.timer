@@ -1,0 +1,10 @@
+[Unit]
+Description=Check for failed Corosync with stale local configuration
+
+[Timer]
+OnBootSec=90s
+OnUnitInactiveSec=60s
+AccuracySec=5s
+
+[Install]
+WantedBy=timers.target

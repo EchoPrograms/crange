@@ -1989,3 +1989,25 @@ override was enabled.
 Remaining: workstation deployment/access, fresh 0.1.3 test and rollout,
 assessment and isolation proofs, operational exercises, final cleanup and
 handover. Agent lab-authoring skills come after full lab acceptance.
+
+### Proxmox1 return and persistent host recovery — October 20
+
+Repaired Proxmox1's failed Corosync return by installing the healthy cluster's
+version-23 local configuration and starting its failed Corosync service. All six
+members are quorate, authentication keys have synchronized, and fresh API
+tickets work across Proxmox1/4 in both directions. The version mismatch came
+from the earlier quorum update while P1 was offline. The original outage was
+separate: P1's Intel e1000e NIC recorded repeated hardware transmit hangs from
+October 18 onward, with NFS/Tailscale connectivity failures.
+
+Installed persistent network recovery and guarded stale-configuration rejoin
+services on P1, P3, P4 and P5. P1/P5 receive the e1000e TSO/GSO mitigation;
+Realtek P3/P4 retain offloads. Address/link/route repair precedes conservative,
+rate-limited graceful reboot escalation. No host was rebooted during deployment.
+Thirteen focused tests and real namespace recovery passed. See
+[incident, operating limits and rollback](proxmox1-network-recovery.md) and
+[deployment evidence](host-network-recovery-acceptance.json).
+
+The separate automatic router-HA enrollment/reconciliation implementation
+remains in progress; the host recovery work does not constitute its deployment
+or a physical failover acceptance test.

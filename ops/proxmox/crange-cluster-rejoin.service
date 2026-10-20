@@ -1,0 +1,9 @@
+[Unit]
+Description=Recover failed Corosync from verified quorate peer configuration
+After=network-online.target pve-cluster.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/crange-cluster-rejoin
+TimeoutStartSec=180
+UMask=0077

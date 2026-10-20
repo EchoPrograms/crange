@@ -1,0 +1,9 @@
+[Unit]
+Description=Recover the configured Proxmox management network
+After=networking.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/crange-management-guard
+TimeoutStartSec=75
+UMask=0077

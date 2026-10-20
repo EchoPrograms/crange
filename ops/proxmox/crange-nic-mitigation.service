@@ -1,0 +1,14 @@
+[Unit]
+Description=Apply configured e1000e transmit-hang mitigation
+After=networking.service
+Before=pve-guests.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/crange-management-guard --mitigate
+RemainAfterExit=yes
+TimeoutStartSec=20
+UMask=0077
+
+[Install]
+WantedBy=multi-user.target
