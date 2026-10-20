@@ -84,11 +84,25 @@
   changed_when: false
   when: crange_swap_repair_btrfs or (not crange_swap_file.stat.exists and (ansible_swaptotal_mb | int) < (crange_swap_target_mb | int))
 
-- name: Require room for swap and guest data
+- name: Fit additional swap within the guest data reserve
+  ansible.builtin.set_fact:
+    crange_swap_requested_mb: '{{ crange_swap_allocation_mb | int }}'
+    crange_swap_allocation_mb: '{{ [crange_swap_allocation_mb | int, [0, ((crange_swap_disk.stdout_lines[1].split()[3] | int) // 1024) - 2048 - 64] | max] | min }}'
+  when: crange_swap_repair_btrfs or (not crange_swap_file.stat.exists and (ansible_swaptotal_mb | int) < (crange_swap_target_mb | int))
+
+- name: Report a disk-limited additional swap allocation
+  ansible.builtin.debug:
+    msg: 'Additional swap is limited to {{ crange_swap_allocation_mb }} MiB to retain 2 GiB for guest data plus filesystem overhead.'
+  when:
+    - crange_swap_requested_mb is defined
+    - (crange_swap_allocation_mb | int) < (crange_swap_requested_mb | int)
+
+- name: Require room for useful swap and guest data
   ansible.builtin.assert:
     that:
+      - (crange_swap_allocation_mb | int) >= 256
       - (crange_swap_disk.stdout_lines[1].split()[3] | int) >= (((crange_swap_allocation_mb | int) + 2048) * 1024)
-    fail_msg: "This VM needs more free disk space for its swap target and a 2 GB data reserve."
+    fail_msg: "This VM needs room for at least 256 MiB of additional swap and a 2 GiB data reserve."
   when: crange_swap_repair_btrfs or (not crange_swap_file.stat.exists and (ansible_swaptotal_mb | int) < (crange_swap_target_mb | int))
 
 - name: Allocate and format a Btrfs swap file without copy-on-write or holes

@@ -454,6 +454,27 @@ class RelayTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError,'protected offline snapshot policy'):
             offline_config_snapshot(request,{},get=get,read_bytes=lambda _:raw,now=1000)
 
+    def test_offline_categorical_tags_retain_exact_protected_ownership(self):
+        from crange_resource_identity import category_updates
+        from urllib.parse import quote
+        previous={'tags':'crange-image;crange-cache-147','description':'Original notes\n'}
+        native=category_updates(previous)
+        request={'guest_node':'proxmox2','kind':'qemu','vmid':147}
+        policy={'offline_config_guests':{'proxmox2':{
+            '147':{'kind':'qemu','required_tags':['crange-image','crange-cache-147']}}}}
+        resource={'node':'proxmox2','type':'qemu','vmid':147,'status':'unknown','tags':native['tags']}
+        def get(path,*args):
+            return ([{'node':'proxmox2','status':'offline'}] if path=='/nodes' else [resource])
+        raw=('cores: 1\nmemory: 512\nscsi0: local-lvm:base-147-disk-0,size=20G\n'
+             +'tags: '+native['tags']+'\ntemplate: 1\n'
+             +''.join('#'+quote(line,safe='')+'\n' for line in native['description'].split('\n'))).encode()
+        snapshot=offline_config_snapshot(request,policy,get=get,read_bytes=lambda _:raw,now=1000)
+        self.assertEqual(snapshot['tags'],['crange-cache-147','crange-image'])
+        self.assertNotIn('Original notes',json.dumps(snapshot))
+        tampered=raw.replace(b'crange-cache-147',b'crange-cache-148')
+        with self.assertRaisesRegex(ValueError,'ownership tags'):
+            offline_config_snapshot(request,policy,get=get,read_bytes=lambda _:tampered,now=1000)
+
     def test_offline_snapshot_dispatch_is_local_fixed_read_and_never_ssh_or_exec(self):
         from unittest.mock import patch
         policy={'peer_uid':101000,'offline_config_reader_node':'proxmox4',

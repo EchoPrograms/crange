@@ -1,0 +1,106 @@
+{
+  "schema_version": 1,
+  "verified_count": 63,
+  "remaining_online": [],
+  "pending_offline": [
+    {
+      "node": "proxmox1",
+      "vmid": 111,
+      "tags": "crange-cache-111;crange-image"
+    },
+    {
+      "node": "proxmox1",
+      "vmid": 122,
+      "tags": "crange-cache-122;crange-image"
+    },
+    {
+      "node": "proxmox1",
+      "vmid": 143,
+      "tags": "crange-cache-143;crange-image"
+    },
+    {
+      "node": "proxmox1",
+      "vmid": 149,
+      "tags": "crange-cache-149;crange-image"
+    },
+    {
+      "node": "proxmox1",
+      "vmid": 183,
+      "tags": "crange-cache-183;crange-image"
+    }
+  ],
+  "proxmox6_replicas": [
+    {
+      "vmid": 153,
+      "status": "stopped",
+      "template": 1,
+      "tags": "crange-cache;crange-image"
+    },
+    {
+      "vmid": 154,
+      "status": "stopped",
+      "template": 1,
+      "tags": "crange-cache;crange-image"
+    },
+    {
+      "vmid": 155,
+      "status": "stopped",
+      "template": 1,
+      "tags": "crange-cache;crange-image"
+    },
+    {
+      "vmid": 156,
+      "status": "stopped",
+      "template": 1,
+      "tags": "crange-cache;crange-image"
+    },
+    {
+      "vmid": 169,
+      "status": "stopped",
+      "template": 1,
+      "tags": "crange-cache;crange-image"
+    },
+    {
+      "vmid": 177,
+      "status": "stopped",
+      "template": 1,
+      "tags": "crange-cache;crange-image"
+    },
+    {
+      "vmid": 184,
+      "status": "stopped",
+      "template": 1,
+      "tags": "crange-cache;crange-image"
+    },
+    {
+      "vmid": 185,
+      "status": "stopped",
+      "template": 1,
+      "tags": "crange-cache;crange-image"
+    },
+    {
+      "vmid": 186,
+      "status": "stopped",
+      "template": 1,
+      "tags": "crange-cache;crange-image"
+    },
+    {
+      "vmid": 187,
+      "status": "stopped",
+      "template": 1,
+      "tags": "crange-cache;crange-image"
+    },
+    {
+      "vmid": 188,
+      "status": "stopped",
+      "template": 1,
+      "tags": "crange-cache;crange-image"
+    },
+    {
+      "vmid": 219,
+      "status": "stopped",
+      "template": 1,
+      "tags": "crange-cache;crange-image"
+    }
+  ]
+}

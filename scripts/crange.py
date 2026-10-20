@@ -235,7 +235,15 @@ def cmd_guac_sync(args: argparse.Namespace) -> None:
 
     from crange_auth import AuthStore
     auth_path = Path(os.environ.get('CRANGE_AUTH_DB', Path.home() / '.local/share/crange/auth.sqlite3'))
-    all_users = AuthStore(auth_path).list_users(project=str(cfg['project_id']))
+    auth = AuthStore(auth_path)
+    from crange_guac import auth_database_identity
+    prior_access = []
+    for suffix in ('applied', 'users-applied'):
+        previous = ROOT / 'guacamole/access' / f'project-{int(cfg["project_id"]):03d}.{suffix}.json'
+        if previous.exists():
+            prior_access.append(json.loads(previous.read_text()))
+    authority = auth_database_identity(auth, prior_access)
+    all_users = auth.list_users(project=str(cfg['project_id']))
     deployed = {}
     try:
         outputs = output_json(path)
@@ -336,6 +344,7 @@ def cmd_guac_sync(args: argparse.Namespace) -> None:
                       'connection_keys': sorted(set(allowed))})
 
     manifest = {'schema_version': 3, 'auth_mode': 'crange-json', 'project_id': project_id,
+                'auth_database': authority,
                 'generated_at': datetime.now(timezone.utc).isoformat(),
                 'users': users, 'connections': connections,
                 'status': 'pending_connector_apply'}
@@ -355,6 +364,10 @@ def cmd_guac_apply(args: argparse.Namespace) -> None:
     manifest_path = ROOT / 'guacamole' / 'access' / f'project-{int(args.project):03d}.json'
     if not manifest_path.is_file():
         raise CrangeError(f'No Guacamole access manifest exists for project {int(args.project):03d}; run guac-sync first.')
+    from crange_auth import AuthStore
+    from crange_guac import auth_database_identity
+    auth = AuthStore(os.environ.get('CRANGE_AUTH_DB', Path.home() / '.local/share/crange/auth.sqlite3'))
+    auth_database_identity(auth, (json.loads(manifest_path.read_text()),))
     from crange_guac import apply_manifest, GuacamoleError
     try:
         applied = apply_manifest(manifest_path)
@@ -371,6 +384,9 @@ def cmd_guac_apply(args: argparse.Namespace) -> None:
                     last_error=None, applied_connections=applied)
     manifest_path.write_text(json.dumps(manifest, indent=2, sort_keys=True) + '\n')
     print(f'Applied Guacamole access for {len(applied)} managed connection(s) from {manifest_path}.')
+    access_state = json.loads(manifest_path.with_name(manifest_path.stem + '.applied.json').read_text())
+    if access_state.get('pending_connections'):
+        print(f"{len(access_state['pending_connections'])} Windows connection(s) await private guest initialization; ready connections remain available.")
     from crange_auth import AuthStore
     from crange_guac_users import ProjectUsers
     auth = AuthStore(os.environ.get('CRANGE_AUTH_DB', Path.home() / '.local/share/crange/auth.sqlite3'))
@@ -1499,6 +1515,19 @@ def cmd_configure_team(args: argparse.Namespace) -> None:
         raise CrangeError(f"Team {team} is not configured.")
     from crange_ssh_identity import refresh_created_guests
     resource_keys = getattr(args, 'guest_keys', None)
+    if resource_keys is None:
+        from crange_configure_scope import online_configuration_keys
+        from crange_scheduling import applied_resources
+        from crange_router_ha import reconcile_locations
+        api = ProxmoxAPI()
+        reconcile_locations(path, api=api)
+        try:
+            resource_keys, skipped = online_configuration_keys(cfg, team, applied_resources(path),
+                api.request('GET', '/nodes'), api.request('GET', '/cluster/resources', {'type':'vm'}))
+        except ValueError as exc:
+            raise CrangeError(str(exc)) from exc
+        for key, reason in skipped:
+            print(f'Skipping {key}: {reason}. Run configuration again after it becomes available.', flush=True)
     refreshed = refresh_created_guests(path, team, **({'resource_keys': resource_keys} if resource_keys is not None else {}))
     if refreshed:
         print("Refreshed SSH identities for newly applied guests: " + ", ".join(refreshed), flush=True)
@@ -1964,6 +1993,13 @@ class ProxmoxAPI:
         return urllib.parse.urlunsplit((active.scheme, active.netloc, '/api2/json', '', ''))
 
     def request(self, method: str, path: str, fields: dict | None = None) -> object:
+        from crange_resource_identity import CONFIG_PATH, CREATE_PATH, category_updates, automation_response, needs_previous
+        if method in ('POST', 'PUT') and fields and ('tags' in fields or 'description' in fields):
+            if CONFIG_PATH.fullmatch(path):
+                previous = self.request('GET', path) if needs_previous(fields) else None
+                fields = category_updates(fields, previous)
+            elif CREATE_PATH.fullmatch(path):
+                fields = category_updates(fields)
         url = self.endpoint + path
         encoded = urllib.parse.urlencode(fields, doseq=True) if fields is not None else None
         if method in ('GET', 'DELETE'):
@@ -1993,7 +2029,7 @@ class ProxmoxAPI:
                 raise CrangeError(f"Proxmox API {method} {path} failed: {type(exc).__name__}.") from exc
         if not isinstance(body, dict) or "data" not in body:
             raise CrangeError(f"Proxmox API {method} {path} returned no data.")
-        return body["data"]
+        return automation_response(path, body["data"]) if method == 'GET' else body['data']
 
     def task(self, node: str, upid: str, timeout: int = 900) -> None:
         if not isinstance(upid, str) or not upid.startswith('UPID:'):

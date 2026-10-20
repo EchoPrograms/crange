@@ -15,6 +15,11 @@ import subprocess
 import time
 import traceback
 from decimal import Decimal, InvalidOperation, ROUND_CEILING
+import sys
+if os.geteuid() == 0 and Path('/usr/local/lib/crange/crange_resource_identity.py').exists():
+    sys.path.insert(0, '/usr/local/lib/crange')
+import crange_resource_identity as resource_identity
+from crange_resource_identity import automation_config, automation_response, display_tags
 
 RANGE_STORAGE_SHA256 = '01666bd35eb315d829a39c52db9b03e0d1c75b3e7cdc4f5f5d7d8b673c888f63'
 
@@ -54,7 +59,16 @@ WINDOWS_SEED_CLEANUP_NODE_IPS = {f'proxmox{i}': f'10.0.0.{100 + i}' for i in ran
 
 
 def _network_config_digest(value):
-    return hashlib.sha256(json.dumps(value, sort_keys=True, separators=(',', ':')).encode()).hexdigest()
+    return hashlib.sha256(json.dumps(automation_config(value), sort_keys=True, separators=(',', ':')).encode()).hexdigest()
+
+
+def identity_module_preamble():
+    """Bundle trusted helper source so a returning host needs no new install."""
+    source = Path(resource_identity.__file__).read_text()
+    return ('import sys,types\n'
+            '_identity_module=types.ModuleType("crange_resource_identity")\n'
+            'sys.modules["crange_resource_identity"]=_identity_module\n'
+            'exec(' + repr(source) + ',_identity_module.__dict__)\n')
 
 
 def validate_request(value, config, peer_uid):
@@ -287,7 +301,8 @@ def offline_config_snapshot(request, policy, *, get, read_bytes, now=None):
     identity_before = _resource_identity(resources_before, guest_node, kind, vmid)
     required = set(allow.get('required_tags', []))
     resource_tags = set(filter(None, str(identity_before.get('tags') or '').split(';')))
-    if not required <= resource_tags:
+    categorical_required = set(filter(None, display_tags(';'.join(required)).split(';')))
+    if not (required <= resource_tags or categorical_required <= resource_tags):
         raise ValueError('Cluster resource ownership tags do not match the offline snapshot allowlist.')
     config_dir = 'qemu-server' if kind == 'qemu' else 'lxc'
     path = Path(f'/etc/pve/nodes/{guest_node}/{config_dir}/{vmid}.conf')
@@ -297,14 +312,22 @@ def offline_config_snapshot(request, policy, *, get, read_bytes, now=None):
     except UnicodeDecodeError as exc:
         raise ValueError('Offline guest config encoding is invalid.') from exc
     config = {}
+    description = []
+    from urllib.parse import unquote
     for line in text.splitlines():
         if line.strip().startswith('['):
             # Snapshot sections contain historical copies, not active limits.
             break
+        if line.startswith('#'):
+            description.append(unquote(line[1:]) + '\n')
+            continue
         if not line or line.lstrip().startswith('#') or ':' not in line:
             continue
         key, value = line.split(':', 1)
         key = key.strip()
+        if key == 'description':
+            description.append(unquote(value.lstrip()))
+            continue
         if key not in ('cores', 'sockets', 'memory', 'tags', 'template') and not re.fullmatch(
                 r'(?:scsi|sata|virtio|ide|efidisk|tpmstate|mp)\d+|rootfs', key):
             # LXC permits repeated low-level settings (e.g. mount entries).
@@ -314,7 +337,10 @@ def offline_config_snapshot(request, policy, *, get, read_bytes, now=None):
             raise ValueError('Offline guest config has duplicate fields.')
         config[key] = value.strip()
     configured_tags = set(filter(None, config.get('tags', '').split(';')))
-    if not required <= configured_tags:
+    if description:
+        config['description'] = ''.join(description)
+    logical_tags = set(filter(None, automation_config(config).get('tags', '').split(';')))
+    if not required <= logical_tags:
         raise ValueError('Shared config ownership tags do not match the offline snapshot allowlist.')
     if inventory_mode and resource_tags != configured_tags:
         raise ValueError('Offline capacity inventory tags differ from shared configuration.')
@@ -358,7 +384,7 @@ def offline_config_snapshot(request, policy, *, get, read_bytes, now=None):
 
 
 def _sealed_config_identity(config, vmid):
-    stable = {key: value for key, value in config.items() if key not in {'template', 'lock', 'digest'}}
+    stable = {key: value for key, value in automation_config(config).items() if key not in {'template', 'lock', 'digest'}}
     volume = re.compile(rf'(?P<storage>[A-Za-z0-9_.-]+:)(?P<directory>{int(vmid)}/)?'
                         rf'(?:vm|base)-{int(vmid)}-disk-(?P<number>[0-9]+)'
                         r'(?P<format>\.(?:raw|qcow2|vmdk))?(?=,|$)')
@@ -690,10 +716,12 @@ def _write_root_cleanup_journal(path, journal):
 
 
 WINDOWS_SEED_REMOTE_SOURCE = r'''import hashlib,json,os,re,stat,subprocess,sys,time
+sys.path.insert(0,'/usr/local/lib/crange')
+from crange_resource_identity import automation_response
 q=json.loads(sys.argv[1]); node=q['node']; build=q['build_id']; vmid=q['vmid']; volid=q['volid']; size=q['iso_size']; sha=q['iso_sha256']; created=int(q['created_at']); action=q['action']; upid=q.get('upid'); vm_mode=q['vm_mode']; guest_name=q.get('guest_name'); ownership_tag=q.get('ownership_tag')
 if node not in {f'proxmox{i}' for i in range(1,7)} or not re.fullmatch(r'[0-9a-f]{32}',build) or volid!='local:iso/crange-win-'+build+'.iso' or type(vmid) is not int or not 100<=vmid<1000000 or type(size) is not int or not 1<=size<=67108864 or not re.fullmatch(r'[0-9a-f]{64}',sha): raise SystemExit(21)
 def run(args, timeout=30): return subprocess.run(args,capture_output=True,text=True,timeout=timeout,check=True).stdout.strip()
-def get(path,*args): return json.loads(run(['pvesh','get',path,'--output-format','json',*args]))
+def get(path,*args): return automation_response(path,json.loads(run(['pvesh','get',path,'--output-format','json',*args])))
 def inspect():
  resources=get('/cluster/resources','--type','vm')
  owned=[r for r in resources if int(r.get('vmid',-1))==vmid]
@@ -743,7 +771,7 @@ def _windows_seed_remote(node, request, run=subprocess.run):
     address = WINDOWS_SEED_CLEANUP_NODE_IPS.get(node)
     if not address or request.get('node') != node:
         raise ValueError('Windows seed cleanup node is outside the fixed cluster allowlist.')
-    source = WINDOWS_SEED_REMOTE_SOURCE
+    source = identity_module_preamble() + WINDOWS_SEED_REMOTE_SOURCE
     from datetime import datetime
     payload_value = dict(request)
     if isinstance(payload_value.get('created_at'), str):
@@ -920,7 +948,7 @@ def recover_export_lock(request, *, read=None, execute=None, boot_time=None, evi
         def read(path, *args):
             result = subprocess.run(['pvesh','get',path,'--output-format','json',*args],
                                     capture_output=True,text=True,timeout=15,check=True)
-            return json.loads(result.stdout)
+            return automation_response(path, json.loads(result.stdout))
     if execute is None:
         def execute(argv):
             return subprocess.run(argv,capture_output=True,text=True,timeout=15,check=True)
@@ -997,7 +1025,7 @@ def host_read(request, marker, source_marker=None, source_pool='crange-probes', 
         args = ['prepare']
         if request['command'] == 'capture-bridge-proof':
             vmid = request['vmid']
-            cfg = json.loads(subprocess.check_output(['pvesh','get',f'/nodes/{node}/qemu/{vmid}/config','--output-format','json'],text=True,timeout=15))
+            cfg = automation_config(json.loads(subprocess.check_output(['pvesh','get',f'/nodes/{node}/qemu/{vmid}/config','--output-format','json'],text=True,timeout=15)))
             pool = json.loads(subprocess.check_output(['pvesh','get','/pools/crange-probes','--output-format','json'],text=True,timeout=15))
             if (marker not in str(cfg.get('tags','')).split(';') or
                     not any(row.get('node') == node and row.get('type') == 'qemu' and int(row.get('vmid',-1)) == vmid
@@ -1028,7 +1056,7 @@ def host_read(request, marker, source_marker=None, source_pool='crange-probes', 
             value = json.loads(raw)
             if not isinstance(value, (dict, list)):
                 raise ValueError('Fixed network diagnostic response has an invalid shape.')
-            return value
+            return automation_response(path, value)
         import socket as socket_module
         controller_pid = int(subprocess.check_output(['lxc-info', '-n', '114', '-pH'], text=True, timeout=10).strip())
         controller_root = Path(f'/proc/{controller_pid}/root')
@@ -1079,7 +1107,7 @@ def host_read(request, marker, source_marker=None, source_pool='crange-probes', 
                 value = json.loads(raw)
                 if not isinstance(value, (dict, list)):
                     raise ValueError('PVE sealed proof response has an invalid shape.')
-                return value
+                return automation_response(path, value)
             result = sealed_windows_proof_snapshot(get=get)
             encoded = json.dumps(result, sort_keys=True, separators=(',', ':'))
             if len(encoded.encode()) > SEALED_WINDOWS_MAX_BYTES:
@@ -1100,7 +1128,7 @@ def host_read(request, marker, source_marker=None, source_pool='crange-probes', 
     if socket.gethostname().split('.')[0] != node:
         raise ValueError('Relay reached a different cluster node.')
     def get(path):
-        return json.loads(subprocess.check_output(['pvesh', 'get', path, '--output-format', 'json'], text=True, timeout=15))
+        return automation_response(path, json.loads(subprocess.check_output(['pvesh', 'get', path, '--output-format', 'json'], text=True, timeout=15)))
     before = get(f'/nodes/{node}/lxc/{vmid}/config')
     validate_guest(before, get('/pools/crange-probes')['members'], node, vmid, marker, request.get('cache_job_id'))
     if command in ('linked-backing','owned-linked-backing'):
@@ -1217,7 +1245,7 @@ def dispatch(value, config, peer_uid, run=subprocess.run):
         # It never accepts a path, command, or guest execution request.
         return {'value': host_read(value, marker, policy=config)}
     # The remote program is fixed source plus serialized validated data, never shell input.
-    program = "_RELAY_SOURCE_DIGEST=" + repr(RELAY_CODE_SHA256) + "\n" + Path(__file__).read_text().split("\nif __name__ == '__main__':")[0]
+    program = identity_module_preamble() + "_RELAY_SOURCE_DIGEST=" + repr(RELAY_CODE_SHA256) + "\n" + Path(__file__).read_text().split("\nif __name__ == '__main__':")[0]
     source_marker = value['source_marker'] if command == 'owned-linked-backing' else config['allowed_guests'].get(node, {}).get(str(value.get('source_id')))
     source_pool = ('crange-iac' if value.get('cache_job_id') and command=='owned-linked-backing'
                    else config.get('source_pools', {}).get(node, {}).get(str(value.get('source_id')), 'crange-probes'))

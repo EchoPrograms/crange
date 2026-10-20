@@ -1,0 +1,11 @@
+[Unit]
+Description=Retry CRANGE category tags after node reconnects
+
+[Timer]
+OnBootSec=2min
+OnUnitInactiveSec=15min
+RandomizedDelaySec=30s
+Unit=crange-resource-tags.service
+
+[Install]
+WantedBy=timers.target

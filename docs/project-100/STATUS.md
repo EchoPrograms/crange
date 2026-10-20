@@ -3,6 +3,47 @@
 Updated October 20, 2026 (UTC). Historical diagnostics and job evidence are in
 [platform-progress.md](platform-progress.md).
 
+## October 20 — category tags and remote-access acceptance
+
+The Proxmox tag migration is deployed and verified on 63 online image/build
+resources. Tags now describe categories (`crange-cache`, `crange-capture`,
+`crange-template-build`) instead of individual VMIDs or job UUIDs. Exact original
+ownership is retained in reversible notes metadata; controller and protected
+host readers continue to verify the same logical configuration and image hashes.
+Only tags and notes were changed, with digest preconditions and private recovery
+journals. Five resources on offline Proxmox1 remain pending; the installed
+15-minute maintenance timer retries after reconnect without contacting offline
+guest APIs. See [migration evidence](resource-category-tags-acceptance.json).
+
+Proxmox6 has 12 `crange-replica-*` entries, all stopped templates. They cover six
+scenario release images, Parrot, a Windows base, and Alpine VM/container cache
+copies on both local storage pools. They support local cloning and use disk;
+they do not reserve running-guest CPU or memory. No replicas were deleted.
+
+Team 2 configuration completed, and all 12 of its SSH/RDP entries rendered real
+1024×768 displays through the public Guacamole WebSocket endpoint for at least
+five seconds. See [Team 2 evidence](guacamole-team2-connection-acceptance.json).
+Team 4 configuration also completed and all 12 entries passed the same real
+browser rendering check; the controller SSH entry passed too. See
+[Team 4 evidence](guacamole-team4-connection-acceptance.json).
+The initial 67-entry audit below is historical baseline evidence, not current
+acceptance. Team 3 and staging repairs and remaining connection checks continue.
+
+Guacamole reconciliation now serializes per-project native connection updates
+and defers Windows entries without their private per-VM credential binding.
+Pending machines remain visible without publishing unusable generic credentials.
+An operator refresh initially used the CLI's alternate authentication database
+and removed ten native participant accounts. All ten accounts were restored with
+their existing credentials and assignments, and each login was verified. Applied
+access now records its authoritative authentication database and refuses a
+different source before changing access or users.
+
+Available guests can be configured while other guests' nodes are offline. The
+workflow retains exact ownership checks, skips unavailable guests, and requires
+the existing management routers. Offline cluster rows may omit guest names;
+that omission no longer blocks available guests. Names are required again when
+the node returns. Proxmox1 remains unfenced and its guests are not relocated.
+
 ## October 20 — reconnect cleanup and first production HA routers
 
 The controller now completes the available part of a project deletion while

@@ -88,3 +88,60 @@ def configuration_inventory(inventory, cfg, network_id, resource_keys):
 
     prune(result['all'])
     return result, needs_path
+
+
+def online_configuration_keys(cfg, network_id, applied, nodes, resources):
+    """Select reachable applied guests without contacting an offline node."""
+    online = {n['node'] for n in nodes if n.get('status') == 'online'}
+    project = int(cfg['project_id'])
+    selected, skipped = [], []
+
+    def available(key):
+        value = applied.get(key)
+        if not value:
+            return False, 'undeployed'
+        vmid = value.get('vm_id')
+        if type(vmid) is not int or str(value.get('id')) != str(vmid):
+            raise ValueError('Configuration requires an exact applied guest identity.')
+        matches = [r for r in resources if r.get('vmid') == vmid]
+        if len(matches) > 1:
+            raise ValueError('Configuration found an ambiguous native guest identity.')
+        if matches:
+            native = matches[0]
+            kind = 'lxc' if key.startswith(('container:', 'router:')) else 'qemu'
+            expected = (value.get('initialization') or [{}])[0].get('hostname') if kind == 'lxc' else value.get('name')
+            if (native.get('type') != kind or native.get('node') != value.get('node_name')
+                    or native.get('pool') != 'crange-iac'
+                    or (value.get('node_name') in online and native.get('name') != expected)
+                    or f'p{project:03d}' not in str(native.get('tags','')).split(';')):
+                raise ValueError('Applied guest ownership or node changed; reconcile before configuration.')
+        if value.get('node_name') not in online:
+            return False, 'node offline'
+        if not matches:
+            raise ValueError('An applied guest is missing from its online node.')
+        return (True, '') if matches[0].get('status') == 'running' else (False, 'not running')
+
+    for key in ('router:project', 'router:staging' if network_id == 254 else f'router:team:{network_id}'):
+        ready, reason = available(key)
+        if not ready:
+            raise ValueError(f'Configuration needs {key}: {reason}. Wait for its existing router or native HA recovery.')
+        selected.append(key)
+    custom_ready = {}
+    for name, network in cfg.get('custom_networks', {}).items():
+        if str(network['owner_team_id']) != str(network_id):
+            continue
+        key = 'router:custom:' + name
+        custom_ready[name], reason = available(key)
+        if custom_ready[name]:selected.append(key)
+        else:skipped.append((key, reason))
+    for kind, field in (('jumpbox','jump_boxes'), ('vm','scenario_boxes'), ('container','scenario_containers')):
+        for name, box in cfg.get(field, {}).items():
+            if str(box['team_id']) != str(network_id):
+                continue
+            key = kind + ':' + name
+            ready, reason = available(key)
+            if box.get('network_key') and not custom_ready.get(box['network_key']):
+                ready, reason = False, 'custom router unavailable'
+            if ready:selected.append(key)
+            else:skipped.append((key, reason))
+    return sorted(selected), sorted(skipped)

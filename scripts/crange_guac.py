@@ -1,6 +1,7 @@
 """Controlled, ownership-safe Guacamole REST reconciliation for CRANGE."""
 from __future__ import annotations
 import json
+import fcntl
 import os
 import tempfile
 from pathlib import Path
@@ -10,6 +11,17 @@ from urllib.error import HTTPError, URLError
 
 class GuacamoleError(RuntimeError):
     pass
+
+
+def auth_database_identity(auth, documents=()):
+    """Bind managed access to its original dashboard authentication database."""
+    path = getattr(auth, 'path', None)
+    identity = str(Path(path).resolve()) if path is not None else None
+    for document in documents:
+        expected = document.get('auth_database')
+        if expected and expected != identity:
+            raise ValueError('Guacamole authentication database differs from its recorded authority; no access reconciliation was performed.')
+    return identity
 
 def _env_file(path):
     values = {}
@@ -99,6 +111,17 @@ class GuacamoleClient:
                 'protocol': protocol, 'parameters': params, 'attributes': {}}
 
     def apply(self, manifest, state_path=None):
+        if state_path is None:
+            return self._apply(manifest)
+        state_path = Path(state_path)
+        state_path.parent.mkdir(parents=True, exist_ok=True)
+        descriptor = os.open(str(state_path) + '.lock',
+                             os.O_CREAT | os.O_RDWR | getattr(os, 'O_NOFOLLOW', 0), 0o600)
+        with os.fdopen(descriptor, 'a') as lock:
+            fcntl.flock(lock, fcntl.LOCK_EX)
+            return self._apply(manifest, state_path)
+
+    def _apply(self, manifest, state_path=None):
         self.login()
         source = self.data_source
         managed_json_auth = manifest.get('auth_mode') == 'crange-json'
@@ -114,10 +137,21 @@ class GuacamoleClient:
                 old = json.loads(state_path.read_text())
             except (OSError, ValueError) as exc:
                 raise GuacamoleError(f'Cannot read Guacamole ownership state: {exc}') from exc
+        if old.get('auth_database') and old['auth_database'] != manifest.get('auth_database'):
+            raise GuacamoleError('Guacamole manifest authentication database differs from its recorded authority.')
         owned = {str(item['name']): str(item['identifier']) for item in old.get('connections', []) if item.get('name') and item.get('identifier')}
         desired = {str(item['name']): item for item in manifest.get('connections', [])}
         if len(desired) != len(manifest.get('connections', [])):
             raise GuacamoleError('Duplicate Guacamole connection names; choose unique box display names.')
+        # A newly deployed Windows VM may be waiting for its exact private
+        # login binding, including while its router/node is unavailable. Keep
+        # it visible as pending without publishing a generic Linux password or
+        # blocking the ready connections in other teams.
+        pending = {name: record for name, record in desired.items()
+                   if record.get('guest_os') == 'windows' and record.get('protocol') == 'rdp'
+                   and not record.get('credential_ref')}
+        desired = {name: record for name, record in desired.items() if name not in pending}
+        payloads = {name: self._connection_payload(record) for name, record in desired.items()}
         identifiers, applied = {}, []
         for name, record in desired.items():
             if not record.get('address'):
@@ -130,12 +164,12 @@ class GuacamoleClient:
                 collisions = [str(item.get('identifier')) for item in connections.values() if item.get('name') == name]
                 if collisions:
                     raise GuacamoleError(f'Guacamole connection name is already in use outside CRANGE ownership: {name}.')
-                created = self._request('POST', f'/api/session/data/{source}/connections', self._connection_payload(record)) or {}
+                created = self._request('POST', f'/api/session/data/{source}/connections', payloads[name]) or {}
                 identifier = str(created.get('identifier') or '')
                 if not identifier:
                     raise GuacamoleError(f'Guacamole did not return an identifier for {name}.')
             else:
-                self._request('PUT', f'/api/session/data/{source}/connections/{identifier}', self._connection_payload(record))
+                self._request('PUT', f'/api/session/data/{source}/connections/{identifier}', payloads[name])
             identifiers[name] = identifier
             applied.append(name)
         from crange_jumpboxes import resource_identifiers as index_resources
@@ -173,6 +207,13 @@ class GuacamoleClient:
         if state_path:
             state_path.parent.mkdir(parents=True, exist_ok=True)
             payload = json.dumps({'schema_version': 2,
+                                  'auth_database': manifest.get('auth_database'),
+                                  'pending_connections': [{**record, 'resource_key': record.get('key', name),
+                                                           'access_state':'awaiting-initialization'}
+                                                          for name, record in sorted(pending.items())],
+                                  'pending_permissions': [{'username': user['username'], 'resource_key': record.get('key', name)}
+                                      for user in manifest.get('users', []) for name, record in sorted(pending.items())
+                                      if record.get('key', name) in user.get('connection_keys', [])],
                                   'connections': [{**desired[n], 'name': n, 'identifier': i,
                                                   'resource_key': desired[n].get('key', n)}
                                                  for n, i in sorted(identifiers.items())],

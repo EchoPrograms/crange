@@ -84,9 +84,10 @@ def _access(auth, root: Path, project: int, username: str):
         applied = json.loads(applied_path.read_text())
     except (OSError, ValueError) as exc:
         raise BridgeError('Project remote access is not applied.') from exc
-    connections = applied.get('connections', [])
-    if not isinstance(connections, list):
+    ready, pending = applied.get('connections', []), applied.get('pending_connections', [])
+    if not isinstance(ready, list) or not isinstance(pending, list):
         raise BridgeError('Project remote access is invalid.')
+    connections = ready + pending
     available = {str(item.get('resource_key')) for item in connections if item.get('resource_key')}
     # Platform administrators are provisioned outside project automation. This
     # protected allowlist also lets the worker recheck native Guacamole admins.
@@ -108,7 +109,7 @@ def _access(auth, root: Path, project: int, username: str):
             current = set(dashboard.get('connections', {}).get(str(project), [])) | {
                 str(item['resource_key']) for item in connections
                 if item.get('default_for_team') and str(item.get('team_id')) in teams}
-        applied_grants = {str(item['resource_key']) for item in applied.get('permissions', [])
+        applied_grants = {str(item['resource_key']) for item in applied.get('permissions', []) + applied.get('pending_permissions', [])
                           if item.get('username') == username and item.get('resource_key')}
         return connections, available & current & applied_grants
 
@@ -184,7 +185,10 @@ def _project_rows(auth, root: Path, project: int, username: str, *, include_stat
             'protocols': [],
             'console_available':console_admin and kind in ('vm','jumpbox','container'),
         })
-        row['protocols'].append({'protocol': item['protocol'], 'connection_name': item['name']})
+        if item.get('access_state') == 'awaiting-initialization':
+            row['access_state'] = 'awaiting-initialization'
+        else:
+            row['protocols'].append({'protocol': item['protocol'], 'connection_name': item['name']})
     rows = list(grouped.values())
     if include_state:
         from crange_live_status import box_states

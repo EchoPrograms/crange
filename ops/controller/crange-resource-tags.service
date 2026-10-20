@@ -1,0 +1,19 @@
+[Unit]
+Description=Normalize owned CRANGE image and probe category tags
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=crange
+Group=crange
+Environment=HOME=/home/crange
+WorkingDirectory=/home/crange/crange
+ExecStart=/usr/bin/python3 /home/crange/crange/scripts/crange_resource_tags.py --apply
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=read-only
+ReadWritePaths=/home/crange/.local/state/crange/resource-tags
+TimeoutStartSec=10min

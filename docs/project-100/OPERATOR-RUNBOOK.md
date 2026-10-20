@@ -269,3 +269,29 @@ account to prove disk rollback, retained the baseline CI account, verified root-
 management access, removed the test snapshot, and returned CI to healthy/running.
 See staging-snapshot-acceptance.json. VM rollback and overriding a still-pending
 shutdown are separate unaccepted gates.
+## Categorical Proxmox tags
+
+The controller presents category tags in Proxmox while keeping exact original
+automation markers in the `CRANGE-OWNERSHIP-V1` notes record. Do not remove or
+rewrite that record manually: it preserves image ownership and existing hashes.
+Scenario clones with different tags do not inherit a template's ownership.
+
+The controller runs `crange-resource-tags.timer` every 15 minutes. It changes
+only recognized image/build/probe resources in CRANGE pools, writes a private
+before-image, uses the Proxmox config digest, and verifies unchanged logical
+configuration afterward. Offline resources remain pending until a subsequent
+pass sees their node online. Locked resources are skipped. No deletion, storage
+move, guest start, or guest reboot occurs in this workflow.
+
+Inspect `systemctl status crange-resource-tags.timer` and
+`journalctl -u crange-resource-tags.service` on the controller. Private journals
+are under `/home/crange/.local/state/crange/resource-tags` (mode 0700, files 0600).
+For a read-only preview, run the following as the controller's `crange` user:
+
+```sh
+HOME=/home/crange python3 /home/crange/crange/scripts/crange_resource_tags.py
+```
+
+Use the installed service for the apply. Its summary contains only resource IDs,
+category tags and status. Original configuration belongs in the private journals,
+not in a Git commit or public diagnostic report.

@@ -430,3 +430,22 @@ No guest deployment, power or network configuration was changed. Evidence:
 - Pinned provider source inspection confirms container node changes force
   replacement, so native router HA needs verified Terraform state adoption as
   well as shared surviving storage. No router migration/HA enrollment was made.
+## October 20, 2026 — category tags and access reconciliation
+
+- Replaced per-resource cache/build/capture tags with category tags on 63 online
+  resources, preserving exact ownership and hash inputs in reversible metadata.
+  Five offline Proxmox1 resources are retried by the maintenance timer.
+- Added compare-and-set migration journals and compatible protected readers,
+  including readers sent to reconnecting nodes. No image disks or guests removed.
+- Serialized Guacamole connection reconciliation and kept uninitialized Windows
+  entries pending until their private credential binding exists.
+- Bound native access/user reconciliation to the recorded dashboard auth store;
+  restored and verified all ten participant logins after the alternate-store
+  refresh incident.
+- Verified all 12 Team 2 and all 12 Team 4 SSH/RDP connections with rendered
+  browser sessions; the controller SSH connection also rendered successfully.
+- Allowed available-guest configuration to proceed around offline guests,
+  including offline inventory rows without names. Retained strict checks for
+  guests on online nodes and required management routers.
+- Limited additional Linux swap to available space while retaining a 2 GiB data
+  reserve and allocation overhead; Team 3's first Parrot guest now has active swap.

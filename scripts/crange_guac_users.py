@@ -126,8 +126,12 @@ def apply_users(project, auth, client, repo_root, secret_hex):
     directory = Path(repo_root) / 'guacamole/access'
     connections_file = directory / f'project-{project:03d}.applied.json'
     state_file = directory / f'project-{project:03d}.users-applied.json'
-    connections = json.loads(connections_file.read_text())['connections'] if connections_file.exists() else []
+    access = json.loads(connections_file.read_text()) if connections_file.exists() else {}
+    connections = access.get('connections', [])
+    visible_connections = connections + access.get('pending_connections', [])
     state = json.loads(state_file.read_text()) if state_file.exists() else {'users': {}}
+    from crange_guac import auth_database_identity
+    state['auth_database'] = auth_database_identity(auth, (state, access))
     owned = state['users']
     desired = ProjectUsers(auth).list(project, private=True)
     client.login()
@@ -150,7 +154,7 @@ def apply_users(project, auth, client, repo_root, secret_hex):
         owned[login] = {'password_revision': user['password_revision'], 'user_key': user['username']}
         save_state(state_file, state)
         keys = set(user['connections']) | {
-            item['resource_key'] for item in connections
+            item['resource_key'] for item in visible_connections
             if item.get('default_for_team') and str(item['team_id']) in user['teams']}
         allowed = {identifier for key in keys for identifier in identifiers.get(key, set())} if user['enabled'] else set()
         permissions = client._request('GET', base+'/'+login+'/permissions') or {}

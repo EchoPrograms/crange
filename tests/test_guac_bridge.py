@@ -44,6 +44,22 @@ class _Jobs:
 
 
 class BridgeTests(unittest.TestCase):
+    def test_pending_box_visibility_still_requires_its_current_applied_grant(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            access = root / 'guacamole/access'
+            access.mkdir(parents=True)
+            pending = {'resource_key':'vm:pending', 'team_id':'1', 'default_for_team':True,
+                       'access_state':'awaiting-initialization'}
+            file = access / 'project-003.applied.json'
+            document = {'connections':[], 'pending_connections':[pending],
+                        'pending_permissions':[{'username':'alice','resource_key':'vm:pending'}]}
+            file.write_text(json.dumps(document))
+            self.assertEqual(_access(_Auth(),root,3,'alice')[1], {'vm:pending'})
+            document['pending_permissions'] = []
+            file.write_text(json.dumps(document))
+            self.assertEqual(_access(_Auth(),root,3,'alice')[1], set())
+
     def test_native_inventory_uses_authenticated_bridge_identity_without_project_input(self):
         result = {'connections': [{'identifier': '4', 'hostname': '10.60.0.20'}]}
         with patch('crange_guac_ticket.request_broker', return_value=result) as broker:
