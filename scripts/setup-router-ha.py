@@ -14,11 +14,15 @@ from pathlib import Path
 import re
 import shlex
 import socket
+import ssl
 import subprocess
 import time
 import uuid
 from contextlib import contextmanager
 from datetime import datetime
+from urllib.parse import urlencode
+from urllib.request import Request, urlopen
+from urllib.error import URLError
 
 STORE = 'crange-router-ha'
 ROOT = Path('/root/crange-resilience/router-ha-enrollment')
@@ -31,6 +35,8 @@ def run(args, *, timeout=40):
 
 
 def api(path, method='get', **params):
+    if method in ('create', 'set', 'delete'):
+        return native_mutation(path, method, params)
     args = ['pvesh', method, path, '--output-format', 'json']
     for key, value in params.items(): args.extend(['--' + key, str(value)])
     result = run(args)
@@ -39,6 +45,37 @@ def api(path, method='get', **params):
     if not result.strip() and method in ('create', 'set', 'delete'):
         return None
     return json.loads(result)
+
+
+def native_mutation(path, method, params):
+    """Submit asynchronous REST tasks without attaching their stdout to pvesh.
+
+    A proxied CLI task can keep the CLI attached for its entire lifetime. Killing
+    that observer closes the worker's stdout and can abort a successful disk
+    copy with SIGPIPE before it releases its lock. REST returns the native UPID.
+    This root-only operator already has the same authority through pvesh; its
+    short-lived ticket stays in memory and is never sent to the controller.
+    """
+    credentials = json.loads(run(['perl', '-MPVE::Cluster', '-MPVE::AccessControl',
+        '-MJSON::PP', '-e', 'PVE::Cluster::cfs_update(1); print encode_json({'
+        'ticket=>PVE::AccessControl::assemble_ticket(q(root@pam)),'
+        'csrf=>PVE::AccessControl::assemble_csrf_prevention_token(q(root@pam))});']))
+    request = Request('https://proxmox4:8006/api2/json' + path,
+        data=urlencode(params).encode(),
+        headers={'Cookie': 'PVEAuthCookie=' + credentials['ticket'],
+                 'CSRFPreventionToken': credentials['csrf'],
+                 'Content-Type': 'application/x-www-form-urlencoded'},
+        method={'create': 'POST', 'set': 'PUT', 'delete': 'DELETE'}[method])
+    context = ssl.create_default_context(cafile='/etc/pve/pve-root-ca.pem')
+    # Older native PVE root CAs omit the keyUsage extension required by
+    # Python 3.13's new strict default. Keep CA signatures, validity and hostname
+    # verification; accept the cluster's existing CA profile without replacing it.
+    context.verify_flags &= ~ssl.VERIFY_X509_STRICT
+    with urlopen(request, context=context, timeout=30) as response:
+        result = json.loads(response.read())
+    if not isinstance(result, dict) or 'data' not in result:
+        raise ValueError('Native HA API returned an uncertain mutation response; do not replay it.')
+    return result['data']
 
 
 def sha(value):
@@ -175,7 +212,11 @@ def review(project, key):
 def task(plan, file, name, endpoint, **params):
     submitted=time.time()
     plan.update(phase='submitting-'+name,submitted_at=submitted);save(file, plan)
-    upid = api(endpoint, 'create', **params)
+    try:
+        upid = api(endpoint, 'create', **params)
+    except (TimeoutError, URLError, subprocess.TimeoutExpired):
+        # An observation failure is never authority to submit the mutation again.
+        upid = None
     if not isinstance(upid,str) or not upid.startswith('UPID:'+plan['node']+':'):
         # A proxied CLI response need not expose the source node's task ID.
         # Find the exact source task, including a still-running or warning
@@ -189,6 +230,10 @@ def task(plan, file, name, endpoint, **params):
     if not isinstance(upid,str) or not upid.startswith('UPID:'+plan['node']+':'):
         raise ValueError('Native task submission is uncertain; preserve its journal.')
     plan.update(phase='waiting-'+name,upid=upid);save(file,plan)
+    observe_task(plan, file, name, upid)
+
+
+def observe_task(plan, file, name, upid):
     for _ in range(120):
         result=api(f'/nodes/{plan["node"]}/tasks/{upid}/status')
         if result.get('status')=='stopped':
@@ -198,11 +243,14 @@ def task(plan, file, name, endpoint, **params):
                     messages=[r.get('t','').strip() for r in log if r.get('t','').strip()]
                     if (len(log)<100 and messages==['WARN: Systemd 252 detected. You may need to enable nesting.','TASK WARNINGS: 1']
                             and api(f'/nodes/{plan["node"]}/lxc/{plan["vmid"]}/status/current').get('status')=='running'):
-                        return
+                        break
                 raise ValueError('Native router task failed; preserve its journal.')
-            return
+            break
         time.sleep(1)
-    raise ValueError('Native router task is still pending; do not replay it.')
+    else:
+        raise ValueError('Native router task is still pending; do not replay it.')
+    plan.setdefault('completed_tasks', {})[name] = {'upid': upid, 'status': result}
+    plan.update(phase='completed-'+name);save(file,plan)
 
 
 @contextmanager
@@ -243,8 +291,14 @@ def apply_reviewed(project, key, plan_id):
         stopped=api(base+'/config')
         task(plan,file,'move-rootfs',base+'/move_volume',volume='rootfs',storage=STORE,delete=1,digest=stopped['digest'])
         task(plan,file,'start',base+'/status/start')
+    return refresh_and_enroll(project,key,state,plan,file,address)
+
+
+def refresh_and_enroll(project,key,state,plan,file,address):
+    vmid=plan['vmid'];base=f'/nodes/{plan["node"]}/lxc/{vmid}'
     current=api(base+'/config')
-    if not current['rootfs'].startswith(f'{STORE}:{vmid}/'):
+    if (not current['rootfs'].startswith(f'{STORE}:{vmid}/') or current.get('lock') or
+            api(base+'/status/current').get('status')!='running'):
         raise ValueError('Shared router disk identity differs; preserve the journal.')
     plan.update(phase='refreshing-state',shared_config_sha256=sha(config_identity(current)));save(file,plan)
     # Run only a provider refresh through the scoped controller account. The
@@ -258,6 +312,106 @@ print(json.dumps(refresh_storage(Path(PROJECT_PATH),ADDRESS,VMID,STORAGE)))
 """.replace('PROJECT_PATH',repr('/home/crange/crange/terraform/environments/project-%03d'%project)).replace('ADDRESS',repr(address)).replace('VMID',repr(vmid)).replace('STORAGE',repr(STORE))
     controller(code, timeout=150)
     return finish_enrollment(project,key,state,plan,file,current,address)
+
+
+def source_command(node, command, *, timeout=60):
+    if node not in SOURCE_NODES:
+        raise ValueError('Unverified router source node.')
+    if node != 'proxmox4':
+        command=['ssh','-oBatchMode=yes','-oConnectTimeout=5','-oStrictHostKeyChecking=yes',
+            '-oHostKeyAlias='+node,'-oUserKnownHostsFile=/etc/pve/nodes/'+node+'/ssh_known_hosts',
+            'root@10.0.0.'+str(100+int(node[-1])),shlex.join(command)]
+    return run(command, timeout=timeout)
+
+
+def verify_committed_files(plan, current):
+    """Read-only checks for the specific old CLI SIGPIPE failure after copy."""
+    old=plan['config']['rootfs'].split(',')[0];new=current['rootfs'].split(',')[0]
+    if (not re.fullmatch(r'[a-z][a-z0-9-]*:vm-'+str(plan['vmid'])+r'-disk-\d+',old) or
+            not re.fullmatch(STORE+':'+str(plan['vmid'])+r'/vm-'+str(plan['vmid'])+r'-disk-\d+\.raw',new)):
+        raise ValueError('Committed disk recovery requires exact managed volume identities.')
+    code="""import hashlib,json,subprocess
+from pathlib import Path
+old=OLD;new=NEW;vmid=VMID
+rows=json.loads(subprocess.check_output(['pvesh','get','/nodes/'+NODE+'/storage/'+old.split(':')[0]+'/content','--vmid',str(vmid),'--output-format','json'],text=True))
+if any(r.get('volid')==old for r in rows):raise SystemExit('Original volume still exists; retain both copies.')
+p=Path(subprocess.check_output(['pvesm','path',new],text=True).strip())
+expected=Path('/mnt/pve/crange-router-ha/images')/str(vmid)/new.split('/')[-1]
+if p!=expected or p.is_symlink() or not p.is_file() or p.stat().st_size!=SIZE:raise SystemExit('Shared volume identity differs.')
+loops=subprocess.run(['losetup','-j',str(p)],capture_output=True,text=True,check=True)
+if loops.stdout.strip():raise SystemExit('Shared filesystem still has a loop attachment.')
+check=subprocess.run(['e2fsck','-f','-n',str(p)],capture_output=True,timeout=60)
+if check.returncode:raise SystemExit('Read-only shared filesystem check failed.')
+print(json.dumps({'source_volume_absent':True,'filesystem_readonly_check':True,'target_volume':new,
+ 'bytes':p.stat().st_size,'fsck_output_sha256':hashlib.sha256(check.stdout+check.stderr).hexdigest()}))
+""".replace('OLD',repr(old)).replace('NEW',repr(new)).replace('VMID',str(plan['vmid'])).replace('NODE',repr(plan['node'])).replace('SIZE',str(int(plan['disk_gib']*2**30)))
+    proof=json.loads(source_command(plan['node'],['python3','-c',code],timeout=85))
+    if (proof.get('source_volume_absent') is not True or proof.get('filesystem_readonly_check') is not True
+            or proof.get('target_volume')!=new or proof.get('bytes')!=int(plan['disk_gib']*2**30)):
+        raise ValueError('Committed filesystem proof differs; preserve its lock.')
+    return proof
+
+
+def resume_conversion(project,key,state,address,value,plan,file):
+    """Resume a proven committed disk move; never repeat stop, copy or restore."""
+    node,vmid=plan['node'],plan['vmid'];base=f'/nodes/{node}/lxc/{vmid}'
+    if (plan.get('state_lineage')!=state.get('lineage') or plan.get('address')!=address or
+            value['vm_id']!=vmid or value['node_name']!=node or
+            sha(plan['config'])!=plan.get('config_sha256')):
+        raise ValueError('Interrupted router conversion identity differs.')
+    rows=[r for r in api('/cluster/resources',type='vm') if r.get('vmid')==vmid]
+    online={r['node'] for r in api('/nodes') if r.get('status')=='online'}
+    current=api(base+'/config');status=api(base+'/status/current').get('status')
+    original={k:v for k,v in plan['config'].items() if k!='rootfs'}
+    actual={k:v for k,v in config_identity(current).items() if k!='rootfs'}
+    if (len(rows)!=1 or rows[0].get('node')!=node or node not in online or
+            rows[0].get('pool')!='crange-iac' or rows[0].get('type')!='lxc' or
+            actual!=original or current.get('template') or current.get('lock') not in (None,'disk') or
+            any(re.fullmatch(r'(?:mp|unused)\d+',k) for k in current) or
+            not re.fullmatch(STORE+':'+str(vmid)+r'/vm-'+str(vmid)+r'-disk-\d+\.raw,size='+format(plan['disk_gib'],'g')+'G',current.get('rootfs','')) or
+            any(r.get('sid')==f'ct:{vmid}' for r in api('/cluster/ha/resources'))):
+        raise ValueError('Interrupted conversion no longer has an exclusive managed shared disk.')
+    verify_clients(sorted(set(plan['eligible_nodes'])|{node}),plan['bridges'])
+    phase=plan['phase']
+    if phase in ('submitting-move-rootfs','waiting-move-rootfs','completed-move-rootfs','move-confirmed'):
+        if status!='stopped':raise ValueError('Interrupted move requires the exact stopped router.')
+        tasks=api('/nodes/'+node+'/tasks',vmid=vmid,limit=100)
+        recent=[r for r in tasks if r.get('starttime',0)>=int(plan['submitted_at'])-1]
+        if (len(tasks)>=100 or len(recent)!=1 or recent[0].get('type')!='move_volume' or
+                str(recent[0].get('id'))!=str(vmid) or recent[0].get('user')!='root@pam' or
+                not str(recent[0].get('upid','')).startswith('UPID:'+node+':')):
+            raise ValueError('Interrupted disk task history is ambiguous; preserve its lock.')
+        upid=recent[0]['upid'];result=api('/nodes/'+node+'/tasks/'+upid+'/status')
+        if result.get('status')!='stopped':raise ValueError('Original disk move is still running; do not replay it.')
+        if result.get('exitstatus')=='broken pipe ':
+            logs=api('/nodes/'+node+'/tasks/'+upid+'/log',limit=1000)
+            messages=[r.get('t','') for r in logs]
+            if (len(logs)>=1000 or not messages or messages[-1].strip()!='TASK ERROR: broken pipe' or
+                    not any(re.fullmatch(r'total size is [\d,]+  speedup is [\d.]+',s.strip()) for s in messages) or
+                    any('error' in s.lower() or 'failed' in s.lower() for s in messages[:-1])):
+                raise ValueError('Failed move has no complete native copy evidence.')
+            proof=verify_committed_files(plan,current)
+            plan['committed_move_recovery']={'task':result,'upid':upid,'proof':proof,
+                'log_sha256':sha(logs),'original_failure_preserved':True}
+            save(file,plan)
+            if current.get('lock')=='disk':source_command(node,['pct','unlock',str(vmid)])
+            unlocked=api(base+'/config')
+            if unlocked.get('lock') or config_identity(unlocked)!=config_identity(current):
+                raise ValueError('Recovered router changed while releasing its stale disk lock.')
+        elif result.get('exitstatus')!='OK' or current.get('lock'):
+            raise ValueError('Native move failed; retain the exact task and disk lock.')
+        plan.update(phase='move-confirmed');save(file,plan)
+        task(plan,file,'start',base+'/status/start')
+    elif phase in ('submitting-start','waiting-start'):
+        tasks=api('/nodes/'+node+'/tasks',vmid=vmid,limit=100)
+        matches=[r for r in tasks if r.get('type')=='vzstart' and str(r.get('id'))==str(vmid)
+                 and r.get('starttime',0)>=int(plan['submitted_at'])-1 and r.get('user')=='root@pam']
+        if len(tasks)>=100 or len(matches)!=1:
+            raise ValueError('Interrupted router start is uncertain; never submit it again.')
+        observe_task(plan,file,'start',matches[0]['upid'])
+    elif phase not in ('completed-start','refreshing-state'):
+        raise ValueError('Interrupted conversion needs inspection; no mutation was repeated.')
+    return refresh_and_enroll(project,key,state,plan,file,address)
 
 
 def finish_enrollment(project,key,state,plan,file,current,address):
@@ -339,10 +493,12 @@ print(json.dumps(summary))
     pending=[(p,json.loads(p.read_text())) for p in ROOT.glob('*.json')]
     pending=[(p,r) for p,r in pending if r.get('origin_plan_id')==origin_plan_id and
              r.get('project_id')==project and r.get('router_key')==key and
-             r.get('vmid')==value['vm_id'] and r.get('phase')=='enrolling-native-ha']
+             r.get('vmid')==value['vm_id'] and r.get('phase')!='enrolled']
     if len(pending)>1:raise ValueError('Ambiguous interrupted HA enrollment journals.')
     if pending:
         file,plan=pending[0]
+        if plan.get('phase')!='enrolling-native-ha':
+            return resume_conversion(project,key,state,address,value,plan,file)
         rows=[r for r in api('/cluster/resources',type='vm') if r.get('vmid')==value['vm_id']]
         online={r['node'] for r in api('/nodes') if r.get('status')=='online'}
         if (len(rows)!=1 or rows[0].get('pool')!='crange-iac' or rows[0].get('type')!='lxc' or

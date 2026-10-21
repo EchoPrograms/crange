@@ -199,7 +199,7 @@ def output_json(path: Path) -> dict:
         def read(name):
             file = path / name
             return json.loads(file.read_text()) if file.exists() else {}
-        return complete_metadata(raw, read('crange.auto.tfvars.json'), read('crange-applied-placements.json'))
+        return complete_metadata(raw, read('crange.auto.tfvars.json'), read('crange-applied-placements.json'),state=read('terraform.tfstate'))
     except (OSError, ValueError) as exc:
         raise CrangeError(f'Cannot read applied guest identity metadata: {exc}') from exc
 
@@ -4137,6 +4137,11 @@ def resume_network_foundations(args, path):
             resource = 'router:custom:' + key
             row = actual.get(resource, {})
             expected = placements[resource]['resolved']
+            if (row.get('node_name')!=expected['node_name'] or
+                    (row.get('disk') or [{}])[0].get('datastore_id')!=expected['datastore_id']):
+                from crange_router_ha import confirmed_router_placement
+                adopted=confirmed_router_placement(path,resource,int(row.get('vm_id',0)),api)
+                if adopted:expected={**expected,**adopted}
             if row.get('node_name') != expected['node_name'] or not row.get('vm_id'):
                 raise CrangeError('Interrupted network foundation router is not at its reviewed node.')
             node, guest = row['node_name'], int(row['vm_id'])

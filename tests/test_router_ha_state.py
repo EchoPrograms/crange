@@ -51,6 +51,26 @@ def fixture():
 
 
 class RouterHAStateTests(unittest.TestCase):
+    def test_foundation_accepts_only_a_proven_adopted_ha_placement(self):
+        for change in (None,'vmid','disk','identity','unadopted','quorum'):
+            state,config,registry,resource,status,nodes,api=fixture()
+            attrs=ha.container_states(state)[ADDRESS]
+            attrs['node_name']='proxmox4'
+            if change=='disk':attrs['disk'][0]['datastore_id']='foreign'
+            if change=='identity':config['hostname']='unrelated'
+            if change=='unadopted':attrs['node_name']='proxmox2'
+            if change=='quorum':status[0]['quorate']=0
+            tf=Mock(return_value=SimpleNamespace(stdout=json.dumps(state)))
+            with self.subTest(change=change),patch.object(ha,'protected_registration',return_value=registry), \
+                    patch.object(ha.time,'time',return_value=1000):
+                if change:
+                    with self.assertRaises(PlacementError):
+                        ha.confirmed_router_placement(Path('/tmp/project-100'),'router:team:2',119 if change=='vmid' else 118,api,tf=tf)
+                else:
+                    self.assertEqual(ha.confirmed_router_placement(Path('/tmp/project-100'),'router:team:2',118,api,tf=tf),
+                                     {'node_name':'proxmox4','datastore_id':ha.STORAGE})
+            self.assertFalse(any(call.args[0]!='GET' for call in api.request.call_args_list))
+
     def test_offline_original_router_does_not_block_unrelated_lab_work_or_infer_recovery(self):
         state, _, registry, resource, status, nodes, api = fixture()
         resource.update(node='proxmox2',status='unknown')

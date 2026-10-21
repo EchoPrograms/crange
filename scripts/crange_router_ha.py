@@ -348,26 +348,53 @@ def protect_registered_plan(path, detail):
             raise PlacementError('Native HA owns this router identity. Retire/review its registration before changing or deleting it.')
 
 
+def protected_registration(path, registry_path=None):
+    path=Path(path)
+    registration=Path(registry_path or Path('/etc/crange/router-ha')/(path.name+'.json'))
+    if not registration.exists():return None
+    info=registration.stat()
+    if info.st_uid!=0 or info.st_mode&0o022 or registration.is_symlink():
+        raise PlacementError('Router HA registration must be root-owned and protected from modification.')
+    if registry_path is None:
+        for parent in registration.parents:
+            info=parent.stat()
+            if info.st_uid!=0 or info.st_mode&0o022 or parent.is_symlink():
+                raise PlacementError('Router HA registration parents must be protected from replacement.')
+    registry=json.loads(registration.read_text())
+    if registry.get('project_id')!=int(path.name.split('-')[-1]):
+        raise PlacementError('Router HA registration belongs to another project.')
+    return registry
+
+
+def confirmed_router_placement(path, resource_key, vmid, api, *, tf=None):
+    """Accept a foundation router's later HA conversion only with native proof."""
+    registry=protected_registration(path)
+    if not registry:return None
+    selected={key:row for key,row in registry.get('routers',{}).items() if guest_key(key)==resource_key}
+    if not selected:return None
+    if len(selected)!=1 or next(iter(selected.values())).get('vmid')!=vmid:
+        raise PlacementError('Foundation router differs from its protected HA identity.')
+    from crange import tf_run
+    snapshot=json.loads((tf or tf_run)(path,['state','pull'],capture=True).stdout)
+    key=next(iter(selected));attrs=container_states(snapshot).get(key,{})
+    disks=attrs.get('disk') or []
+    if len(disks)!=1 or disks[0].get('datastore_id')!=STORAGE:
+        raise PlacementError('HA disk conversion has not been adopted into router state.')
+    if prove_moves(snapshot,{**registry,'routers':selected},api):
+        raise PlacementError('HA assignment changed; wait for verified state adoption before resuming configuration.')
+    return {'node_name':attrs['node_name'],'datastore_id':STORAGE}
+
+
 def reconcile_locations(path, *, api=None, tf=None, registry_path=None, journal_root=None):
     """Worker entry point. Missing root registration leaves ordinary projects alone."""
     from crange import ProxmoxAPI, tf_run
     from crange_scheduling import atomic_json
     path = Path(path)
     registration = Path(registry_path or Path('/etc/crange/router-ha') / (path.name + '.json'))
-    if not registration.exists():
+    registry = protected_registration(path,registry_path)
+    if registry is None:
         return []
     project = int(path.name.split('-')[-1])
-    stat = registration.stat()
-    if stat.st_uid != 0 or stat.st_mode & 0o022 or registration.is_symlink():
-        raise PlacementError('Router HA registration must be root-owned and protected from modification.')
-    if registry_path is None:
-        for parent in registration.parents:
-            info = parent.stat()
-            if info.st_uid != 0 or info.st_mode & 0o022 or parent.is_symlink():
-                raise PlacementError('Router HA registration parents must be protected from replacement.')
-    registry = json.loads(registration.read_text())
-    if registry.get('project_id') != project:
-        raise PlacementError('Router HA registration belongs to another project.')
     if registry.get('routers') == {}:
         return []
     tf = tf or tf_run

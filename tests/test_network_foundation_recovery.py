@@ -12,7 +12,7 @@ import crange_scheduling
 
 
 class FoundationRecoveryTests(unittest.TestCase):
-    def recover(self, *, bad=None, legacy=False):
+    def recover(self, *, bad=None, legacy=False, ha=False):
         with tempfile.TemporaryDirectory() as temporary:
             home = pathlib.Path(temporary)
             project = home / 'project-100';project.mkdir()
@@ -37,6 +37,9 @@ class FoundationRecoveryTests(unittest.TestCase):
                 'plan_id': identity, 'network_foundation': ['test'], 'reservation_state': 'released'}))
             actual = {resource: {'node_name': 'proxmox2', 'vm_id': 138,
                                  'disk': [{'datastore_id': 'local-lvm', 'size': 4}]}}
+            if ha:
+                actual[resource]['node_name']='proxmox5'
+                actual[resource]['disk'][0]['datastore_id']='crange-router-ha'
             config = {'unprivileged': 1, 'tags': 'p100;p100c100',
                 'net0': 'bridge=p100t254,ip=10.100.254.2/24,gw=10.100.254.1',
                 'net1': 'bridge=p100c100,ip=10.100.100.1/24'}
@@ -66,6 +69,8 @@ class FoundationRecoveryTests(unittest.TestCase):
                  patch.object(crange, 'ProxmoxAPI', return_value=api), \
                  patch.object(crange, 'tf_run', return_value=SimpleNamespace(stdout='{}')) as terraform, \
                  patch('crange_network_foundation.validate_plan'), \
+                 patch('crange_router_ha.confirmed_router_placement',return_value=(
+                     {'node_name':'proxmox5','datastore_id':'crange-router-ha'} if ha else None)), \
                  patch.object(crange_scheduling, 'applied_resources', return_value=actual), \
                  patch.object(crange, 'cmd_configure_network_foundation') as configure:
                 if bad:
@@ -87,6 +92,9 @@ class FoundationRecoveryTests(unittest.TestCase):
 
     def test_unreadable_legacy_review_does_not_block_owned_recovery(self):
         self.recover(legacy=True)
+
+    def test_proven_ha_storage_and_node_adoption_do_not_reapply_the_original_plan(self):
+        self.recover(ha=True)
 
     def test_changed_or_active_resources_do_not_trigger_configuration(self):
         for bad in ('network', 'active', 'storage', 'inputs', 'plan'):

@@ -50,7 +50,9 @@ def main():
     desired = json.loads(desired_file.read_text()) if desired_file.exists() else {}
     applied_file = args.terraform_dir / 'crange-applied-placements.json'
     applied = json.loads(applied_file.read_text()) if applied_file.exists() else {}
-    outputs = complete_metadata(outputs, desired, applied)
+    state_file=args.terraform_dir/'terraform.tfstate'
+    state=json.loads(state_file.read_text()) if state_file.exists() else None
+    outputs = complete_metadata(outputs, desired, applied,state=state)
     def val(name):
         value = outputs[name]["value"]
         if name in ("jump_boxes", "scenario_boxes", "scenario_containers"):
@@ -71,7 +73,7 @@ def main():
                 scenario_hosts.append(endpoint)
             if endpoint['address'] and 'vnc' in selected:
                 vnc_hosts.append(endpoint)
-    custom_networks = routers.get("custom_networks", {})
+    custom_networks = {key:net for key,net in routers.get("custom_networks", {}).items() if has_guest_id(net)}
     project_router_ip = routers["project"]["address"]
     project_network = f"10.{project_id}.0.0/16"
     project_downstream = f"10.{project_id}.0.1"

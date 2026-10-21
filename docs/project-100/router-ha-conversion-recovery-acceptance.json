@@ -1,0 +1,116 @@
+{
+  "observed_at": "2026-10-21T13:26:04.061696+00:00",
+  "project_id": 100,
+  "router_key": "router:custom:t0852bb1b34-test-primary",
+  "guest_id": 261,
+  "node": "proxmox6",
+  "same_guest_identity": true,
+  "shared_rootfs": "crange-router-ha:261/vm-261-disk-0.raw,size=4G",
+  "config_sha256": "f3fd7b5aade0661b67c985cc09dd94523bc308155e071506843c0e68f483a8ca",
+  "running": true,
+  "unlocked": true,
+  "enrollment_phase": "enrolled",
+  "committed_move_recovery": {
+    "task": {
+      "exitstatus": "broken pipe ",
+      "id": "261",
+      "node": "proxmox6",
+      "pid": 4050292,
+      "pstart": 45979218,
+      "starttime": 1792557878,
+      "status": "stopped",
+      "type": "move_volume",
+      "upid": "UPID:proxmox6:003DCD74:02BD9652:6AD84336:move_volume:261:root@pam:",
+      "user": "root@pam"
+    },
+    "upid": "UPID:proxmox6:003DCD74:02BD9652:6AD84336:move_volume:261:root@pam:",
+    "proof": {
+      "source_volume_absent": true,
+      "filesystem_readonly_check": true,
+      "target_volume": "crange-router-ha:261/vm-261-disk-0.raw",
+      "bytes": 4294967296,
+      "fsck_output_sha256": "79347a2c11713ae4d44f93380c6d0ef9bd74d925eec022a7b0add09ffed24cda"
+    },
+    "log_sha256": "608590bf868c49ea1b9abf2bda561e29857eb86d10073ca3bb7bc7a8f53395e2",
+    "original_failure_preserved": true
+  },
+  "completed_tasks": {
+    "start": {
+      "upid": "UPID:proxmox6:000341A0:02EC7269:6AD8BB2C:vzstart:261:root@pam:",
+      "status": {
+        "exitstatus": "OK",
+        "id": "261",
+        "node": "proxmox6",
+        "pid": 213408,
+        "pstart": 49050217,
+        "starttime": 1792588588,
+        "status": "stopped",
+        "type": "vzstart",
+        "upid": "UPID:proxmox6:000341A0:02EC7269:6AD8BB2C:vzstart:261:root@pam:",
+        "user": "root@pam"
+      }
+    }
+  },
+  "native_ha": [
+    {
+      "digest": "866aa87656f0f1dbccd3bd9850730efd48e9d0f9",
+      "failback": 0,
+      "max_relocate": 4,
+      "max_restart": 1,
+      "sid": "ct:261",
+      "state": "started",
+      "type": "ct"
+    }
+  ],
+  "affinity": [
+    {
+      "digest": "be153647b81b31f83b04d0b5554ba0f3e87cc580",
+      "nodes": "proxmox2,proxmox3,proxmox4,proxmox5,proxmox6",
+      "order": 2,
+      "resources": "ct:261",
+      "rule": "crange-p100-ct261",
+      "strict": 1,
+      "type": "node-affinity"
+    }
+  ],
+  "tasks_since_enrollment_started": [
+    {
+      "endtime": 1792588593,
+      "id": "261",
+      "node": "proxmox6",
+      "pid": 213408,
+      "pstart": 49050217,
+      "starttime": 1792588588,
+      "status": "OK",
+      "type": "vzstart",
+      "upid": "UPID:proxmox6:000341A0:02EC7269:6AD8BB2C:vzstart:261:root@pam:",
+      "user": "root@pam"
+    },
+    {
+      "endtime": 1792557942,
+      "id": "261",
+      "node": "proxmox6",
+      "pid": 4050292,
+      "pstart": 45979218,
+      "starttime": 1792557878,
+      "status": "broken pipe ",
+      "type": "move_volume",
+      "upid": "UPID:proxmox6:003DCD74:02BD9652:6AD84336:move_volume:261:root@pam:",
+      "user": "root@pam"
+    },
+    {
+      "endtime": 1792557870,
+      "id": "261",
+      "node": "proxmox6",
+      "pid": 4049936,
+      "pstart": 45978068,
+      "starttime": 1792557866,
+      "status": "OK",
+      "type": "vzstop",
+      "upid": "UPID:proxmox6:003DCC10:02BD91D4:6AD8432A:vzstop:261:root@pam:",
+      "user": "root@pam"
+    }
+  ],
+  "one_move_submitted": true,
+  "no_second_stop": true
+}

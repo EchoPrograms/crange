@@ -1,0 +1,25 @@
+{
+  "collected_at": "2026-10-21T13:25:24.890795+00:00",
+  "scope": "Read-only authenticated WSMan commands using exact applied-guest private credential bindings",
+  "transport": "NTLM; message encryption required",
+  "results": [
+    {
+      "key": "t001-assessor-win-j02",
+      "address": "10.100.1.12",
+      "status_code": 0,
+      "result": {
+        "computer": "MERIDIA-CB301ES",
+        "service": "Running"
+      }
+    },
+    {
+      "key": "t002-assessor-win-j02",
+      "address": "10.100.2.12",
+      "status_code": 0,
+      "result": {
+        "computer": "MERIDIA-L44B0OG",
+        "service": "Running"
+      }
+    }
+  ]
+}

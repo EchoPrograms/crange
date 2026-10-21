@@ -26,9 +26,11 @@ def state():
 class RouterOperatorTests(unittest.TestCase):
     def test_void_mutations_succeed_but_empty_reads_are_invalid(self):
         for method in ('create', 'set', 'delete'):
-            with patch.object(operator, 'run', return_value='\n') as run:
+            with patch.object(operator, 'native_mutation', return_value=None) as mutate, \
+                    patch.object(operator, 'run') as run:
                 self.assertIsNone(operator.api('/cluster/ha/resources', method))
-                self.assertEqual(run.call_count, 1)
+                mutate.assert_called_once_with('/cluster/ha/resources', method, {})
+                run.assert_not_called()
         with patch.object(operator, 'run', return_value=''):
             with self.assertRaises(json.JSONDecodeError):
                 operator.api('/cluster/ha/resources')

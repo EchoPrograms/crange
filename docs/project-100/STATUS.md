@@ -1463,3 +1463,62 @@ inside collapsed maintenance tools and later disappeared after acceptance).
 A separate actual-browser component render passed with a fixture, without
 JavaScript errors or submitting a job. The fixed admin operation was exercised
 successfully through the authenticated dashboard API.
+
+### October 21: maintained bases accepted; lab workflow resumed
+
+All nine selectable OS choices now have published image IDs and passed real
+placement reviews. Five maintained Linux bases passed fresh-clone identity and
+readiness checks. The final Ubuntu container retry succeeded on Proxmox2;
+Debian/Alpine/Ubuntu container caches are verified on all four application
+workers. Debian/Ubuntu VM caches are verified on Proxmox2/5/6. Proxmox3 lacks
+their additional disk headroom; its reserve was preserved. Proxmox1 remains
+router-only and Proxmox4 remains the required core. See
+[template acceptance](../platform-template-acceptance.json), pushed in `62aad11`.
+
+Fresh reads at 04:40 UTC found all 56 existing Project100 machines running with
+their expected identities: 30 company servers, six staging servers and twenty
+participant workstations. See [guest evidence](oct21-existing-guest-status.json).
+This supersedes the older undeployed-workstation checkpoint; it does not prove
+their access or service readiness.
+
+The native `crange-sync` browser audit tested all 66 project SSH/RDP connections:
+49 connected and rendered a display; 17 failed. Failures were concentrated in
+Team1/5 access plus staging DB SSH. See
+[initial connection results](guacamole-oct21-initial-connectivity.json).
+Team1 configuration `659dd79ac1154fd389aeeaf6a09c008b` repaired its four container
+logins and router/jump-box policy, then failed during workstation Windows access
+with a WinRM class-registration error. Later authenticated read-only WinRM
+commands succeed on that workstation and the Team2 comparison host. Full access
+repair and a repeat browser sweep remain pending.
+
+Actual browser preparation `3178057fcaf84a4eb20872d97f0d781c` declared release0.1.3's
+six fresh test guests and isolated LAN100. Reviewed foundation
+`5eb16d24dfe8938f400f106128bb09de` created CT261 and its VNet through dashboard apply
+`490d5ef140724675a687ab9be99a22ea`; existing guests were preserved. Its HA disk move
+committed, but killing its attached CLI observer after 40 seconds broke stdout
+and left a terminal native `broken pipe` error and stale disk lock.
+
+The repaired operator submits asynchronous native REST tasks with verified
+cluster TLS and a root ticket kept only in memory. For this exact interrupted
+move it verified unique ownership/task history, completed native copy output,
+absence of the old volume and a read-only filesystem check before releasing
+the stale lock. It started the same CT261, refreshed only its storage state and
+enrolled native HA. The original failed task remains recorded. Native evidence
+proves one move and one stop, with no duplicate copy or replay. Project100 now
+has eight registered routers. See
+[live recovery evidence](router-ha-conversion-recovery-acceptance.json).
+
+Dashboard retries exposed two integration gaps. Foundation recovery now accepts
+a later HA node/storage assignment only after protected registration, state
+lineage and fresh native HA proof. Targeted Terraform creation can also omit
+the custom-router map output: inventory now fills missing metadata only for
+the same allocated LXC generation in state and its applied receipt, with exact
+project/bridge/address ownership. Undeployed router declarations remain absent
+from inventory. These fixes are deployed; the fresh dashboard retry is running.
+
+The dashboard also reloads project state after release/review/deployment jobs
+complete, including failed jobs with partial progress. Its behavioral Node
+regression passes. The current Python regression passes 1,230 tests with one
+existing skip. Remaining work includes LAN acceptance, fresh 0.1.3 test/cleanup
+and explicit rollout, repaired participant access, isolation/assessment proofs
+and final operational acceptance. The full lab goal remains incomplete.
