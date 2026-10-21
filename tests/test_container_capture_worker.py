@@ -5,21 +5,21 @@ from pathlib import Path
 import sys
 import tempfile
 import unittest
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 sys.path.insert(0,str(Path(__file__).resolve().parents[1]/'scripts'))
 import crange_capture as capture
 from crange_distribution import DistributionError, _source_config_identity
 
 class ContainerCaptureTests(unittest.TestCase):
     def setUp(self):
-        self.tmp=tempfile.TemporaryDirectory();self.events=[]
+        self.tmp=tempfile.TemporaryDirectory();self.events=[];self.source_id=125
         self.source={'hostname':'p100t254-mhl-app01','memory':1024,'cores':1,'unprivileged':1,
                      'rootfs':'local-lvm:vm-125-disk-0,size=8G','net0':'name=eth0,bridge=p100t254,ip=10.100.254.40/24,type=veth','template':0}
         self.clone={**self.source,'hostname':'capture','rootfs':'local-lvm:vm-201-disk-0,size=8G'}
         self.running=False;self.template_null=False
         owner=self
         class API:
-            def container(self,node,vmid):return dict(owner.source if vmid==125 else owner.clone)
+            def container(self,node,vmid):return dict(owner.source if vmid==owner.source_id else owner.clone)
             def container_status(self,node,vmid):return 'running' if vmid==201 and owner.running else 'stopped'
             def request(self,method,path,fields=None):
                 owner.events.append((method,path,fields))
@@ -45,19 +45,27 @@ class ContainerCaptureTests(unittest.TestCase):
             def close(self):pass
         self.api,self.ledger=API(),Ledger
     def tearDown(self):self.tmp.cleanup()
-    def invoke(self,probe_error=None,identity_error=None):
+    def invoke(self,probe_error=None,identity_error=None,platform_source=False):
         def identity(*args,**kwargs):
             self.events.append(('identity',self.running,kwargs['kind']))
             if identity_error:raise identity_error
             return {'source_config_sha256':_source_config_identity(self.clone,201),'source_identity':{'machine_id':'a'*32}}
         def export(*args,**kwargs):self.events.append(('export',self.running,kwargs['kind']))
         policy={'allowed_nodes':['proxmox2'],'approved_backup_storage':[['proxmox2','archive']]}
-        with patch.object(capture,'DATA',Path(self.tmp.name)),patch.object(capture,'_capture_destination',return_value='proxmox2'),patch.object(capture,'capture_policy',return_value=(policy,'isolated','local-lvm','archive')),patch.object(capture,'ReservationLedger',self.ledger),patch.object(capture,'discover',return_value={'guests':{'201':{}}}),patch.object(capture,'node_locks',return_value=contextlib.nullcontext()),patch.object(capture,'capture_source_identity',side_effect=identity),patch.object(capture.time,'monotonic',return_value=0,side_effect=[0,181] if identity_error else None),patch.object(capture,'export_image',side_effect=export),patch('crange_distribution.main',side_effect=probe_error) as probe_main:
-            result=capture.capture_container(self.api,project=100,node='proxmox2',source_id=125,name='capture',description='test',slug='abc',profile={'init_system':'systemd'},generalize=lambda *args:{'generalized':True,'machine_id_empty':True,'previous_machine_id':'a'*32})
+        with patch.object(capture,'_approved_platform_source'),patch.object(capture,'DATA',Path(self.tmp.name)),patch.object(capture,'_capture_destination',return_value='proxmox2'),patch.object(capture,'capture_policy',return_value=(policy,'isolated','local-lvm','archive')),patch.object(capture,'ReservationLedger',self.ledger),patch.object(capture,'discover',return_value={'guests':{'201':{}}}),patch.object(capture,'node_locks',return_value=contextlib.nullcontext()),patch.object(capture,'capture_source_identity',side_effect=identity),patch.object(capture.time,'monotonic',return_value=0,side_effect=[0,181] if identity_error else None),patch.object(capture,'export_image',side_effect=export),patch('crange_distribution.main',side_effect=probe_error) as probe_main:
+            result=capture.capture_container(self.api,project=100,node='proxmox2',source_id=self.source_id,name='capture',description='test',slug='abc',profile={'init_system':'systemd'},platform_source=platform_source,policy_override=policy,ct_exec=Mock(prepare_capture_identity=lambda *a:{'prepared':True}),generalize=lambda *args:{'generalized':True,'machine_id_empty':True,'previous_machine_id':'a'*32})
             args=probe_main.call_args.args[0]
             self.assertEqual(args[:2],['--catalog',str(capture.CONFIG/'image-catalog.json')])
             self.assertIn('--policy',args);self.assertNotIn('--kind',args)
             return result
+    def test_platform_debian_sets_nesting_on_the_container_before_start(self):
+        self.source_id=3000;self.source['template']=1;self.clone['features']='keyctl=1'
+        self.invoke(platform_source=True)
+        index=next(i for i,event in enumerate(self.events) if len(event)>2 and event[0]=='PUT' and event[1]=='/nodes/proxmox2/lxc/201/config')
+        self.assertEqual(self.events[index][2]['features'],'keyctl=1,nesting=1')
+        self.assertLess(index,next(i for i,event in enumerate(self.events) if len(event)>1 and event[1]=='/nodes/proxmox2/lxc/201/status/start'))
+        self.assertNotIn('features',self.source)
+
     def test_reserves_isolates_and_exports_only_after_clean_shutdown(self):
         vmid,evidence=self.invoke();self.assertEqual(vmid,201)
         self.assertLess(next(i for i,e in enumerate(self.events) if e[0]=='reserve'),next(i for i,e in enumerate(self.events) if len(e)>1 and str(e[1]).endswith('/clone')))

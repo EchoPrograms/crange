@@ -1635,12 +1635,6 @@ def capture_vm(api, *, project, node, source_id, name, description, slug, profil
                 atomic_json(receipt_path, receipt)
             else:
                 fields = {'tags': f'crange-image;{marker};p{project:03d}', 'onboot': 0}
-                if platform_source and source_id == 3000 and profile.get('init_system') == 'systemd':
-                    # Debian 13 systemd needs nesting in an unprivileged LXC.
-                    # Configure only this disposable derivative, never its source.
-                    features = dict(token.split('=', 1) for token in str(config.get('features') or '').split(',') if '=' in token)
-                    features['nesting'] = '1'
-                    fields['features'] = ','.join(f'{key}={value}' for key, value in sorted(features.items()))
                 if node != source_node:
                     fields['machine'] = _portable_capture_machine(api, node, config)
                     print(f'Portable capture machine: {fields["machine"]}', flush=True)
@@ -1944,6 +1938,12 @@ def capture_container(api, *, project, node, source_id, name, description, slug,
                 base = f'/nodes/{node}/lxc/{vmid}'
                 config = api.container(node, vmid)
                 fields = {'tags': f'crange-image;{marker};p{project:03d}', 'onboot': 0}
+                if platform_source and source_id == 3000 and profile.get('init_system') == 'systemd':
+                    # Debian 13 systemd needs nesting in an unprivileged LXC.
+                    # Configure only this disposable derivative, never its source.
+                    features = dict(token.split('=', 1) for token in str(config.get('features') or '').split(',') if '=' in token)
+                    features['nesting'] = '1'
+                    fields['features'] = ','.join(f'{key}={value}' for key, value in sorted(features.items()))
                 for key in config:
                     if re.fullmatch(r'net[0-9]+', key):
                         from crange_distribution import disconnected_container_nic
