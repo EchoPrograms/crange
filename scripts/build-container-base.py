@@ -111,6 +111,8 @@ def build(args):
             '--hostname', hostname, '--rootfs', 'local-lvm:4', '--cores', '1', '--memory', '512', '--swap', '0',
             '--unprivileged', '1', '--onboot', '0', '--pool', 'crange-iac', '--tags', 'range-lan;crange-base',
             '--net0', 'name=eth0,bridge=craccess,ip=dhcp,mtu=1450,firewall=1', '--nameserver', '10.60.2.1'])
+        if distro.startswith('debian-13'):
+            command(['pct','set',str(args.vmid),'--features','nesting=1'])
         command(['pct', 'start', str(args.vmid)])
         # pct start can return before guest networking has finished booting.
         for attempt in range(60):
@@ -136,7 +138,12 @@ def build(args):
         guest('visudo', '-cf', '/etc/sudoers.d/crange-user')
         if distro.startswith('alpine'):
             guest('rc-update', 'add', 'sshd', 'default')
-            put('/etc/init.d/crange-hostkeys', '#!/sbin/openrc-run\ndepend() { need localmount; before sshd; }\nstart() { /usr/bin/ssh-keygen -A; }\n', '0755')
+            interpreter = guest('sh','-c','command -v openrc-run').strip()
+            if interpreter not in ('/sbin/openrc-run','/bin/openrc-run'):
+                raise BuildError('Unsupported Alpine OpenRC interpreter.')
+            put('/etc/init.d/crange-machine-id', '#!'+interpreter+'\ndepend() { need localmount; before crange-hostkeys sshd; }\nstart() { if ! test -s /etc/machine-id; then umask 022; od -An -N16 -tx1 /dev/urandom | tr -d " \\n" > /etc/machine-id; fi; }\n', '0755')
+            guest('rc-update','add','crange-machine-id','boot')
+            put('/etc/init.d/crange-hostkeys', '#!'+interpreter+'\ndepend() { need localmount crange-machine-id; before sshd; }\nstart() { /usr/bin/ssh-keygen -A; }\n', '0755')
             guest('rc-update', 'add', 'crange-hostkeys', 'boot')
             guest('rc-service', 'sshd', 'start')
         else:

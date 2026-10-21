@@ -6,10 +6,10 @@ import crange_cache_jobs as jobs
 from crange_placement import ReservationLedger
 
 class ResumeTests(unittest.TestCase):
-    def run_case(self,foreign=False,active=False,replace=False,missing_evidence=False,already_replaced=False):
+    def run_case(self,foreign=False,active=False,replace=False,missing_evidence=False,already_replaced=False,linux=False):
         job='cache-'+'a'*32;sha='b'*64;node='proxmox5';store='crange-thin'
         item={'operation':'cache_prepare','image':'image','artifact_sha256':sha,
-              'resolved':{'node_name':node,'datastore_id':store},'resources':{},'reservation_id':'r','resource_key':'cache:image'}
+              'resolved':{'node_name':node,'datastore_id':store},'resources':{'memory_mb':512,'cpu_cores':1},'reservation_id':'r','resource_key':'cache:image'}
         upid='UPID:proxmox5:00000001:00000001:00000001:qmclone:139:crange-iac@pve!terraform:'
         record={'job_id':job,'node':node,'datastore_id':store,'image_id':'image','artifact_sha256':sha,
                 'state':'verifying','kind':'qemu','template_id':139,'probe_id':140,
@@ -24,7 +24,7 @@ class ResumeTests(unittest.TestCase):
         def request(method,path,fields=None):
             if path.endswith('/config'):
                 vmid=139 if '/139/' in path else 140
-                return {'template':int(vmid==139),'tags':f'crange-image;crange-cache-{vmid}',
+                return {'template':int(vmid==139),'memory':512,'cores':1,'tags':f'crange-image;crange-cache-{vmid}',
                         'description':'foreign' if foreign else ('CRANGE distribution '+job+' image image' if vmid==139 else 'CRANGE verification '+job)}
             if path.endswith('/status/current'):return {'status':'stopped'}
             if '/tasks/' in path:return {'status':'running' if active else 'stopped','exitstatus':'OK'}
@@ -37,7 +37,7 @@ class ResumeTests(unittest.TestCase):
             pins=root/'artifact-pins';pins.mkdir();(pins/(job+'.json')).write_text(json.dumps({'job_id':job,'artifact_sha256':sha,'volume_id':'crange-library:backup/test'}))
             ledger=ReservationLedger(root/'reservations.sqlite3');ledger.db.execute('INSERT INTO jobs (job_id,project_id,owner,state,expires,heartbeat,allocations) VALUES (?,?,?,?,?,?,?)',(job,100,'admin','running',9999999999,0,json.dumps([item])));ledger.close()
             with patch.object(jobs,'_root',return_value=root),patch.object(jobs,'_settings',return_value=(policy,catalog)),patch.object(jobs,'ProxmoxAPI',return_value=api), \
-                 patch.object(jobs,'_cache_probe_identity',return_value=({'identity_mode':'windows-scenario-snapshot-v1'},'windows',False)), \
+                 patch.object(jobs,'_cache_probe_identity',return_value=({'machine_id':'a'*32,'ssh_host_key':'ssh-ed25519 key'},'systemd',False) if linux else ({'identity_mode':'windows-scenario-snapshot-v1'},'windows',False)), \
                  patch.object(jobs.scheduling,'node_locks',return_value=nullcontext()),patch.object(jobs,'select_probe_bridge',return_value='crprobe1450'), \
                  patch('crange_distribution._require_probe_pool'),patch.object(jobs,'ProbeVerifier') as verify, \
                  patch.object(jobs,'catalog_transaction',side_effect=lambda path,callback:callback(catalog)), \
@@ -51,6 +51,12 @@ class ResumeTests(unittest.TestCase):
                 else:self.assertEqual(jobs.resume_snapshot_cache(job,replace_probe=replace)['state'],'ready')
             ledger=ReservationLedger(root/'reservations.sqlite3');state=ledger.get_job(job)['state'];ledger.close()
         return api,published,state
+
+    def test_linux_resume_uses_the_existing_probe_and_releases_only_after_acceptance(self):
+        api,published,state=self.run_case(linux=True)
+        self.assertEqual(state,'released')
+        self.assertEqual(published[0]['template_id'],139)
+        self.assertEqual([c.args[0] for c in api.request.call_args_list if c.args[0]!='GET'],['DELETE'])
 
     def test_resume_verifies_existing_probe_without_restore_or_clone(self):
         api,published,state=self.run_case()

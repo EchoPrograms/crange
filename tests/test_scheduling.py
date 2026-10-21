@@ -289,6 +289,23 @@ class SchedulingTests(unittest.TestCase):
         with self.assertRaises(CrangeError):
             scheduling.discover(RacyAPI([{'node':'proxmox2','type':'qemu','vmid':145}]),policy)
 
+    def test_discovery_restarts_once_after_confirmed_move_and_accounts_new_node(self):
+        class MovingAPI(API):
+            calls=0
+            def request(self, method, path, fields=None):
+                if path=='/nodes':return [{'node':n,'status':'online'} for n in ('proxmox2','proxmox3')]
+                if path=='/cluster/resources' and fields=={'type':'vm'}:
+                    self.calls+=1
+                    return [{'node':'proxmox2' if self.calls==1 else 'proxmox3','type':'qemu','vmid':101,'status':'running'}]
+                if path=='/nodes/proxmox2/qemu/101/config':raise CrangeError('Proxmox API GET failed with HTTP 500.')
+                return super().request(method,path,fields)
+        api=MovingAPI();result=scheduling.discover(api,dict(scheduling.DEFAULT_POLICY,allowed_nodes=['proxmox2','proxmox3']))
+        self.assertEqual(api.calls,3)
+        self.assertEqual(result['guests']['101']['node_name'],'proxmox3')
+        self.assertEqual(result['nodes']['proxmox2']['committed_memory_mb'],0)
+        self.assertEqual(result['nodes']['proxmox3']['committed_memory_mb'],2048)
+        self.assertEqual(result['quota_usage']['global']['memory_mb'],2048)
+
     def test_container_capability_requires_pinned_provider_acceptance(self):
         policy=dict(scheduling.DEFAULT_POLICY,allowed_nodes=['proxmox2'],provider_version='0.104.0')
         self.assertNotIn('container',scheduling.discover(API(),policy)['nodes']['proxmox2']['guest_types'])

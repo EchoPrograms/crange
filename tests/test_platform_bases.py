@@ -80,11 +80,14 @@ class MaintainedBaseTests(unittest.TestCase):
         api = Mock()
         api.vm.return_value = {'name': 'crange-base-debian-13', 'tags': 'range-lan;crange-base', 'template': 1}
         image = {'kind': 'vm', 'verified': True, 'source_revision': 'platform-debian-13-vm-' + 'a' * 64}
+        order=[]
         with patch.object(b, 'read_settings', return_value=({}, {'images': {'debian-13-vm-base-v1': image}})), \
-                patch.object(b, 'distribute', return_value={'errors': {}}), patch.object(b, 'link_global_base'), \
+                patch.object(b, 'distribute', side_effect=lambda *a,**k:order.append('distribute') or {'errors': {}}), \
+                patch.object(b, 'link_global_base', side_effect=lambda *a,**k:order.append('link')), \
                 patch.object(b, 'capture_vm') as capture:
             self.assertTrue(b.prepare('debian-13-vm', version='1', api=api)['reused'])
             capture.assert_not_called()
+            self.assertEqual(order,['distribute','link'])
 
     def test_wrong_existing_provenance_cannot_be_adopted(self):
         api = Mock()
@@ -137,6 +140,9 @@ class MaintainedBaseTests(unittest.TestCase):
                     'approved-ct-base': {'template_id': 3000, 'template_node': 'proxmox4'},
                     'p100-image-example': {'image_id': 'p100-image-example'}}))
             (project / 'crange.auto.tfvars.json').write_text('{}')
+            deleted=project.with_name('project-001');deleted.mkdir()
+            (deleted/'crange.auto.tfvars.json').write_text('{}')
+            (deleted/'.crange-lifecycle.json').write_text(json.dumps({'state':'deleted'}))
             def approve(image, projects, api):
                 self.assertEqual(projects, [100])
                 file = project / 'approved-container-templates.json'
@@ -162,6 +168,21 @@ class MaintainedBaseTests(unittest.TestCase):
                     patch.object(crange_cache_jobs, 'prepare_cache') as prepare:
                 report = b.distribute('base-v1')
             self.assertEqual(report['ready'], ['proxmox1'])
-            self.assertEqual(len(report['errors']), 5)
-            self.assertIn('proxmox4', report['errors'])
+            self.assertEqual(report['errors'], {})
+            self.assertEqual(len(report['excluded']), 5)
+            self.assertIn('proxmox4', report['excluded'])
             prepare.assert_called_once()
+
+    def test_distribution_preserves_router_only_restriction(self):
+        import crange_cache_jobs
+        policy={'allowed_nodes':['proxmox1','proxmox2'],'router_only_nodes':['proxmox1'],
+                'approved_storage':[['proxmox1','local-lvm'],['proxmox2','local-lvm']]}
+        image={'kind':'vm','verified':True,'approved_projects':['*']}
+        with tempfile.TemporaryDirectory() as directory,patch.object(b,'DATA',Path(directory)),\
+                patch.object(b,'read_settings',return_value=(policy,{'images':{'base-v1':image}})),\
+                patch.object(crange_cache_jobs,'prepare_cache') as prepare:
+            report=b.distribute('base-v1')
+        self.assertEqual(report['ready'],['proxmox2'])
+        self.assertIn('proxmox1',report['excluded'])
+        prepare.assert_called_once_with(project_id=1,image_id='base-v1',node_name='proxmox2',
+                                       datastore_id='local-lvm',owner='platform-base-distribution',auto_storage=True)

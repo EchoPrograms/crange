@@ -13,6 +13,25 @@ from crange_image_cache import CacheError
 
 
 class CacheJobTests(unittest.TestCase):
+    def test_cache_pool_fallback_only_retries_unallocated_disk_admission(self):
+        from crange_placement import PlacementError
+        ledger = Mock()
+        ledger.reserve_preparation.side_effect = [PlacementError('cache preparation has insufficient disk_gb headroom'),
+            {'resolved': {'datastore_id': 'local-hdd'}}]
+        scope = {'node_name': 'proxmox6', 'policy': {'approved_storage': [
+            ['proxmox6','local-lvm'], ['proxmox6','local-hdd'], ['proxmox5','foreign']]}}
+        result = jobs.reserve_cache_storage(ledger, datastore_id='local-lvm', auto_storage=True, **scope)
+        self.assertEqual(result['resolved']['datastore_id'], 'local-hdd')
+        self.assertEqual([call.kwargs['datastore_id'] for call in ledger.reserve_preparation.call_args_list],
+                         ['local-lvm','local-hdd'])
+        for reason in ('job already has reservations; reconcile instead of duplicating',
+                       'cache preparation has insufficient memory_mb headroom', 'cache preparation global quota exceeded'):
+            ledger.reset_mock();ledger.reserve_preparation.side_effect = PlacementError(reason)
+            with self.assertRaisesRegex(PlacementError, reason):
+                jobs.reserve_cache_storage(ledger, datastore_id='local-lvm', auto_storage=True, **scope)
+            ledger.reserve_preparation.assert_called_once()
+
+
     def test_snapshot_resume_retains_offline_or_router_only_cache_without_blocking_other_work(self):
         from crange_placement import ReservationLedger
         for node,status,restricted,resumed in [('proxmox1','offline',False,False),
@@ -125,7 +144,7 @@ class CacheJobTests(unittest.TestCase):
             catalog = {'schema_version': 1, 'images': {'base-v1': image}}
             (root / 'image-catalog.json').write_text(json.dumps(catalog))
             policy = {'enabled': True, 'revision': 'v1', 'allowed_nodes': ['proxmox2'],
-                'allowed_storages': ['local-lvm'], 'cache': {'isolated_bridge': 'vmbrtest',
+                'allowed_storages': ['local-lvm'], 'approved_storage': [['proxmox2','local-lvm']], 'cache': {'isolated_bridge': 'vmbrtest',
                 'isolated_bridges': ['vmbrtest'], 'tested_paths': ['local-linked-vm', 'vm-archive-restore']}}
             inventory = {'captured_at': jobs.time.time(), 'quota_usage': {}, 'guests': {},
                 'nodes': {'proxmox2': {'online': True, 'memory_mb': 16384, 'cpu_cores': 16,

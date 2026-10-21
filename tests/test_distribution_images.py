@@ -60,6 +60,15 @@ class ReplicaTests(unittest.TestCase):
         return self.worker.prepare(self.catalog, 'base-v1', source_node='proxmox2',
             source_id=100, node='proxmox2', datastore_id='local-lvm', job_id='test')
 
+    def test_smaller_maintained_linux_probe_is_only_a_proposal(self):
+        for base in ('debian-13-vm','ubuntu-24-04-vm'):
+            image={'kind':'vm','init_system':'systemd','memory_mb':2048,'cpu_cores':2,
+                   'source_revision':'platform-'+base+'-'+'a'*64}
+            self.assertEqual(automatic_probe_candidate(image),{'memory_mb':1024,'cpu_cores':1})
+            self.assertNotIn('probe_resources',image)
+            with self.assertRaises(DistributionError):validate_probe_candidate(image,{'memory_mb':512,'cpu_cores':1})
+            self.assertIsNone(automatic_probe_candidate({**image,'source_revision':'unrelated'}))
+
     def test_publishes_only_after_probe_deleted_and_preserves_catalog(self):
         result = self.prepare()
         self.assertEqual(len(self.catalog['images']['base-v1']['replicas']), 1)

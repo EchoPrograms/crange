@@ -1048,7 +1048,12 @@ def _fixed_guest_read(api, node, guest_type, vmid, command, ct_exec, timeout):
 
 def _guest_readiness(read, init_system):
     if init_system == 'systemd':
-        return read(['/usr/bin/systemctl', 'is-system-running'])
+        state=read(['/usr/bin/systemctl','is-system-running'])
+        if state=='degraded':
+            error=DistributionError('Source guest is not ready for identity capture.')
+            error.collector_state='degraded'
+            raise error
+        return state
     # OpenRC installations differ on whether rc-status is linked into /bin or
     # /sbin. Try only these fixed executable paths; never invoke a shell.
     failure = None
@@ -1060,13 +1065,13 @@ def _guest_readiness(read, init_system):
     raise DistributionError('OpenRC readiness command failed.') from failure
 
 
-def normalize_isolated_network_wait(api, node, kind, vmid, bridge):
+def normalize_isolated_network_wait(api, node, kind, vmid, bridge, *, ct_exec=None):
     """Clear only a known offline wait failure on an owned disposable VM.
 
     This does not mask/disable a service or permit general degraded readiness.
     The caller must subsequently observe normal readiness and collect identity.
     """
-    if kind != 'qemu':
+    if kind not in ('qemu','lxc') or (kind=='lxc' and ct_exec is None):
         return None
     _require_probe_pool(api, node, kind, vmid)
     base = f'/nodes/{node}/{kind}/{vmid}'
@@ -1079,12 +1084,18 @@ def normalize_isolated_network_wait(api, node, kind, vmid, bridge):
             api.request('GET', base + '/status/current').get('status') != 'running'):
         raise DistributionError('Offline readiness repair requires an owned running disconnected probe.')
     command = ['/usr/bin/systemctl', '--failed', '--no-pager', '--no-legend']
-    output = _fixed_guest_read(api, node, kind, vmid, command, None, 30)
+    output = _fixed_guest_read(api, node, kind, vmid, command, ct_exec, 30)
     rows = [line.strip() for line in output.splitlines() if line.strip()]
     unit = 'systemd-networkd-wait-online.service'
     if len(rows) != 1 or not re.fullmatch(
             rf'(?:\S+\s+)?{re.escape(unit)}\s+loaded\s+failed\s+failed(?:\s+.*)?', rows[0]):
         return None
+    if kind=='lxc':
+        result=ct_exec.reset_network_wait(node,vmid)
+        if result.get('reset') is not True:
+            return None
+        return {'unit':unit,'action':'reset-failed','bridge':bridge,
+                'all_nics_disconnected':True,'services_disabled':False}
     response = api.request('POST', base + '/agent/exec', {
         'command': ['/usr/bin/systemctl', 'reset-failed', unit]})
     import time
@@ -1812,7 +1823,8 @@ class ProbeVerifier:
             except Exception as error:
                 # Guest-agent initialization may lag behind host task completion.
                 if getattr(error, 'collector_state', None) == 'degraded':
-                    offline_preparation = normalize_isolated_network_wait(api, node, kind, vmid, self.bridge)
+                    offline_preparation = normalize_isolated_network_wait(api, node, kind, vmid, self.bridge,
+                        **({'ct_exec':self.ct_exec} if kind=='lxc' else {}))
             time.sleep(2)
         if readiness != ('running' if self.init_system == 'systemd' else 'default'):
             raise DistributionError('Disposable clone did not become ready.')
@@ -1890,35 +1902,54 @@ class SSHContainerExec:
             raise DistributionError('Unsupported CT verification command.')
         relay = Path('/run/crange-ct-read/socket')
         if relay.exists():
-            import socket
             from crange_ct_read_relay import COMMANDS
             read = next(key for key, value in COMMANDS.items() if value == command)
-            request = {'node': node, 'vmid': int(vmid), 'command': read}
-            if self.api is not None:
-                config = self.api.request('GET', f'/nodes/{node}/lxc/{int(vmid)}/config')
-                request.update(command='owned-image-read', read=read, marker=owned_container_marker(config))
-                if request['marker'].startswith('crange-cache-'):
-                    match=re.fullmatch(r'CRANGE verification (cache-[a-f0-9]{32})',str(config.get('description','')).rstrip('\r\n'))
-                    if not match:raise DistributionError('Compact probe lacks its exact hidden job identity.')
-                    request['cache_job_id']=match[1]
-            with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as client:
-                client.settimeout(65); client.connect(str(relay))
-                client.sendall(json.dumps(request).encode() + b'\n')
-                data = b''
-                while not data.endswith(b'\n') and len(data) <= 8192:
-                    chunk = client.recv(8193 - len(data))
-                    if not chunk: break
-                    data += chunk
-            if len(data) > 8192 or not data.endswith(b'\n'):
-                raise DistributionError('Fixed CT relay response is invalid.')
-            response = json.loads(data)
-            if set(response) != {'value'} or not isinstance(response['value'], str):
-                raise DistributionError('Fixed CT relay denied the identity read.')
-            return response['value']
+            return self._relay(node,vmid,'owned-image-read',read=read)
         result = self.run(['ssh', '-o', 'BatchMode=yes', node,
                           shlex.join(['pct', 'exec', str(int(vmid)), '--'] + command)],
                          check=True, capture_output=True, text=True, timeout=60)
         return result.stdout
+
+    def _relay(self,node,vmid,operation,*,read=None):
+        import socket
+        request={'node':node,'vmid':int(vmid),'command':read}
+        if self.api is not None:
+            config=self.api.request('GET',f'/nodes/{node}/lxc/{int(vmid)}/config')
+            request.update(command=operation,marker=owned_container_marker(config))
+            if read is not None:request['read']=read
+            if request['marker'].startswith('crange-cache-'):
+                match=re.fullmatch(r'CRANGE verification (cache-[a-f0-9]{32})',str(config.get('description','')).rstrip('\r\n'))
+                if not match:raise DistributionError('Compact probe lacks its exact hidden job identity.')
+                request['cache_job_id']=match[1]
+        with socket.socket(socket.AF_UNIX,socket.SOCK_STREAM) as client:
+            client.settimeout(65);client.connect(str(Path('/run/crange-ct-read/socket')))
+            client.sendall(json.dumps(request).encode()+b'\n');data=b''
+            while not data.endswith(b'\n') and len(data)<=8192:
+                chunk=client.recv(8193-len(data))
+                if not chunk:break
+                data+=chunk
+        if len(data)>8192 or not data.endswith(b'\n'):
+            raise DistributionError('Fixed CT relay response is invalid.')
+        response=json.loads(data)
+        if set(response)!={'value'} or not isinstance(response['value'],str):
+            raise DistributionError('Fixed CT relay denied the owned image request.')
+        return response['value']
+
+    def reset_network_wait(self,node,vmid):
+        if self.api is None:
+            raise DistributionError('Network-wait reset requires verified image ownership.')
+        result=json.loads(self._relay(node,vmid,'owned-image-network-wait-reset'))
+        if (not isinstance(result,dict) or type(result.get('reset')) is not bool or
+                (result['reset'] and (result.get('unit')!='systemd-networkd-wait-online.service'
+                                      or result.get('services_disabled') is not False))):
+            raise DistributionError('Invalid offline network-wait reset acknowledgement.')
+        return result
+
+    def prepare_capture_identity(self,node,vmid):
+        result=json.loads(self._relay(node,vmid,'capture-container-identity-prepare'))
+        if not isinstance(result,dict) or result.get('prepared') is not True:
+            raise DistributionError('Capture identity startup preparation failed.')
+        return result
 
 
 def generalize_capture_container(node, vmid, marker):
@@ -2434,6 +2465,12 @@ def automatic_probe_candidate(image):
     if image.get('init_system', image.get('identity_capture', {}).get('init_system')) != 'systemd':
         return None
     memory, cpu = image.get('memory_mb'), image.get('cpu_cores')
+    maintained = str(image.get('source_revision','')).startswith((
+        'platform-debian-13-vm-', 'platform-ubuntu-24-04-vm-'))
+    if maintained and type(memory) is int and memory > 1024 and type(cpu) is int and cpu >= 1:
+        # Propose a smaller verification guest for these fixed server bases.
+        # It is approved only after a real boot, identity check and cleanup.
+        return {'memory_mb':1024,'cpu_cores':1}
     if (type(memory) is not int or type(cpu) is not int or memory <= 2048 or cpu < 1):
         return None
     return {'memory_mb': 2048, 'cpu_cores': min(cpu, 2)}

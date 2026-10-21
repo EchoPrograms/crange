@@ -12,6 +12,45 @@ from crange_ct_read_relay import (validate_request, validate_guest, dispatch,
 
 
 class RelayTests(unittest.TestCase):
+    def test_alpine_capture_bootstrap_keeps_existing_identity_and_handles_bin_openrc(self):
+        import tempfile
+        from unittest.mock import patch
+        from crange_ct_read_relay import container_identity_prepare_program
+        with tempfile.TemporaryDirectory() as directory:
+            root=Path(directory);(root/'etc/init.d').mkdir(parents=True)
+            (root/'etc/os-release').write_text('ID=alpine\n')
+            program=container_identity_prepare_program().replace('/etc/',str(root)+'/etc/')
+            with patch('os.path.isfile',side_effect=lambda p:p in ('/bin/openrc-run','/bin/rc-update')), \
+                    patch('subprocess.run') as run:
+                exec(compile(program,'capture-bootstrap','exec'),{})
+                first=(root/'etc/machine-id').read_text()
+                exec(compile(program,'capture-bootstrap','exec'),{})
+            self.assertRegex(first,r'^[a-f0-9]{32}\n$')
+            self.assertEqual((root/'etc/machine-id').read_text(),first)
+            service=(root/'etc/init.d/crange-machine-id').read_text()
+            self.assertTrue(service.startswith('#!/bin/openrc-run\n'))
+            self.assertIn('before crange-hostkeys sshd',service)
+            self.assertEqual(run.call_args_list[0].args[0],['/bin/rc-update','add','crange-machine-id','boot'])
+
+    def test_container_generalization_removes_host_keys_but_preserves_authorized_keys(self):
+        import ast,tempfile
+        import crange_ct_read_relay as relay
+        module=ast.parse(Path(relay.__file__).read_text())
+        program=next(n.value for n in ast.walk(module) if isinstance(n,ast.Constant) and
+                     isinstance(n.value,str) and 'Source machine-ID is unavailable' in n.value)
+        with tempfile.TemporaryDirectory() as directory:
+            root=Path(directory);(root/'etc/ssh').mkdir(parents=True);(root/'var/lib/dbus').mkdir(parents=True)
+            (root/'etc/machine-id').write_text('a'*32+'\n')
+            (root/'etc/ssh/authorized_keys').write_text('keep user key')
+            for name in ('ssh_host_ed25519_key','ssh_host_ed25519_key.pub'):
+                (root/'etc/ssh'/name).write_text('old host key')
+            program=program.replace('/etc/',str(root)+'/etc/').replace('/var/lib/dbus/',str(root)+'/var/lib/dbus/')
+            exec(compile(program,'capture-generalization','exec'),{})
+            self.assertEqual((root/'etc/machine-id').read_text(),'')
+            self.assertEqual((root/'etc/ssh/authorized_keys').read_text(),'keep user key')
+            self.assertFalse((root/'etc/ssh/ssh_host_ed25519_key').exists())
+            self.assertFalse((root/'etc/ssh/ssh_host_ed25519_key.pub').exists())
+
     def test_private_bridge_requests_have_no_arbitrary_paths_or_commands(self):
         config={'peer_uid':1000,'node_addresses':{'proxmox5':'10.0.0.105'}}
         prepare={'command':'capture-bridge-prepare','node':'proxmox5'}

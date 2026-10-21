@@ -318,7 +318,7 @@ def _custom_foundation_networks(inventory, policy, requests, cfg, keys):
     return inventory
 
 
-def discover(api, policy, planned_networks=()):
+def discover(api, policy, planned_networks=(), *, _retry_moved=True):
     """Account visible guest disks and active or unknown-status guest CPU/RAM.
 
     VM.Audit on all guests is required. Host memory.used is deliberately treated
@@ -494,14 +494,19 @@ def discover(api, policy, planned_networks=()):
         except Exception as exc:
             # A VMID can disappear between the cluster listing and config read
             # during a reviewed cancel/recreate. Ignore only a confirmed stale
-            # listing; a live or moved VM, or an inconclusive refresh, fails closed.
+            # listing. A confirmed move restarts the entire observation once,
+            # so its commitments cannot be charged to the old node or omitted.
             from crange import CrangeError
             if not isinstance(exc, CrangeError) or 'failed with HTTP 500.' not in str(exc):
                 raise
             refreshed = api.request('GET', '/cluster/resources', {'type': 'vm'})
             if not isinstance(refreshed, list):
                 raise PlacementError('Could not verify a guest disappeared after a config API error.') from exc
-            if any(int(item.get('vmid', -1)) == vmid for item in refreshed):
+            matches = [item for item in refreshed if int(item.get('vmid', -1)) == vmid]
+            if (_retry_moved and len(matches)==1 and matches[0].get('type')==kind
+                    and matches[0].get('node') in KNOWN_NODES and matches[0]['node']!=name):
+                return discover(api, policy, planned_networks, _retry_moved=False)
+            if matches:
                 raise
             continue
         node = result['nodes'][name]; template = bool(int(config.get('template', 0)))

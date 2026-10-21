@@ -23,6 +23,7 @@ BASES = {
     'debian-13-container': {'source_id': 3000, 'kind': 'container', 'display_name': 'Debian 13 Container',
                             'profile': {'init_system': 'systemd'}},
     'ubuntu-24-04-container': {'source_id': 3001, 'kind': 'container', 'display_name': 'Ubuntu Server 24.04 Container',
+                               'publication_version': '4',
                                'profile': {'init_system': 'systemd'}},
     'alpine-container': {'source_id': 3002, 'kind': 'container', 'display_name': 'Alpine Container',
                          'profile': {'init_system': 'openrc'}},
@@ -39,7 +40,7 @@ def source_policy(base_policy):
     return policy
 
 
-def distribute(image_id, *, api=None):
+def distribute(image_id, *, api=None, on_ready=None):
     """Fill verified local caches on every enrolled node, retaining failures."""
     from crange_cache_jobs import prepare_cache
     policy, catalog = read_settings()
@@ -48,8 +49,12 @@ def distribute(image_id, *, api=None):
     if not image or image.get('verified') is not True or is_release_template(image_id, image):
         raise DistributionError('Choose a verified OS base, not a scenario release image.')
     project = 1 if '*' in image['approved_projects'] else image['approved_projects'][0]
-    report = {'image_id': image_id, 'ready': [], 'errors': {}}
+    from crange_placement import workload_node_allowed
+    report = {'image_id': image_id, 'ready': [], 'errors': {}, 'excluded': {}}
     for node in sorted(policy.get('allowed_nodes', [])):
+        if not workload_node_allowed(policy, node, 'cache:'+image_id, image['kind']):
+            report['excluded'][node] = 'Node is reserved for router containers.'
+            continue
         candidates = [storage for candidate, storage in policy.get('approved_storage', [])
                       if candidate == node and (image['kind'] == 'vm' or
                       storage in policy.get('nodes', {}).get(node, {}).get('snapshot_storages', []))]
@@ -64,13 +69,16 @@ def distribute(image_id, *, api=None):
                 raise DistributionError('No approved local clone storage on this node.')
             print(f'Preparing {image_id} on {node}/{storage}', flush=True)
             prepare_cache(project_id=project, image_id=image_id, node_name=node,
-                          datastore_id=storage, owner='platform-base-distribution')
+                          datastore_id=storage, owner='platform-base-distribution', auto_storage=True)
             report['ready'].append(node)
+            if on_ready is not None:
+                on_ready()
+                on_ready = None
         except Exception as exc:
             report['errors'][node] = str(exc)
             print(f'{node}: {exc}', flush=True)
     for node in sorted({f'proxmox{i}' for i in range(1, 7)} - set(policy.get('allowed_nodes', []))):
-        report['errors'][node] = 'Node needs verified enrollment before automatic placement.'
+        report['excluded'][node] = 'Node needs verified enrollment before automatic placement.'
     atomic_json(DATA / 'base-distribution' / (image_id + '.json'), report, 0o600)
     return report
 
@@ -85,6 +93,8 @@ def link_global_base(image_id, definition, *, api=None):
     # Existing project layouts also use terraform.tfvars.json.
     paths += [path for path in environments.glob('project-[0-9][0-9][0-9]')
               if path not in paths and (path / 'terraform.tfvars').exists()]
+    from crange_project_lifecycle import is_active
+    paths = [path for path in paths if is_active(path)]
     if not paths:
         raise DistributionError('No real project is available to validate base approval.')
     projects = [int(path.name[-3:]) for path in paths]
@@ -118,8 +128,10 @@ def image_id_for(base, version):
     return f'{base}-base-v{version}'
 
 
-def prepare(base, version='3', *, api=None):
+def prepare(base, version=None, *, api=None):
     from crange import ProxmoxAPI
+    base_key(base)
+    version = version if version is not None else BASES[base].get('publication_version', '3')
     image_id = image_id_for(base, version)
     definition = BASES[base]
     source_id = definition['source_id']
@@ -133,7 +145,8 @@ def prepare(base, version='3', *, api=None):
                 or not str(existing.get('source_revision', '')).startswith(f'platform-{base}-')):
             raise DistributionError('Immutable base version already exists with different provenance.')
         print(f'Base {image_id} is already published; retaining its immutable version.', flush=True)
-        report = distribute(image_id, api=api)
+        report = distribute(image_id, api=api,
+                            on_ready=lambda: link_global_base(image_id, definition, api=api))
         link_global_base(image_id, definition, api=api)
         if report['errors']:
             raise DistributionError('Base distribution needs attention: ' + json.dumps(report['errors'], sort_keys=True))
@@ -217,7 +230,8 @@ def prepare(base, version='3', *, api=None):
     receipt.update(state='published', image_id=image_id)
     atomic_json(receipt_path, receipt, 0o600)
     print(f'Published {image_id}; ready for verified node distribution.', flush=True)
-    report = distribute(image_id, api=api)
+    report = distribute(image_id, api=api,
+                        on_ready=lambda: link_global_base(image_id, definition, api=api))
     link_global_base(image_id, definition, api=api)
     if report['errors']:
         raise DistributionError('Base published; distribution needs attention: ' + json.dumps(report['errors'], sort_keys=True))

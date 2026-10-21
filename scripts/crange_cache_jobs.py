@@ -185,7 +185,7 @@ def reconcile_unstarted_caches(project_id):
 
 
 def resume_snapshot_cache(job_id, *, replace_probe=False):
-    """Verify one stopped, owned Windows snapshot probe; never restore or clone again."""
+    """Verify an existing owned Linux/snapshot probe without another restore."""
     from crange_catalog import publish_replica
     from crange_distribution import _JournaledProbeAPI, _require_probe_pool
     from datetime import datetime, timezone
@@ -200,10 +200,13 @@ def resume_snapshot_cache(job_id, *, replace_probe=False):
         with scheduling.node_locks([node],library=True),journal.allocation_lock():
             record=json.loads(path.read_text());policy,catalog=_settings();image=catalog['images'].get(image_id,{})
             identity,profile,sealed=_cache_probe_identity(image)
+            linux = (profile in ('systemd','openrc') and bool(identity.get('machine_id'))
+                     and bool(identity.get('ssh_host_key')) and not sealed)
             saved=ledger.get_job(job_id)
             allocation=saved.get('allocations',[]) if saved else []
             if (not saved or saved.get('state')!='running' or record.get('job_id')!=job_id or record.get('state')!='verifying' or record.get('kind')!='qemu' or
-                    identity.get('identity_mode')!='windows-scenario-snapshot-v1' or sealed or
+                    (identity.get('identity_mode')!='windows-scenario-snapshot-v1' and not linux) or sealed or
+                    (linux and replace_probe) or
                     record.get('artifact_sha256')!=image.get('artifact_sha256') or len(allocation)!=1 or
                     allocation[0].get('operation')!='cache_prepare' or allocation[0].get('image')!=image_id or
                     allocation[0].get('artifact_sha256')!=image.get('artifact_sha256') or
@@ -230,12 +233,17 @@ def resume_snapshot_cache(job_id, *, replace_probe=False):
                 if (not cache_owned(config,guest,job_id) or bool(int(config.get('template',0)))!=template or
                         config.get('lock') or status.get('status')!='stopped'):
                     raise DistributionError('Existing cache/probe ownership, template or stopped state changed.')
+                if linux and not template and (
+                        int(config.get('memory',0)) <= 0 or int(config.get('cores',0)) <= 0 or
+                        int(config['memory']) > allocation[0]['resources'].get('memory_mb',0) or
+                        int(config['cores']) > allocation[0]['resources'].get('cpu_cores',0)):
+                    raise DistributionError('Existing Linux probe exceeds its retained capacity reservation.')
             _require_probe_pool(api,node,'qemu',probe)
             bridge=select_probe_bridge(policy);settings=policy.get('cache',policy)
             verifier=ProbeVerifier(bridge,settings.get('isolated_bridges',[]),identity,init_system=profile)
             wrapped=_JournaledProbeAPI(api,record,journal)
             if not replace_probe:
-                print(f'Resuming Windows snapshot verification for cache {vmid}, existing probe {probe}; no restore or clone is submitted.',flush=True)
+                print(f'Resuming isolated verification for cache {vmid}, existing probe {probe}; no restore or clone is submitted.',flush=True)
             if replace_probe:
                 evidence=record.get('verification_evidence',[])
                 if record.get('probe_replacement') or not any(row.get('type') in ('qga-timeout','qga-exec-error') for row in evidence):
@@ -380,8 +388,36 @@ def _resume_accepted_container_restore(api, ledger, journal, policy, catalog, im
     return updated
 
 
+def reserve_cache_storage(ledger, *, datastore_id, auto_storage=False, **scope):
+    """Try approved stores only while admission has made no allocation."""
+    from crange_placement import PlacementError
+    node, policy = scope['node_name'], scope['policy']
+    approved = set(map(tuple, policy.get('approved_storage', [])))
+    if (node, datastore_id) not in approved:
+        raise PlacementError('Cache datastore is not approved.')
+    candidates = [datastore_id]
+    if auto_storage:
+        candidates += sorted(storage for candidate, storage in approved
+                             if candidate == node and storage != datastore_id)
+    failures = {}
+    for storage in candidates:
+        try:
+            return ledger.reserve_preparation(datastore_id=storage, **scope)
+        except PlacementError as error:
+            # reserve_preparation rolls back before returning these errors.
+            # Never retry another pool after a provider task was submitted.
+            if not auto_storage or str(error) not in (
+                    'cache preparation has insufficient disk_gb headroom',
+                    'cache destination datastore or guest capability unavailable',
+                    'cache linked-clone datastore capability unverified'):
+                raise
+            failures[storage] = str(error)
+    raise PlacementError('No approved cache datastore has headroom: ' + json.dumps(failures, sort_keys=True))
+
+
 def prepare_cache(*, project_id, image_id, node_name, datastore_id='local-lvm',
-                  additional_capacity=None, owner='cli', job_id=None, acceptance_policy_path=None, _controlled_acceptance_policy=None):
+                  additional_capacity=None, owner='cli', job_id=None, acceptance_policy_path=None, _controlled_acceptance_policy=None,
+                  auto_storage=False):
     """Admit cache/probe plus optional imminent guest demand, then verify local base.
 
     Failure retains reservations, provider IDs/tasks and artifact pin. Success
@@ -393,10 +429,14 @@ def prepare_cache(*, project_id, image_id, node_name, datastore_id='local-lvm',
         raise DistributionError('Invalid cache preparation job ID.')
     policy, _ = _settings()
     if acceptance_policy_path is not None:
+        if auto_storage:
+            raise DistributionError('Acceptance cache storage must remain exact.')
         if additional_capacity:
             raise DistributionError('Acceptance cache preparation cannot include guest deployment demand.')
         policy = acceptance_policy(acceptance_policy_path, node_name, datastore_id)
     if _controlled_acceptance_policy is not None:
+        if auto_storage:
+            raise DistributionError('Controlled acceptance cache storage must remain exact.')
         if acceptance_policy_path is not None or additional_capacity:
             raise DistributionError('Controlled acceptance cannot include guest deployment demand or another policy override.')
         policy=_controlled_acceptance_policy
@@ -410,7 +450,7 @@ def prepare_cache(*, project_id, image_id, node_name, datastore_id='local-lvm',
     try:
         with scheduling.node_locks([node_name], library=True):
             def update(catalog):
-                nonlocal job_id
+                nonlocal job_id, datastore_id
                 image = catalog['images'].get(image_id)
                 if not image or ('*' not in image['approved_projects'] and project_id not in image['approved_projects']):
                     raise DistributionError('Image is not approved for the selected project.')
@@ -436,8 +476,8 @@ def prepare_cache(*, project_id, image_id, node_name, datastore_id='local-lvm',
                 bridge = select_probe_bridge(policy)
                 for file in journal.directory.glob('*.json'):
                     previous = json.loads(file.read_text())
-                    if ((previous.get('image_id'), previous.get('node'), previous.get('datastore_id')) ==
-                            (image_id, node_name, datastore_id) and previous.get('state') not in
+                    if (previous.get('image_id') == image_id and previous.get('node') == node_name and
+                            (auto_storage or previous.get('datastore_id') == datastore_id) and previous.get('state') not in
                             ('evicted', 'cleaned-owned', 'reconciled-absent')):
                         if (_controlled_acceptance_policy is not None and image['kind']=='container'
                                 and previous.get('state') in ('converting-template','verifying')):
@@ -463,9 +503,10 @@ def prepare_cache(*, project_id, image_id, node_name, datastore_id='local-lvm',
                 demand = required_capacity(image, probe_candidate=candidate)
                 total = preparation_peak_capacity(demand, additional_capacity or {})
                 inventory = scheduling.discover(api, policy)
-                allocation = ledger.reserve_preparation(project_id=project_id, job_id=job_id,
+                allocation = reserve_cache_storage(ledger, auto_storage=auto_storage, project_id=project_id, job_id=job_id,
                     owner=owner, image_id=image_id, catalog=catalog, node_name=node_name,
                     datastore_id=datastore_id, capacity=total, inventory=inventory, policy=policy)
+                datastore_id = allocation['resolved']['datastore_id']
                 ledger.mark_running(job_id)
                 validator = shared_reservation_validator(ledger, job_id, allocation,
                                                          image_id, image['artifact_sha256'])

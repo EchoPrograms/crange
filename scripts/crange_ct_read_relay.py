@@ -186,16 +186,16 @@ def validate_request(value, config, peer_uid):
                     for tag in allowed['required_tags'])):
             raise ValueError('Guest is outside the protected offline config snapshot allowlist.')
         return reader, vmid, 'offline-config-snapshot', None
-    if isinstance(value, dict) and value.get('command') in ('owned-image-read', 'capture-container-generalize'):
+    if isinstance(value, dict) and value.get('command') in ('owned-image-read', 'capture-container-generalize', 'capture-container-identity-prepare', 'owned-image-network-wait-reset'):
         fields = {'node', 'vmid', 'command', 'marker'}
         if value['command'] == 'owned-image-read': fields.add('read')
         marker = value.get('marker')
-        compact = str(marker).startswith('crange-cache-') and value['command']=='owned-image-read'
+        compact = str(marker).startswith('crange-cache-') and not value['command'].startswith('capture-container-')
         if compact:
             fields.add('cache_job_id')
             if marker!=f"crange-cache-{value.get('vmid')}" or not re.fullmatch(r'cache-[a-f0-9]{32}',str(value.get('cache_job_id',''))):
                 raise ValueError('Invalid compact probe identity.')
-        pattern = r'crange-capture-[a-f0-9]{12}' if value['command'] == 'capture-container-generalize' else r'(?:crange-capture-[a-f0-9]{12}|crange-job-[a-zA-Z0-9-]{1,64})'
+        pattern = r'crange-capture-[a-f0-9]{12}' if value['command'].startswith('capture-container-') else r'(?:crange-capture-[a-f0-9]{12}|crange-job-[a-zA-Z0-9-]{1,64})'
         if (set(value) != fields or not re.fullmatch(r'proxmox[1-6]', str(value.get('node', '')))
                 or value.get('node') not in config.get('node_addresses', {})
                 or type(value.get('vmid')) is not int or value['vmid'] < 100
@@ -1186,6 +1186,14 @@ def host_read(request, marker, source_marker=None, source_pool='crange-probes', 
         value = json.dumps({'verified': True, 'source_id': source_id, 'probe_id': vmid,
                             'source_volume': volumes[0], 'probe_volume': volumes[1],
                             'origin': rows[0]['origin'].strip(' []')})
+    elif command == 'owned-image-network-wait-reset':
+        if get(f'/nodes/{node}/lxc/{vmid}/status/current').get('status')!='running':
+            raise ValueError('Offline network-wait reset requires a running owned probe.')
+        value = json.dumps(reset_probe_network_wait(vmid))
+    elif command == 'capture-container-identity-prepare':
+        if get(f'/nodes/{node}/lxc/{vmid}/status/current').get('status') != 'running':
+            raise ValueError('Capture identity preparation requires a running owned clone.')
+        value = subprocess.check_output(['pct','exec',str(vmid),'--','/usr/bin/python3','-c',container_identity_prepare_program()],text=True,timeout=30)
     elif command == 'capture-container-generalize':
         # Only a live, disconnected unprivileged capture clone passed the pool,
         # marker and mount checks above. This fixed program runs inside its LXC.
@@ -1206,7 +1214,15 @@ for path in paths:
   os.ftruncate(fd,0);os.fsync(fd)
  finally:os.close(fd)
 if not old: raise RuntimeError('Source machine-ID is unavailable')
-print(json.dumps({'generalized':True,'previous_machine_id':old,'machine_id_empty':os.stat('/etc/machine-id').st_size==0}))"""
+# The clone's existing crange-hostkeys boot service generates missing keys.
+# Retaining keys here would give every full clone the same SSH identity.
+removed=[]
+for name in os.listdir('/etc/ssh'):
+ if not re.fullmatch(r'ssh_host_(?:rsa|ecdsa|ed25519)_key(?:\.pub)?',name): continue
+ path='/etc/ssh/'+name;info=os.lstat(path)
+ if not stat.S_ISREG(info.st_mode): raise RuntimeError('Unexpected SSH host-key file')
+ os.unlink(path);removed.append(name)
+print(json.dumps({'generalized':True,'previous_machine_id':old,'machine_id_empty':os.stat('/etc/machine-id').st_size==0,'ssh_host_keys_removed':removed}))"""
         value = subprocess.check_output(['pct','exec',str(vmid),'--','/usr/bin/python3','-c',program],text=True,timeout=30)
     else:
         read = request['read'] if command == 'owned-image-read' else command
@@ -1227,6 +1243,42 @@ print(json.dumps({'generalized':True,'previous_machine_id':old,'machine_id_empty
     if len(value.encode()) > 4096:
         raise ValueError('Identity read exceeds response bound.')
     return value
+
+
+def reset_probe_network_wait(vmid, *, run=subprocess.run):
+    """Clear only the sole expected failed wait on a validated offline probe."""
+    base=['pct','exec',str(vmid),'--','/usr/bin/systemctl']
+    failed=run(base+['--failed','--no-pager','--no-legend'],check=True,capture_output=True,text=True,timeout=30)
+    rows=[line.strip() for line in failed.stdout.splitlines() if line.strip()]
+    unit='systemd-networkd-wait-online.service'
+    if len(rows)!=1 or not re.fullmatch(rf'(?:\S+\s+)?{re.escape(unit)}\s+loaded\s+failed\s+failed(?:\s+.*)?',rows[0]):
+        return {'reset':False}
+    run(base+['reset-failed',unit],check=True,capture_output=True,text=True,timeout=30)
+    return {'reset':True,'unit':unit,'services_disabled':False}
+
+
+def container_identity_prepare_program():
+    """Fixed Alpine bootstrap for a disposable capture, before identity capture."""
+    return r'''import os,json,secrets,subprocess,stat
+from pathlib import Path
+release=Path('/etc/os-release').read_text().splitlines()
+alpine='ID=alpine' in release or 'ID="alpine"' in release
+if alpine:
+ interpreter=next((p for p in ('/sbin/openrc-run','/bin/openrc-run') if os.path.isfile(p)),None)
+ update=next((p for p in ('/sbin/rc-update','/bin/rc-update') if os.path.isfile(p)),None)
+ if not interpreter or not update: raise RuntimeError('Alpine OpenRC runtime is missing')
+ def put(path,content,mode):
+  if os.path.lexists(path) and not stat.S_ISREG(os.lstat(path).st_mode): raise RuntimeError('Unexpected startup-file type')
+  fd=os.open(path,os.O_WRONLY|os.O_CREAT|os.O_TRUNC|os.O_NOFOLLOW,mode)
+  with os.fdopen(fd,'w') as f: f.write(content);f.flush();os.fsync(f.fileno())
+  os.chmod(path,mode)
+ put('/etc/init.d/crange-machine-id','#!'+interpreter+'\ndepend() { need localmount; before crange-hostkeys sshd; }\nstart() { if ! test -s /etc/machine-id; then umask 022; od -An -N16 -tx1 /dev/urandom | tr -d " \\n" > /etc/machine-id; fi; }\n',0o755)
+ put('/etc/init.d/crange-hostkeys','#!'+interpreter+'\ndepend() { need localmount crange-machine-id; before sshd; }\nstart() { /usr/bin/ssh-keygen -A; }\n',0o755)
+ subprocess.run([update,'add','crange-machine-id','boot'],check=True,capture_output=True)
+ subprocess.run([update,'add','crange-hostkeys','boot'],check=True,capture_output=True)
+ if not os.path.exists('/etc/machine-id') or not Path('/etc/machine-id').read_text().strip():
+  put('/etc/machine-id',secrets.token_hex(16)+'\n',0o644)
+print(json.dumps({'prepared':True,'init_system':'openrc' if alpine else 'systemd'}))'''
 
 
 def dispatch(value, config, peer_uid, run=subprocess.run):

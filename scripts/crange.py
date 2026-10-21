@@ -2087,10 +2087,11 @@ class ProxmoxAPI:
                     body = json.load(response)
                 break
             except urllib.error.HTTPError as exc:
-                # PVE may briefly return gateway 595/596 while a node API
-                # request is still healthy. Retry only idempotent reads; never
+                # The bounded adapter can return 503 while all upstream slots
+                # are busy; PVE can also return transient gateway 595/596.
+                # Retry only idempotent reads; never
                 # replay a create, restore, task start, or other mutation.
-                if method == 'GET' and exc.code in (595, 596) and attempt + 1 < attempts:
+                if method == 'GET' and exc.code in (503, 595, 596) and attempt + 1 < attempts:
                     time.sleep(1 << attempt)
                     continue
                 raise CrangeError(f"Proxmox API {method} {path} failed with HTTP {exc.code}.") from exc
@@ -2110,7 +2111,7 @@ class ProxmoxAPI:
             try:
                 result = self.request("GET", path)
             except CrangeError as error:
-                if getattr(error.__cause__, 'code', None) not in (595, 596):
+                if getattr(error.__cause__, 'code', None) not in (503, 595, 596):
                     raise
                 # The provider task remains authoritative. Resume observing the
                 # same handle within its deadline; never replay its mutation.

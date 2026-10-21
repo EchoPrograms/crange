@@ -140,6 +140,28 @@ class ProxmoxReadRetryTests(unittest.TestCase):
         urlopen.assert_called_once()
         error.close()
 
+    def test_busy_adapter_retries_reads_but_never_writes(self):
+        response = Mock()
+        response.__enter__ = Mock(return_value=response)
+        response.__exit__ = Mock(return_value=False)
+        error = HTTPError('https://pve.example/api2/json/nodes/pve/status', 503, 'busy', {}, None)
+        with patch('crange.urllib.request.urlopen', side_effect=[error, response]) as urlopen, \
+             patch('crange.json.load', return_value={'data': {'status': 'running'}}), patch('crange.time.sleep'):
+            self.assertEqual(self.api.request('GET', '/nodes/pve/status'), {'status': 'running'})
+            self.assertEqual(urlopen.call_count, 2)
+        for method in ('POST', 'PUT', 'DELETE'):
+            with self.subTest(method=method), patch('crange.urllib.request.urlopen', side_effect=error) as urlopen:
+                with self.assertRaisesRegex(crange.CrangeError, 'HTTP 503'):
+                    self.api.request(method, '/nodes/pve/qemu/100/status/start', {})
+                urlopen.assert_called_once()
+        wrapped = crange.CrangeError('busy'); wrapped.__cause__ = error
+        self.api.request = Mock(side_effect=[wrapped, {'status': 'stopped', 'exitstatus': 'OK'}])
+        with patch('crange.time.sleep'):
+            self.api.task('proxmox6', 'UPID:proxmox6:1:2:3:qmclone:175:user:')
+        self.assertTrue(all(call.args == ('GET', '/nodes/proxmox6/tasks/UPID%3Aproxmox6%3A1%3A2%3A3%3Aqmclone%3A175%3Auser%3A/status')
+                            for call in self.api.request.call_args_list))
+        error.close()
+
     def test_get_does_not_retry_other_http_failures(self):
         error = HTTPError('https://pve.example/api2/json/nodes/pve/status',
                           500, 'server error', {}, None)

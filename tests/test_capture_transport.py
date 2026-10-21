@@ -85,6 +85,22 @@ class CaptureTransportTests(unittest.TestCase):
             result = capture._capture_destination(Mock(), 'proxmox1', {'cpu': 'kvm64'}, {}, policy)
         self.assertEqual(result, 'proxmox5')
 
+    def test_full_preferred_pool_falls_back_only_to_approved_pool_with_headroom(self):
+        policy={'allowed_nodes':['proxmox6'],'approved_storage':[['proxmox6','local-lvm'],['proxmox6','local-hdd']]}
+        store={'available':True,'guest_types':['vm']}
+        inventory={'nodes':{'proxmox6':{'online':True,'storages':{'local-lvm':store,'local-hdd':store,'foreign':store}}}}
+        ledger=Mock();ledger.active_reservations.return_value=[]
+        profile={'_capture_datastores':{'proxmox6':'local-lvm'}}
+        def capture_policy(node,settings,policy,**kwargs):return policy,'isolated',settings['_capture_datastores'][node],'archive'
+        with patch.object(capture,'discover',return_value=inventory),patch.object(capture,'capture_policy',side_effect=capture_policy),\
+                patch.object(capture,'_source_capacity',return_value={'cpu_cores':1,'memory_mb':512,'disk_gb':8}),\
+                patch.object(capture,'ReservationLedger',return_value=ledger),\
+                patch('crange_placement.capacity_window',side_effect=[{'cpu_cores':4,'memory_mb':4000,'disk_gb':-2},
+                    {'cpu_cores':4,'memory_mb':4000,'disk_gb':100}]) as capacity:
+            self.assertEqual(capture._capture_destination(Mock(),'proxmox4',{'cpu':'kvm64'},profile,policy),'proxmox6')
+        self.assertEqual(profile['_capture_datastores']['proxmox6'],'local-hdd')
+        self.assertEqual(capacity.call_count,2)
+
     def test_builder_preference_never_overrides_headroom_or_local_capture(self):
         policy = {'allowed_nodes': ['proxmox5', 'proxmox6']}
         store = {'available': True, 'guest_types': ['vm']}

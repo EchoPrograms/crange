@@ -567,7 +567,7 @@ def capture_policy(node, profile, policy_override=None, *, kind="vm"):
 
 
 def _capture_destination(api, source_node, source, profile, policy, *, kind='vm'):
-    """Prefer local capture; admit a remote copy only with actual headroom."""
+    """Choose approved node/storage headroom and record the transient profile."""
     from crange_placement import capacity_window
     inventory = discover(api, policy)
     capacity = _source_capacity(source, 'lxc' if kind=='container' else 'qemu')
@@ -601,26 +601,37 @@ def _capture_destination(api, source_node, source, profile, policy, *, kind='vm'
                     if not {'ssse3', 'sse4_1', 'sse4_2', 'popcnt', 'pni', 'cx16', 'lahf_lm', 'aes'} <= flags:
                         rejected[candidate] = 'destination lacks the source CPU instruction set'
                         continue
-            datastore = host['storages'][storage]
-            if not datastore.get('available') or kind not in datastore.get('guest_types', []):
-                rejected[candidate] = 'capture datastore unavailable or incompatible'
-                continue
-            window = capacity_window(host, policy, candidate, datastore, 'full')
-            available = {key: window[key] - sum(r[key] for r in pending
-                if r['node_name'] == candidate and (key != 'disk_gb' or r['datastore_id'] == storage))
-                for key in capacity}
-            if any(available[key] < value for key, value in capacity.items()):
-                rejected[candidate] = {key: {'required': round(value, 2), 'available': round(available[key], 2)}
-                                       for key, value in capacity.items() if available[key] < value}
-                continue
-            rank = preferred.index(candidate) if candidate in preferred else len(preferred)
-            choices.append((candidate != source_node, rank, host.get('load', 0), candidate))
+            storages=[storage]+sorted({sid for node,sid in policy.get('approved_storage',[])
+                                      if node==candidate and sid!=storage})
+            rejected[candidate]={}
+            for index,storage in enumerate(storages):
+                trial={**profile,'_capture_datastores':{**profile.get('_capture_datastores',{}),candidate:storage}}
+                try:
+                    if capture_policy(candidate,trial,policy,kind=kind)[2]!=storage:
+                        continue
+                    datastore=host['storages'][storage]
+                    if not datastore.get('available') or kind not in datastore.get('guest_types',[]):
+                        rejected[candidate][storage]='capture datastore unavailable or incompatible'
+                        continue
+                    window=capacity_window(host,policy,candidate,datastore,'full')
+                    available={key:window[key]-sum(r[key] for r in pending
+                        if r['node_name']==candidate and (key!='disk_gb' or r['datastore_id']==storage)) for key in capacity}
+                    if any(available[key]<value for key,value in capacity.items()):
+                        rejected[candidate][storage]={key:{'required':round(value,2),'available':round(available[key],2)}
+                            for key,value in capacity.items() if available[key]<value}
+                        continue
+                    rank=preferred.index(candidate) if candidate in preferred else len(preferred)
+                    choices.append((candidate!=source_node,rank,index,host.get('load',0),candidate,storage))
+                except (ValueError,KeyError) as exc:
+                    rejected[candidate][storage]=str(exc)
         except (ValueError, KeyError) as exc:
             rejected[candidate] = str(exc)
             continue
     if not choices:
         raise DistributionError('No approved node can host a full isolated capture copy: ' + json.dumps(rejected, sort_keys=True))
-    return min(choices)[-1]
+    node,storage=min(choices)[-2:]
+    profile.setdefault('_capture_datastores',{})[node]=storage
+    return node
 
 
 def _transport_template_id(api, receipt, save):
@@ -1624,6 +1635,12 @@ def capture_vm(api, *, project, node, source_id, name, description, slug, profil
                 atomic_json(receipt_path, receipt)
             else:
                 fields = {'tags': f'crange-image;{marker};p{project:03d}', 'onboot': 0}
+                if platform_source and source_id == 3000 and profile.get('init_system') == 'systemd':
+                    # Debian 13 systemd needs nesting in an unprivileged LXC.
+                    # Configure only this disposable derivative, never its source.
+                    features = dict(token.split('=', 1) for token in str(config.get('features') or '').split(',') if '=' in token)
+                    features['nesting'] = '1'
+                    fields['features'] = ','.join(f'{key}={value}' for key, value in sorted(features.items()))
                 if node != source_node:
                     fields['machine'] = _portable_capture_machine(api, node, config)
                     print(f'Portable capture machine: {fields["machine"]}', flush=True)
@@ -1942,6 +1959,10 @@ def capture_container(api, *, project, node, source_id, name, description, slug,
                         raise DistributionError('Container capture network isolation was not applied exactly.')
                 task(base+'/status/start', {})
                 try:
+                    if platform_source:
+                        adapter = ct_exec or SSHContainerExec(api=api)
+                        receipt['identity_startup_preparation'] = adapter.prepare_capture_identity(node,vmid)
+                        atomic_json(receipt_path,receipt)
                     deadline = time.monotonic()+180
                     while True:
                         try:
@@ -1949,7 +1970,14 @@ def capture_container(api, *, project, node, source_id, name, description, slug,
                                 job_id=identity_job, journal=journal, ct_exec=ct_exec or SSHContainerExec(api=api),
                                 init_system=profile.get('init_system', 'systemd'))
                             break
-                        except DistributionError:
+                        except DistributionError as error:
+                            if profile.get('init_system','systemd')=='systemd' and getattr(error,'collector_state',None)=='degraded':
+                                from crange_distribution import normalize_isolated_network_wait
+                                preparation=normalize_isolated_network_wait(api,node,'lxc',vmid,bridge,
+                                    ct_exec=ct_exec or SSHContainerExec(api=api))
+                                if preparation:
+                                    receipt['offline_network_readiness']=preparation
+                                    atomic_json(receipt_path,receipt)
                             if time.monotonic()>=deadline: raise
                             time.sleep(2)
                     prepared = (generalize or generalize_capture_container)(node, vmid, marker)
