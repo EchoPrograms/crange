@@ -12,7 +12,7 @@ from crange_distribution import DistributionError, FileJournal
 
 
 class FailedContainerRestoreTests(unittest.TestCase):
-    def run_case(self, *, reused=False, remains=None, active=False, failed=True):
+    def run_case(self, *, reused=False, remains=None, active=False, failed=True, other_task=False):
         job='cache-'+'a'*32;digest='b'*64;node='proxmox2';vmid=247
         upid='UPID:proxmox2:001:002:003:vzrestore:247:user:'
         image={'kind':'container','artifact_sha256':digest,
@@ -33,6 +33,7 @@ class FailedContainerRestoreTests(unittest.TestCase):
             if path=='/cluster/resources':
                 return ([{'vmid':247,'node':'proxmox3','type':'lxc'}] if reused else [])+(
                        [{'vmid':247,'node':node,'type':'lxc'}] if remains=='guest' else [])
+            if path.endswith('/tasks') and fields['source']=='all':return [{'id':'247','type':'vzrestore','starttime':5,'upid':'different'}] if other_task else []
             if path.endswith('/tasks'):return [{'id':'247','upid':upid}] if active else []
             if path.endswith('/content'):return [{'volid':'local-lvm:vm-247-disk-0'}] if remains=='volume' else []
             raise AssertionError(path)
@@ -43,7 +44,7 @@ class FailedContainerRestoreTests(unittest.TestCase):
                 'artifact_sha256':digest,'volume_id':image['artifact']['volume_id']}))
             journal=FileJournal(root/'journal');journal(copy.deepcopy(record))
             with patch.object(jobs,'_root',return_value=root):
-                if remains or active or not failed:
+                if remains or active or not failed or other_task:
                     with self.assertRaises(DistributionError):
                         jobs.reconcile_failed_container_restore(api,ledger,journal,record,image)
                     self.assertEqual(json.loads((journal.directory/(job+'.json')).read_text())['state'],'allocated')
@@ -63,7 +64,7 @@ class FailedContainerRestoreTests(unittest.TestCase):
         self.run_case(reused=True)
 
     def test_guest_volume_active_or_uncertain_task_blocks_reconciliation(self):
-        for case in ({'remains':'guest'},{'remains':'volume'},{'active':True},{'failed':False}):
+        for case in ({'remains':'guest'},{'remains':'volume'},{'active':True},{'failed':False},{'other_task':True}):
             with self.subTest(case=case):self.run_case(**case)
 
 

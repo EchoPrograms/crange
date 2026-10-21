@@ -445,10 +445,16 @@ def reconcile_failed_container_restore(api, ledger, journal, record, image):
         raise DistributionError('Failed restore archive pin differs; retain it.')
     live=api.request('GET','/cluster/resources',{'type':'vm'})
     active=api.request('GET',f'/nodes/{node}/tasks',{'source':'active','limit':1000})
+    history=api.request('GET',f'/nodes/{node}/tasks',{'source':'all','limit':1000})
     volumes=api.request('GET',f'/nodes/{node}/storage/{storage}/content')
-    if (not isinstance(live,list) or not isinstance(active,list) or len(active)>=1000 or not isinstance(volumes,list) or
+    created=float(record.get('created_at',0))
+    if (not isinstance(live,list) or not isinstance(active,list) or len(active)>=1000 or
+            not isinstance(history,list) or len(history)>=1000 or not isinstance(volumes,list) or
             any(row.get('node')==node and str(row.get('vmid'))==str(vmid) for row in live) or
             any(str(row.get('id'))==str(vmid) or row.get('upid')==tasks[0]['upid'] for row in active) or
+            any(str(row.get('id'))==str(vmid) and float(row.get('starttime',0))>=created and
+                row.get('type') in ('vzcreate','vzrestore','vzclone','qmcreate','qmrestore','qmclone') and
+                row.get('upid')!=tasks[0]['upid'] for row in history) or
             any(str(row.get('vmid'))==str(vmid) or re.search(rf'(?:vm|base)-{vmid}-',str(row.get('volid',''))) for row in volumes)):
         raise DistributionError('Failed restore still has a guest, volume or active task; retain it.')
     evidence={'verified':True,'inventory_complete':True,'target_absent':True,'node':node,'template_id':vmid,
