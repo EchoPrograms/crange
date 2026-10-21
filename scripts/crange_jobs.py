@@ -25,6 +25,45 @@ JUMP_NAME = re.compile(r"[a-z][a-z0-9-]{0,30}-j[0-9]{2}\Z")
 RESOURCE_KEY = re.compile(r"[a-z][a-z0-9_-]{0,63}\Z")
 VERSION = re.compile(r"[0-9]+(?:\.[0-9]+){0,2}(?:-[a-z0-9.-]+)?\Z")
 NODES = {f"proxmox{i}" for i in range(1, 7)}
+POWER_OPERATIONS = ('guac-box-control','box-state','machine-state')
+
+
+def job_guest_scope(row):
+    """None means the whole project; a set identifies exact guest mutations."""
+    operation=row['operation'];options=json.loads(row['options'])
+    if operation in ('guac-box-control','guac-snapshot'):
+        return {options['resource_key']}
+    if operation=='box-state':
+        return {'jumpbox:'+options['name']}
+    if operation=='machine-state':
+        return {options['kind']+':'+options['name']}
+    if operation in ('inventory','guac-sync','guac-refresh','network-verify','network-reconcile','network-publish'):
+        return set()
+    if operation in ('apply','stage-deploy','release-apply'):
+        try:
+            from crange_apply_scope import guest_key
+            record=json.loads((ROOT/'terraform/environments'/f'project-{row["project"]:03d}'/'.crange-plans'/(options['plan_id']+'.json')).read_text())
+            keys=set()
+            for change in record['changes']:
+                if change['actions']==['no-op']:continue
+                key=guest_key(change['address'])
+                if not key or key.startswith('router:'):return None
+                keys.add(key)
+            return keys
+        except (OSError,ValueError,KeyError,TypeError):
+            return None
+    if operation=='release-capture' and options.get('machines'):
+        return {kind+':'+name for name in options['machines'] for kind in ('vm','container','jumpbox')}
+    return None
+
+
+def power_conflict(candidate, running):
+    if candidate['project']!=running['project']:
+        return False
+    if candidate['operation'] not in POWER_OPERATIONS and running['operation'] not in POWER_OPERATIONS:
+        return False
+    left,right=job_guest_scope(candidate),job_guest_scope(running)
+    return (left is None and right!=set()) or (right is None and left!=set()) or bool((left or set()) & (right or set()))
 
 
 def choice(value, allowed):
@@ -401,7 +440,7 @@ class JobStore:
             if operation == 'guac-box-control'  and options['action'] == 'stop':
                 db.execute("UPDATE jobs SET status='interrupted',output='Superseded by force Stop.',finished=? "
                            "WHERE project=? AND operation='guac-box-control' AND status IN ('queued','running') "
-                           "AND json_extract(options,'$.resource_key')=? AND json_extract(options,'$.action')='shutdown'",
+                           "AND json_extract(options,'$.resource_key')=? AND json_extract(options,'$.action') IN ('shutdown','restart','start')",
                            (time.time(), project, options['resource_key']))
             db.execute("INSERT INTO jobs(id,actor,project,operation,options,status,created) VALUES(?,?,?,?,?,'queued',?)",
                        (job, actor, project, operation, json.dumps(options, sort_keys=True), time.time()))
@@ -614,8 +653,8 @@ class JobStore:
                 if required and ready:
                     db.execute("UPDATE jobs SET status='queued',waiting_nodes='[]',finished=NULL WHERE id=? AND status='waiting-for-node'",(row['id'],))
 
-    def run_next(self, force_only=None, *, network_only=False):
-        if not network_only and force_only is not True:
+    def run_next(self, force_only=None, *, network_only=False, power_only=None):
+        if not network_only and force_only is not True and power_only is not True:
             self.resume_waiting()
         with self.connect() as db:
             db.execute('BEGIN IMMEDIATE')
@@ -625,7 +664,11 @@ class JobStore:
             force = "operation='guac-box-control' AND json_extract(options,'$.action')='stop'"
             lane = '' if force_only is None else (' AND (' + force + ')' if force_only else ' AND NOT (' + force + ')')
             lane += " AND operation IN ('network-verify','network-reconcile','network-publish')" if network_only else " AND operation NOT IN ('network-verify','network-reconcile','network-publish')"
-            row = db.execute("SELECT * FROM jobs WHERE status='queued'" + lane + " ORDER BY created LIMIT 1").fetchone()
+            if power_only is not None:
+                lane += " AND operation " + ("IN" if power_only else "NOT IN") + " ('guac-box-control','box-state','machine-state')"
+            running=db.execute("SELECT * FROM jobs WHERE status='running'").fetchall()
+            candidates=db.execute("SELECT * FROM jobs WHERE status='queued'" + lane + " ORDER BY created LIMIT 100").fetchall()
+            row=next((candidate for candidate in candidates if force_only is True or not any(power_conflict(candidate,active) for active in running)),None)
             if row:
                 db.execute("UPDATE jobs SET status='running',output='Worker picked up this action; starting…\n' WHERE id=?", (row['id'],))
         if row is None:
@@ -787,12 +830,19 @@ class JobStore:
                     stop.wait(0.5)
         emergency = threading.Thread(target=emergency_worker, daemon=True)
         emergency.start()
+        def power_worker():
+            while not stop.is_set():
+                if not self.run_next(force_only=False,power_only=True):
+                    stop.wait(0.25)
+        controls=[threading.Thread(target=power_worker,daemon=True) for _ in range(4)] if not network_only else []
+        for thread in controls:thread.start()
         try:
             while not stop.is_set():
-                if not self.run_next(force_only=False, network_only=network_only):
+                if not self.run_next(force_only=False, network_only=network_only,power_only=False):
                     stop.wait(0.5)
         finally:
             emergency.join(timeout=5)
+            for thread in controls:thread.join(timeout=5)
 
     def start(self):
         stop = threading.Event()

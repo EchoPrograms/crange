@@ -61,7 +61,7 @@ def resolve(project, key):
 
 
 def power(project, key, action):
-    from crange import CrangeError, save_config, validate_project_quota
+    from crange import CrangeError, save_power_state, validate_project_quota
     if action not in POWER_ACTIONS:
         raise CrangeError('Unsupported power action.')
     path, cfg, box, api, kind, node, vmid, address = resolve(project, key)
@@ -81,8 +81,8 @@ def power(project, key, action):
         status = (api.container_status if kind == 'container' else api.status)(node, vmid)
         if status != 'running':
             raise CrangeError('Box did not start.')
-    box['started'] = status == 'running'
-    save_config(path, cfg)
+    box['started']=status=='running'
+    save_power_state(path,FIELDS[kind],key.split(':',1)[1],status=='running')
     print(f'{key}: {status}.')
 
 

@@ -42,18 +42,18 @@ class BoxActionsTests(unittest.TestCase):
         api.status.side_effect = ['running', 'stopped', 'running']
         with patch('crange_guac_boxes.resolve', return_value=resolved), \
                 patch('crange.validate_project_quota') as quota, \
-                patch('crange.save_config') as save, contextlib.redirect_stdout(io.StringIO()):
+                patch('crange.save_power_state') as save, contextlib.redirect_stdout(io.StringIO()):
             power(3, 'vm:web', 'restart')
         api.request.assert_called_once_with('POST', '/nodes/proxmox1/qemu/123/status/shutdown', {'timeout': 90, 'forceStop': 0})
         quota.assert_called_once_with(resolved[0], resolved[1])
         api.start.assert_called_once_with('proxmox1', 123)
-        save.assert_called_once_with(resolved[0], resolved[1])
+        save.assert_called_once_with(resolved[0], 'scenario_boxes','web',True)
 
     def test_failed_shutdown_never_starts_or_updates_desired_state(self):
         resolved = self.fixture()
         resolved[3].status.return_value = 'running'
         with patch('crange_guac_boxes.resolve', return_value=resolved), \
-                patch('crange.save_config') as save:
+                patch('crange.save_power_state') as save:
             with self.assertRaisesRegex(CrangeError, 'did not stop cleanly'):
                 power(3, 'vm:web', 'restart')
         resolved[3].start.assert_not_called()
@@ -67,7 +67,7 @@ class BoxActionsTests(unittest.TestCase):
                 status = api.container_status if kind == 'container' else api.status
                 status.side_effect = ['running', 'stopped']
                 with patch('crange_guac_boxes.resolve', return_value=resolved), \
-                     patch('crange.save_config'), contextlib.redirect_stdout(io.StringIO()):
+                     patch('crange.save_power_state'), contextlib.redirect_stdout(io.StringIO()):
                     power(3, kind + ':web', 'stop')
                 path_kind = 'lxc' if kind == 'container' else 'qemu'
                 api.request.assert_called_once_with('POST', f'/nodes/proxmox1/{path_kind}/123/status/stop',

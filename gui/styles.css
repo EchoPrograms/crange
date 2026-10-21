@@ -413,10 +413,15 @@ pre, code { font-family: "IBM Plex Mono", ui-monospace, Consolas, monospace; }
 .sidebar nav button.active .nav-icon { color: var(--blue); }
 .table-link { color: var(--blue); text-decoration-color: #68839f; }
 .ip-address { color: #a5cbd2; font-variant-numeric: tabular-nums; }
-.status-good, .job-status-succeeded { color: var(--green); }
+.status-good { color: var(--text,#ededed); }
+.job-status-succeeded { color: var(--green); }
 .status-warning, .job-status-queued, .job-status-reconcile-required, .template-readiness-warning { color: var(--amber); }
 .status-bad, .job-status-failed, .job-status-interrupted { color: var(--red); }
 .status-info, .job-status-running { color: var(--blue); }
+.job-status-running { color: var(--text,#ededed); }
+.status-running::before { animation: status-dot-pulse 2.4s ease-in-out infinite; }
+@keyframes status-dot-pulse { 0%, 100% { opacity: 1; } 50% { opacity: .4; } }
+@media (prefers-reduced-motion: reduce) { .status-running::before { animation: none; } }
 .row-actions [data-action-icon="Remote access"] .action-icon, #guac-link .action-icon { color: var(--blue); }
 .row-actions [data-action-icon="Start"] .action-icon { color: var(--green); }
 .row-actions [data-action-icon="Stop"] .action-icon, [data-action-icon="Stop task"] .action-icon { color: var(--red); }

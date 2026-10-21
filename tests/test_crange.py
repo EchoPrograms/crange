@@ -385,6 +385,15 @@ jump_boxes = {
         with self.assertRaisesRegex(crange.CrangeError, "No unused"):
             crange._allocate_project_transit_address(all_addresses)
 
+    def test_transit_inventory_ignores_only_variables_only_scaffolds(self):
+        orphan=crange.ENVS/'project-004';orphan.mkdir();(orphan/'variables.tf').write_text('variable "project_id" {}')
+        with patch.object(crange,'ProxmoxAPI',return_value=SimpleNamespace(request=lambda *args:[])), \
+             patch.object(crange,'run',return_value=SimpleNamespace(stdout='[]')):
+            crange._occupied_project_transit_addresses()
+            (orphan/'main.tf').write_text('terraform {}')
+            with self.assertRaisesRegex(crange.CrangeError,'unreadable project config'):
+                crange._occupied_project_transit_addresses()
+
     def test_project_init_reads_live_guest_config_and_opnsense_addresses(self):
         class API:
             def request(self, method, path, fields=None):

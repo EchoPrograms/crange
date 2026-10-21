@@ -327,7 +327,10 @@ input:not([type=checkbox]):not([type=radio]), textarea:not(.clipboard-service-ta
 .cr-row-job pre { font-family: "IBM Plex Mono", ui-monospace, Consolas, monospace; }
 
 /* Readable semantic accents, without tinted badges or matching colored outlines. */
-.cr-status.on { color: var(--cr-green); }
+.cr-status.on { color: var(--cr-text); }
+.cr-status.on::before { animation: cr-status-dot-pulse 2.4s ease-in-out infinite; }
+@keyframes cr-status-dot-pulse { 0%, 100% { opacity: 1; } 50% { opacity: .4; } }
+@media (prefers-reduced-motion: reduce) { .cr-status.on::before { animation: none; } }
 .cr-server-ip, .cr-network-row code { color: #a5cbd2; }
 .cr-error::before, .cr-row-job.failed summary { color: var(--cr-red); }
 .cr-title-loading, .cr-row-job.active summary { color: var(--cr-blue); }

@@ -59,11 +59,20 @@ def project_dir(project: str) -> Path:
     return path
 
 
+class ProjectConfig(dict):
+    """Remember read-time power flags so concurrent controls survive other edits."""
+    def __init__(self, data):
+        super().__init__(data)
+        self.power_baseline = {(field, name): box.get('started', True)
+                               for field in ('jump_boxes','scenario_boxes','scenario_containers')
+                               for name, box in data.get(field, {}).items()}
+
+
 def json_config(path: Path) -> dict:
     cfg = path / "crange.auto.tfvars.json"
     if cfg.exists():
         try:
-            return json.loads(cfg.read_text())
+            return ProjectConfig(json.loads(cfg.read_text()))
         except (json.JSONDecodeError, OSError) as exc:
             raise CrangeError(f"Cannot read {cfg}: {exc}") from exc
     # Import the standard project inputs once from the existing HCL tfvars file.
@@ -104,6 +113,33 @@ def json_config(path: Path) -> dict:
 
 
 def save_config(path: Path, data: dict) -> None:
+    with (path/'.crange-config.lock').open('a') as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX)
+        cfg=path/'crange.auto.tfvars.json'
+        if isinstance(data, ProjectConfig) and cfg.exists():
+            current=json.loads(cfg.read_text())
+            for (field,name), previous in data.power_baseline.items():
+                proposed=data.get(field,{}).get(name)
+                actual=current.get(field,{}).get(name)
+                if proposed is not None and actual is not None and proposed.get('started',True)==previous and actual.get('started',True)!=previous:
+                    proposed['started']=actual.get('started',True)
+        _save_config_locked(path,data)
+        if isinstance(data,ProjectConfig):
+            data.power_baseline=ProjectConfig(data).power_baseline
+
+
+def save_power_state(path: Path, field: str, name: str, started: bool) -> None:
+    """Commit one observed power flag without overwriting concurrent edits."""
+    with (path/'.crange-config.lock').open('a') as lock:
+        fcntl.flock(lock,fcntl.LOCK_EX)
+        current=json_config(path)
+        if name not in current.get(field,{}):
+            raise CrangeError('Guest declaration changed during power action; refresh its status.')
+        current[field][name]['started']=started
+        _save_config_locked(path,current)
+
+
+def _save_config_locked(path: Path, data: dict) -> None:
     validate_project_quota(path, data)
     cfg = path / "crange.auto.tfvars.json"
     text = json.dumps(data, indent=2, sort_keys=True) + "\n"
@@ -457,6 +493,13 @@ def _occupied_project_transit_addresses() -> set[str]:
     for existing in sorted(ENVS.glob("project-*")):
         if not existing.is_dir() or existing.name == "project-template":
             continue
+        # A leftover variables-only scaffold has no project configuration,
+        # Terraform root module or backend/state. Native/OPNsense inventories
+        # below still reserve every real address. Never skip an actual project
+        # whose configuration is missing, unreadable, or malformed.
+        entries = list(existing.iterdir())
+        if all(item.name == 'variables.tf' and item.is_file() for item in entries):
+            continue
         try:
             other = json_config(existing)
         except CrangeError as exc:
@@ -800,8 +843,13 @@ def cmd_box_state(args: argparse.Namespace) -> None:
     boxes = cfg.get("jump_boxes", {})
     if args.name not in boxes:
         raise CrangeError(f"Box {args.name} is not configured.")
-    boxes[args.name]["started"] = args.state == "start"
-    save_config(path, cfg)
+    if (path/'terraform.tfstate').exists():
+        live=output_json(path).get('jump_boxes',{}).get('value',{}).get(args.name)
+        if live:
+            from crange_guac_boxes import power
+            power(int(args.project),'jumpbox:'+args.name,'start' if args.state=='start' else 'shutdown')
+            return
+    save_power_state(path,'jump_boxes',args.name,args.state=='start')
     print(f"Box {args.name} desired state set to {args.state}. Run infra plan, review it, then infra apply.")
 
 
@@ -1323,6 +1371,23 @@ def cmd_apply_saved(args: argparse.Namespace, path: Path) -> None:
     manifest.write_text(json.dumps(record, indent=2) + '\n')
     from crange_scheduling import atomic_json
     atomic_json(path / '.crange-plans' / f'{args.plan_id}.json', {k:record[k] for k in ('plan_id','created','changes','placements','reservation_ids','policy_revision','apply_scope','applied_at','bootstrap','bootstrap_node','bootstrap_nodes','bootstrap_router_nodes','bootstrap_networks','network_foundation') if k in record},0o640)
+    from crange_router_ha import enroll_created
+    try:
+        enrolled = enroll_created(path, args.plan_id, record['changes'])
+    except Exception:
+        if record.get('bootstrap'):
+            atomic_json(path/'.crange-bootstrap.json', {
+                'schema_version':1,'project_id':int(args.project),'state':'configuration_failed',
+                'bootstrap_plan_id':args.plan_id,'node':record['bootstrap_node'],
+                'nodes':record.get('bootstrap_nodes',[]),'router_nodes':record.get('bootstrap_router_nodes',{}),
+                'networks':record['bootstrap_networks'],'applied_at':record['applied_at'],'acceptance_recorded':False},0o640)
+        if record.get('network_foundation'):
+            atomic_json(path/'.crange-network-foundation.json', {
+                'project_id':int(args.project),'networks':record['network_foundation'],
+                'state':'configuration_failed','plan_id':args.plan_id},0o640)
+        raise
+    if enrolled:
+        print('Native HA enabled for created routers: ' + ', '.join(enrolled), flush=True)
     if record.get('network_foundation'):
         args.network_foundation_applied = True
         cmd_configure_network_foundation(args, record['network_foundation'])
@@ -1375,6 +1440,10 @@ def cmd_bootstrap_configure(args: argparse.Namespace) -> None:
     from crange_scheduling import atomic_json
     atomic_json(status_path, status, 0o640)
     try:
+        if status.get('bootstrap_plan_id'):
+            saved = path/'.crange-plans'/(status['bootstrap_plan_id']+'.json')
+            from crange_router_ha import enroll_created
+            enroll_created(path, status['bootstrap_plan_id'], json.loads(saved.read_text())['changes'])
         cmd_configure(argparse.Namespace(project=args.project, target='all', yes=True))
     except Exception:
         status['state'] = 'configuration_failed'
@@ -2634,8 +2703,7 @@ def cmd_machine_state(args: argparse.Namespace) -> None:
         status = api.status(node, vmid) if args.kind == 'vm' else api.container_status(node, vmid)
         if status != wanted:
             raise CrangeError(f'Guest did not reach {wanted}; desired state was not changed.')
-    box['started'] = args.state == 'start'
-    save_config(path, cfg)
+    save_power_state(path,field,args.name,args.state=='start')
     print(f'{args.name}: {wanted}. Only this guest was operated on; desired power state updated.')
 
 
@@ -4365,7 +4433,7 @@ def make_parser() -> argparse.ArgumentParser:
     q.add_argument('--credential-ref', default=''); q.add_argument('--sealed-credentials', default='')
     q.set_defaults(func=cmd_jumpbox_settings)
     q = sub.add_parser("box-list"); q.add_argument("project"); q.set_defaults(func=cmd_boxes)
-    q = sub.add_parser("box-state", help="Set desired jump box power state"); q.add_argument("project"); q.add_argument("name"); q.add_argument("state", choices=("start", "stop")); q.set_defaults(func=cmd_box_state)
+    q = sub.add_parser("box-state", help="Start/stop a deployed jump box, or set its state before deployment"); q.add_argument("project"); q.add_argument("name"); q.add_argument("state", choices=("start", "stop")); q.set_defaults(func=cmd_box_state)
     for verb, add in (("box-add", True), ("box-remove", False)):
         q = sub.add_parser(verb); q.add_argument("project"); q.add_argument("name")
         if add:
@@ -4469,7 +4537,14 @@ def make_parser() -> argparse.ArgumentParser:
 def main() -> int:
     args = make_parser().parse_args()
     try:
-        args.func(args)
+        project = getattr(args, 'project', None)
+        # Emergency power controls retain their independent execution lane.
+        if project and str(project).isdigit() and 1<=int(project)<=255 and not args.command.startswith('guac-') and args.command not in ('box-state','machine-state'):
+            from crange_router_ha import project_operation
+            with project_operation(project):
+                args.func(args)
+        else:
+            args.func(args)
     except CrangeError as exc:
         print(f"crange: {exc}", file=sys.stderr)
         return 2

@@ -11,12 +11,83 @@ from pathlib import Path
 import re
 import time
 import uuid
+import fcntl
+import os
+from contextlib import contextmanager
 
 from crange_apply_scope import guest_key
 from crange_placement import PlacementError
 
 NODES = {f'proxmox{i}' for i in range(1, 7)}
 STORAGE = 'crange-router-ha'
+
+
+@contextmanager
+def project_operation(project, *, blocking=True, root=None):
+    """Serialize HA metadata adoption with normal project CLI operations."""
+    if not re.fullmatch(r'[0-9]{1,3}', str(project)) or not 1 <= int(project) <= 255:
+        raise PlacementError('Invalid project operation identity.')
+    directory = Path(root or Path.home()/'.local/state/crange/project-operations')
+    directory.mkdir(parents=True, exist_ok=True, mode=0o700)
+    descriptor = os.open(directory/f'p{int(project):03d}.lock',
+                         os.O_CREAT | os.O_RDWR | os.O_NOFOLLOW, 0o600)
+    with os.fdopen(descriptor, 'a') as stream:
+        try:
+            fcntl.flock(stream, fcntl.LOCK_EX | (0 if blocking else fcntl.LOCK_NB))
+        except BlockingIOError:
+            yield False
+            return
+        yield True
+
+
+def creation_is_independent(attributes):
+    clone = attributes.get('clone') or []
+    return not clone or (len(clone) == 1 and clone[0].get('full') is True
+                         and type(clone[0].get('vm_id')) is int)
+
+
+def automatic_enabled():
+    policy = Path('/etc/crange/router-ha/policy.json')
+    if not policy.exists():
+        return False
+    for item in (policy, *policy.parents):
+        info = item.stat()
+        if item.is_symlink() or info.st_uid != 0 or info.st_mode & 0o022:
+            raise PlacementError('Router HA policy must be protected from modification.')
+    return json.loads(policy.read_text()).get('automatic_enrollment') is True
+
+
+def enroll_created(path, plan_id, changes):
+    """Automatically enroll only routers created by this completed apply."""
+    if not automatic_enabled():
+        return []
+    reconcile_locations(path)
+    keys = sorted({guest_key(row['address']) for row in changes
+                   if row.get('actions') == ['create'] and str(guest_key(row['address']) or '').startswith('router:')})
+    if not keys:
+        return []
+    from crange_scheduling import atomic_json
+    pending = path/'.crange-router-ha-pending.json'
+    atomic_json(pending, {'plan_id':plan_id,'changes':[
+        row for row in changes if guest_key(row['address']) in keys]},0o640)
+    import socket
+    project = int(path.name.split('-')[-1])
+    for key in keys:
+        request = {'command':'router-ha-enroll','node':'proxmox4','project_id':project,
+                   'router_key':key,'plan_id':plan_id}
+        with socket.socket(socket.AF_UNIX,socket.SOCK_STREAM) as client:
+            client.settimeout(330);client.connect('/run/crange-ct-read/socket')
+            client.sendall(json.dumps(request).encode()+b'\n');raw=b''
+            while not raw.endswith(b'\n') and len(raw)<=8192:
+                part=client.recv(8193-len(raw))
+                if not part:break
+                raw+=part
+        reply=json.loads(raw)
+        value=json.loads(reply['value']) if set(reply)=={'value'} and isinstance(reply['value'],str) else None
+        if not isinstance(value,dict) or value.get('phase')!='enrolled' or value.get('project_id')!=project or value.get('router_key')!=key:
+            raise PlacementError('Router HA enrollment is incomplete; retain its operator journal and retry bootstrap configuration.')
+    pending.unlink()
+    return keys
 
 
 def digest(value):
@@ -99,7 +170,7 @@ def fresh(row, now):
 
 
 def membership_identity(rows):
-    return [{k: r.get(k) for k in ('vmid', 'type', 'node', 'status', 'name')} for r in rows]
+    return [{k: r.get(k) for k in ('vmid', 'type', 'node', 'status', 'name', 'pool')} for r in rows]
 
 
 def candidate_matches(candidate, observed):
@@ -157,7 +228,7 @@ def refresh_storage(path, key, vmid, storage, *, tf=None, api=None):
     path = Path(path); tf = tf or tf_run; api = api or ProxmoxAPI()
     before = json.loads(tf(path, ['state','pull'], capture=True).stdout)
     attrs = container_states(before).get(key, {})
-    if attrs.get('vm_id') != vmid or str(attrs.get('id')) != str(vmid) or attrs.get('clone'):
+    if attrs.get('vm_id') != vmid or str(attrs.get('id')) != str(vmid) or not creation_is_independent(attrs):
         raise PlacementError('Router storage adoption lacks its original creation identity.')
     node = attrs.get('node_name'); project = int(path.name.split('-')[-1])
     config = api.request('GET', f'/nodes/{node}/lxc/{vmid}/config')
@@ -191,7 +262,7 @@ def refresh_storage(path, key, vmid, storage, *, tf=None, api=None):
     if (after.get('lineage') != before['lineage'] or other_guests(after) != other_guests(before) or
             current.get('node_name') != node or current.get('vm_id') != vmid or len(disks)!=1 or
             disks[0].get('datastore_id') != STORAGE or disks[0].get('size') != attrs['disk'][0]['size'] or
-            current.get('operating_system') != attrs.get('operating_system') or
+            current.get('operating_system') != attrs.get('operating_system') or current.get('clone') != attrs.get('clone') or
             current.get('initialization') != attrs.get('initialization')):
         raise PlacementError('Router refresh changed an unrelated guest or creation identity; preserve its journal.')
     if json.loads(metadata_file.read_text()) != metadata:
@@ -220,10 +291,10 @@ def prove_moves(snapshot, registry, api, *, now=None):
         if (not resource_key or not resource_key.startswith('router:') or type(vmid) is not int or
                 attributes.get('vm_id') not in (None, vmid) or str(attributes.get('id')) != str(vmid)):
             raise PlacementError('Registered router no longer matches the project state.')
-        if attributes.get('clone'):
-            raise PlacementError('Templated router creation references need separate adoption acceptance; router state retained.')
+        if not creation_is_independent(attributes):
+            raise PlacementError('Linked router creation references cannot be adopted; router state retained.')
         actual = [r for r in resources if r.get('vmid') == vmid]
-        if len(actual) != 1 or actual[0].get('type') != 'lxc':
+        if len(actual) != 1 or actual[0].get('type') != 'lxc' or actual[0].get('pool') != 'crange-iac':
             raise PlacementError('Registered router has no unique native container identity.')
         node = actual[0]['node']
         if node == attributes.get('node_name') and nodes.get(node, {}).get('status') == 'offline':
@@ -234,7 +305,7 @@ def prove_moves(snapshot, registry, api, *, now=None):
         allowed = registration.get('eligible_nodes', [])
         if (not isinstance(allowed, list) or not allowed or len(set(allowed)) != len(allowed) or
                 not set(allowed) <= NODES or node not in NODES or node not in allowed or
-                attributes.get('node_name') not in allowed or
+                (attributes.get('node_name') not in allowed and attributes.get('node_name') != registration.get('initial_node')) or
                 nodes.get(node, {}).get('status') != 'online' or actual[0].get('status') != 'running'):
             raise PlacementError('Router recovery has not reached an enrolled online node.')
         config = api.request('GET', f'/nodes/{node}/lxc/{vmid}/config')

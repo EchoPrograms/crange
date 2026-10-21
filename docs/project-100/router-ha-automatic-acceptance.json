@@ -1,0 +1,503 @@
+{
+  "schema_version": 1,
+  "project_id": 253,
+  "state_lineage": "04336072-592d-4992-1196-08b96f876464",
+  "automatic_enrollment": [
+    {
+      "module": "module.project_router",
+      "vmid": 242,
+      "node": "proxmox5",
+      "storage": "crange-router-ha"
+    },
+    {
+      "module": "module.staging_router",
+      "vmid": 241,
+      "node": "proxmox5",
+      "storage": "crange-router-ha"
+    },
+    {
+      "module": "module.team_router[\"1\"]",
+      "vmid": 240,
+      "node": "proxmox3",
+      "storage": "crange-router-ha"
+    }
+  ],
+  "relocation": {
+    "request": {
+      "phase": "submitting",
+      "vmid": 240,
+      "source": "proxmox6",
+      "target": "proxmox3",
+      "identity_sha256": "33d0f17143cd173b14c15eb3b2402b0ecd156c326b7dff7533503f0e5d110541",
+      "lineage": "04336072-592d-4992-1196-08b96f876464",
+      "submitted_at": 1792541625.7753458
+    },
+    "adoption_receipts": [
+      {
+        "before_sha256": "18cc2f75e54901ca0bd9fd67a6a58810eefad2f23924e52988ab155b9363b7ac",
+        "candidate_sha256": "bc68c21ffc9476ce9356c5661be04edf88cdee6d99e5643a60e3e7f93d9b057e",
+        "moves": {
+          "module.team_router[\"1\"].proxmox_virtual_environment_container.router": {
+            "from": "proxmox6",
+            "to": "proxmox3",
+            "vmid": 240
+          }
+        },
+        "phase": "verified",
+        "project_id": 253
+      }
+    ],
+    "placement_after": {
+      "clone_mode": "archive",
+      "datastore_id": "crange-router-ha",
+      "declared_template": null,
+      "guest_id": 240,
+      "image_id": "debian-12-router-v1",
+      "node_name": "proxmox3",
+      "template_file_id": "crange-library:vztmpl/debian-12-standard_12.12-1_amd64.tar.zst",
+      "template_id": null,
+      "template_node": "proxmox6",
+      "verified_local_cache": false
+    }
+  },
+  "returning_worker_simulation": {
+    "omitted_destination": "proxmox6",
+    "service_remained_on": "proxmox3",
+    "verified_rule_after": {
+      "digest": "a4e548a514b12db6be2f380bec6cf339ec13bd3e",
+      "nodes": "proxmox2,proxmox3,proxmox4,proxmox5,proxmox6",
+      "order": 3,
+      "resources": "ct:240",
+      "rule": "crange-p253-ct240",
+      "strict": 1,
+      "type": "node-affinity"
+    },
+    "registry_nodes_after": [
+      "proxmox2",
+      "proxmox3",
+      "proxmox4",
+      "proxmox5",
+      "proxmox6"
+    ],
+    "scheduled_observer": {
+      "checked_at": 1792541918.8177934,
+      "projects": [
+        {
+          "adopted": [],
+          "enrolled": [],
+          "project": 100,
+          "state": "ready",
+          "waiting_vmids": []
+        },
+        {
+          "adopted": [],
+          "enrolled": [],
+          "project": 253,
+          "state": "ready",
+          "waiting_vmids": []
+        }
+      ],
+      "state": "checked"
+    }
+  },
+  "native_services_after": [
+    {
+      "crm_state": "started",
+      "failback": 0,
+      "id": "service:ct:240",
+      "max_relocate": 4,
+      "max_restart": 1,
+      "node": "proxmox3",
+      "request_state": "started",
+      "sid": "ct:240",
+      "state": "started",
+      "status": "ct:240 (proxmox3, started)",
+      "type": "service"
+    },
+    {
+      "crm_state": "started",
+      "failback": 0,
+      "id": "service:ct:241",
+      "max_relocate": 4,
+      "max_restart": 1,
+      "node": "proxmox5",
+      "request_state": "started",
+      "sid": "ct:241",
+      "state": "started",
+      "status": "ct:241 (proxmox5, started)",
+      "type": "service"
+    },
+    {
+      "crm_state": "started",
+      "failback": 0,
+      "id": "service:ct:242",
+      "max_relocate": 4,
+      "max_restart": 1,
+      "node": "proxmox5",
+      "request_state": "started",
+      "sid": "ct:242",
+      "state": "started",
+      "status": "ct:242 (proxmox5, started)",
+      "type": "service"
+    }
+  ],
+  "physical_failure_tested": false,
+  "physical_rejoin_tested": false,
+  "bootstrap_network_configuration": "SSH timeout; not accepted",
+  "cleanup": {
+    "project_delete_exit_code": 0,
+    "native_guests_and_ha_removed": true,
+    "vnets_removed": true,
+    "project_directory_removed": true,
+    "route_and_gateway_removed": true,
+    "audit_completed_after_shared_sqlite_journal_permission_repair": true
+  },
+  "live_project_100": {
+    "lineage": "8b8a98ab-64c5-d053-b86f-3dc69511fc27",
+    "routers": [
+      {
+        "module": "module.project_router",
+        "vmid": 113,
+        "node": "proxmox2",
+        "storage": "crange-router-ha"
+      },
+      {
+        "module": "module.staging_router",
+        "vmid": 116,
+        "node": "proxmox5",
+        "storage": "crange-router-ha"
+      },
+      {
+        "module": "module.team_router[\"1\"]",
+        "vmid": 120,
+        "node": "proxmox4",
+        "storage": "crange-router-ha"
+      },
+      {
+        "module": "module.team_router[\"2\"]",
+        "vmid": 118,
+        "node": "proxmox2",
+        "storage": "crange-router-ha"
+      },
+      {
+        "module": "module.team_router[\"3\"]",
+        "vmid": 117,
+        "node": "proxmox5",
+        "storage": "crange-router-ha"
+      },
+      {
+        "module": "module.team_router[\"4\"]",
+        "vmid": 119,
+        "node": "proxmox3",
+        "storage": "crange-router-ha"
+      },
+      {
+        "module": "module.team_router[\"5\"]",
+        "vmid": 121,
+        "node": "proxmox4",
+        "storage": "crange-router-ha"
+      }
+    ],
+    "services": [
+      {
+        "crm_state": "started",
+        "failback": 0,
+        "id": "service:ct:113",
+        "max_relocate": 4,
+        "max_restart": 1,
+        "node": "proxmox2",
+        "request_state": "started",
+        "sid": "ct:113",
+        "state": "started",
+        "status": "ct:113 (proxmox2, started)",
+        "type": "service"
+      },
+      {
+        "crm_state": "started",
+        "failback": 0,
+        "id": "service:ct:116",
+        "max_relocate": 4,
+        "max_restart": 1,
+        "node": "proxmox5",
+        "request_state": "started",
+        "sid": "ct:116",
+        "state": "started",
+        "status": "ct:116 (proxmox5, started)",
+        "type": "service"
+      },
+      {
+        "crm_state": "started",
+        "failback": 0,
+        "id": "service:ct:117",
+        "max_relocate": 4,
+        "max_restart": 1,
+        "node": "proxmox5",
+        "request_state": "started",
+        "sid": "ct:117",
+        "state": "started",
+        "status": "ct:117 (proxmox5, started)",
+        "type": "service"
+      },
+      {
+        "crm_state": "started",
+        "failback": 0,
+        "id": "service:ct:118",
+        "max_relocate": 4,
+        "max_restart": 1,
+        "node": "proxmox2",
+        "request_state": "started",
+        "sid": "ct:118",
+        "state": "started",
+        "status": "ct:118 (proxmox2, started)",
+        "type": "service"
+      },
+      {
+        "crm_state": "started",
+        "failback": 0,
+        "id": "service:ct:119",
+        "max_relocate": 4,
+        "max_restart": 1,
+        "node": "proxmox3",
+        "request_state": "started",
+        "sid": "ct:119",
+        "state": "started",
+        "status": "ct:119 (proxmox3, started)",
+        "type": "service"
+      },
+      {
+        "crm_state": "started",
+        "failback": 0,
+        "id": "service:ct:120",
+        "max_relocate": 4,
+        "max_restart": 1,
+        "node": "proxmox4",
+        "request_state": "started",
+        "sid": "ct:120",
+        "state": "started",
+        "status": "ct:120 (proxmox4, started)",
+        "type": "service"
+      },
+      {
+        "crm_state": "started",
+        "failback": 0,
+        "id": "service:ct:121",
+        "max_relocate": 4,
+        "max_restart": 1,
+        "node": "proxmox4",
+        "request_state": "started",
+        "sid": "ct:121",
+        "state": "started",
+        "status": "ct:121 (proxmox4, started)",
+        "type": "service"
+      }
+    ],
+    "rules": [
+      {
+        "digest": "c22482171b85409871e576f1871c89cfa8896328",
+        "nodes": "proxmox2,proxmox3,proxmox4,proxmox5,proxmox6",
+        "order": 1,
+        "resources": "ct:119",
+        "rule": "crange-p100-ct119",
+        "strict": 1,
+        "type": "node-affinity"
+      },
+      {
+        "digest": "c22482171b85409871e576f1871c89cfa8896328",
+        "nodes": "proxmox2,proxmox3,proxmox4,proxmox5,proxmox6",
+        "order": 2,
+        "resources": "ct:120",
+        "rule": "crange-p100-ct120",
+        "strict": 1,
+        "type": "node-affinity"
+      },
+      {
+        "digest": "c22482171b85409871e576f1871c89cfa8896328",
+        "nodes": "proxmox2,proxmox3,proxmox4,proxmox5,proxmox6",
+        "order": 3,
+        "resources": "ct:121",
+        "rule": "crange-p100-ct121",
+        "strict": 1,
+        "type": "node-affinity"
+      },
+      {
+        "digest": "c22482171b85409871e576f1871c89cfa8896328",
+        "nodes": "proxmox2,proxmox3,proxmox4,proxmox5,proxmox6",
+        "order": 4,
+        "resources": "ct:118",
+        "rule": "crange-p100-ct118",
+        "strict": 1,
+        "type": "node-affinity"
+      },
+      {
+        "digest": "c22482171b85409871e576f1871c89cfa8896328",
+        "nodes": "proxmox2,proxmox3,proxmox4,proxmox5,proxmox6",
+        "order": 5,
+        "resources": "ct:113",
+        "rule": "crange-p100-ct113",
+        "strict": 1,
+        "type": "node-affinity"
+      },
+      {
+        "digest": "c22482171b85409871e576f1871c89cfa8896328",
+        "nodes": "proxmox2,proxmox3,proxmox4,proxmox5,proxmox6",
+        "order": 6,
+        "resources": "ct:116",
+        "rule": "crange-p100-ct116",
+        "strict": 1,
+        "type": "node-affinity"
+      },
+      {
+        "digest": "c22482171b85409871e576f1871c89cfa8896328",
+        "nodes": "proxmox2,proxmox3,proxmox4,proxmox5,proxmox6",
+        "order": 7,
+        "resources": "ct:117",
+        "rule": "crange-p100-ct117",
+        "strict": 1,
+        "type": "node-affinity"
+      }
+    ],
+    "native_guests": [
+      {
+        "name": "p100-router",
+        "node": "proxmox2",
+        "pool": "crange-iac",
+        "status": "running",
+        "vmid": 113
+      },
+      {
+        "name": "p100t254-router",
+        "node": "proxmox5",
+        "pool": "crange-iac",
+        "status": "running",
+        "vmid": 116
+      },
+      {
+        "name": "p100t003-router",
+        "node": "proxmox5",
+        "pool": "crange-iac",
+        "status": "running",
+        "vmid": 117
+      },
+      {
+        "name": "p100t002-router",
+        "node": "proxmox2",
+        "pool": "crange-iac",
+        "status": "running",
+        "vmid": 118
+      },
+      {
+        "name": "p100t004-router",
+        "node": "proxmox3",
+        "pool": "crange-iac",
+        "status": "running",
+        "vmid": 119
+      },
+      {
+        "name": "p100t001-router",
+        "node": "proxmox4",
+        "pool": "crange-iac",
+        "status": "running",
+        "vmid": 120
+      },
+      {
+        "name": "p100t005-router",
+        "node": "proxmox4",
+        "pool": "crange-iac",
+        "status": "running",
+        "vmid": 121
+      }
+    ],
+    "root_disks": {
+      "113": "crange-router-ha:113/vm-113-disk-0.raw,size=8G",
+      "116": "crange-router-ha:116/vm-116-disk-0.raw,size=8G",
+      "117": "crange-router-ha:117/vm-117-disk-0.raw,size=8G",
+      "118": "crange-router-ha:118/vm-118-disk-0.raw,size=8G",
+      "119": "crange-router-ha:119/vm-119-disk-0.raw,size=8G",
+      "120": "crange-router-ha:120/vm-120-disk-0.raw,size=8G",
+      "121": "crange-router-ha:121/vm-121-disk-0.raw,size=8G"
+    },
+    "observer": {
+      "checked_at": 1792542657.2387385,
+      "projects": [
+        {
+          "adopted": [],
+          "enrolled": [],
+          "project": 100,
+          "state": "ready",
+          "waiting_vmids": []
+        }
+      ],
+      "state": "checked"
+    },
+    "adoption_receipts": [
+      {
+        "before_sha256": "c1afed8645d3280e579dd6b5117bf5bbb4bb4a45741fb23247b6af6c4ca4a99d",
+        "candidate_sha256": "ec6e3857c4af795dd672c5f2e7f7ef5ac8f556d14dbd18ce30bdd399151fe9e0",
+        "moves": {
+          "module.team_router[\"4\"].proxmox_virtual_environment_container.router": {
+            "from": "proxmox2",
+            "to": "proxmox3",
+            "vmid": 119
+          }
+        },
+        "phase": "aborted-before-submit",
+        "project_id": 100
+      },
+      {
+        "before_sha256": "80539814d35cd54381962f6f8205b7f7435c02f126bbce1e8b2c16f30f33169f",
+        "candidate_sha256": "5b032d163419b33784d3f24e3da4d7e721d66f9a8986db019652cdfcaf519320",
+        "moves": {
+          "module.team_router[\"4\"].proxmox_virtual_environment_container.router": {
+            "from": "proxmox2",
+            "to": "proxmox3",
+            "vmid": 119
+          }
+        },
+        "phase": "verified",
+        "project_id": 100
+      },
+      {
+        "before_sha256": "47f42eb4c10bf8ccc9ce5b9c8bb9310a1c17bab147fcdfbd96daeff7febdd893",
+        "candidate_sha256": "2218c8354994239948421ad4c7104f2cc0b07e4ba973d0e92ea0fe04ce385de6",
+        "moves": {
+          "module.team_router[\"5\"].proxmox_virtual_environment_container.router": {
+            "from": "proxmox1",
+            "to": "proxmox4",
+            "vmid": 121
+          }
+        },
+        "phase": "verified",
+        "project_id": 100
+      },
+      {
+        "before_sha256": "ac35e1b9359df312b671709ff8149f6800bedb4844d9d9c31700b627dfc26a73",
+        "candidate_sha256": "417c88ead5c51f1d677b90b6bcf3b4859270ad4e2f619d72a13d5bd2beb34475",
+        "moves": {
+          "module.team_router[\"1\"].proxmox_virtual_environment_container.router": {
+            "from": "proxmox1",
+            "to": "proxmox4",
+            "vmid": 120
+          }
+        },
+        "phase": "verified",
+        "project_id": 100
+      }
+    ],
+    "source_sha256": {
+      "scripts/crange.py": "7900062e0470e671308510472d314573aee6beaf6a19ae2410c5f9cd62b649eb",
+      "scripts/crange_jobs.py": "f0b816e6945a2fed9af7e72ef7bd8f8f468cfb0280cefc6803d8a0eb91ddb149",
+      "scripts/crange_guac_boxes.py": "c87e89d4390b72643c5d269eb992a7b89a9855678c75168ea04216cd84c931d7",
+      "scripts/crange_service.py": "b6b166ea26c310b034dd444c22b3f3502fc6d73f52ac50ac8d8a251e9cc3aa02",
+      "scripts/crange_router_ha.py": "8c026b5225eee40452e6d099183577095a5b7132dac2e345495c4b792396e452",
+      "scripts/crange_router_ha_service.py": "d977880c872e1b281c458bb882857ce229dbc6d1e17e299862f17ed87c9d0f65",
+      "scripts/setup-router-ha.py": "086a64f5a69385fb4e1fe20a9fbbbf75243b42cc5cd0755056535d2f2fac94e2",
+      "scripts/crange_ct_read_relay.py": "f9a3d3a0a54ed8abf3778fb3179e550346b08d10a4244bb264f0b78497ebc937",
+      "gui/app.js": "7260660c1f0e12c49fbc9274f75f09ab703d37c4940e09adcab96d16622d7910",
+      "gui/styles.css": "dd71507540b9e05b8e69f00ea21ffcd9adefa6216adfbe05bb65696dd315185f"
+    },
+    "core_sources_sha256": {
+      "router_ha_operator.py": "086a64f5a69385fb4e1fe20a9fbbbf75243b42cc5cd0755056535d2f2fac94e2",
+      "crange_ct_read_relay.py": "f9a3d3a0a54ed8abf3778fb3179e550346b08d10a4244bb264f0b78497ebc937"
+    }
+  }
+}

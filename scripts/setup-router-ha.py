@@ -18,10 +18,12 @@ import subprocess
 import time
 import uuid
 from contextlib import contextmanager
+from datetime import datetime
 
 STORE = 'crange-router-ha'
 ROOT = Path('/root/crange-resilience/router-ha-enrollment')
 NODES = {f'proxmox{i}' for i in range(2, 7)}
+SOURCE_NODES = NODES | {'proxmox1'}
 
 
 def run(args, *, timeout=40):
@@ -52,7 +54,7 @@ def guard(project, key):
     if os.geteuid() != 0 or socket.gethostname() != 'proxmox4':
         raise ValueError('Run as root only on the surviving core, Proxmox4.')
     if (type(project) is not int or not 1 <= project <= 255 or project in (60, 61) or
-            not re.fullmatch(r'router:(?:project|staging|team:(?:[1-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-3]))', key)):
+            not re.fullmatch(r'router:(?:project|staging|team:(?:[1-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-3])|custom:[a-z][a-z0-9_-]{0,63})', key)):
         raise ValueError('Select one exact project/staging/team router.')
     rows = api('/cluster/status')
     if not any(r.get('type') == 'cluster' and r.get('quorate') == 1 for r in rows):
@@ -71,16 +73,20 @@ def snapshot(project):
 
 def router(snapshot, key):
     direct = {'router:project':'module.project_router', 'router:staging':'module.staging_router'}
-    module = direct.get(key) or 'module.team_router[' + json.dumps(key.removeprefix('router:team:')) + ']'
+    module = direct.get(key) or ('module.custom_router[' + json.dumps(key.removeprefix('router:custom:')) + ']'
+                                if key.startswith('router:custom:') else
+                                'module.team_router[' + json.dumps(key.removeprefix('router:team:')) + ']')
     rows = [r for r in snapshot.get('resources', []) if r.get('module') == module and
             r.get('type') == 'proxmox_virtual_environment_container' and r.get('name') == 'router']
     if len(rows) != 1 or len(rows[0].get('instances', [])) != 1:
         raise ValueError('Router has no unique Terraform container identity.')
     instance = rows[0]['instances'][0]; value = instance['attributes']
-    if (instance.get('deposed') or instance.get('status') == 'tainted' or value.get('clone') or
+    clone = value.get('clone') or []
+    independent = not clone or (len(clone)==1 and clone[0].get('full') is True and type(clone[0].get('vm_id')) is int)
+    if (instance.get('deposed') or instance.get('status') == 'tainted' or not independent or
             type(value.get('vm_id')) is not int or str(value['vm_id']) != str(value.get('id')) or
             len(value.get('disk', [])) != 1 or not snapshot.get('lineage')):
-        raise ValueError('Only intact stock-archive router state is accepted.')
+        raise ValueError('Only intact independent router state is accepted.')
     return module + '.proxmox_virtual_environment_container.router', value
 
 
@@ -88,10 +94,17 @@ def config_identity(config):
     return {k:v for k,v in config.items() if k in ('hostname','rootfs','unprivileged','tags') or re.fullmatch(r'net\d+', k)}
 
 
+def verify_rule(rule,vmid,nodes):
+    if (rule.get('type')!='node-affinity' or rule.get('strict')!=1 or rule.get('disable',0) or
+            set(str(rule.get('resources','')).split(','))!={f'ct:{vmid}'} or
+            set(str(rule.get('nodes','')).split(','))!=set(nodes)):
+        raise ValueError('Existing router HA affinity differs from its reviewed enrollment.')
+
+
 def inspect_router(project, key):
     state = snapshot(project); address, value = router(state, key); vmid = value['vm_id']; node = value['node_name']
     online = {r['node'] for r in api('/nodes') if r.get('status') == 'online'}
-    if node not in online or node not in NODES:
+    if node not in online or node not in SOURCE_NODES:
         raise ValueError('Router source is offline or unverified; never start a second copy.')
     matches = [r for r in api('/cluster/resources', type='vm') if r.get('vmid') == vmid]
     if (len(matches) != 1 or matches[0].get('type') != 'lxc' or matches[0].get('node') != node or
@@ -109,7 +122,7 @@ def inspect_router(project, key):
     bridges = []
     for field in ('net0','net1'):
         match = re.search(r'(?:^|,)bridge=([^,]+)', config.get(field, ''))
-        if not match or not (match[1] == 'crtrans' or re.fullmatch(fr'p{project:03d}(?:tr|t\d{{3}})', match[1])):
+        if not match or not (match[1] == 'crtrans' or re.fullmatch(fr'p{project:03d}(?:tr|[tc]\d{{3}})', match[1])):
             raise ValueError('Router network is outside its project.')
         bridges.append(match[1])
     return state, address, value, config, sorted(online & NODES), sorted(set(bridges))
@@ -136,7 +149,7 @@ print(json.dumps({'shared_mount':True,'bridges':BRIDGES}))
 def review(project, key):
     guard(project, key)
     state, address, value, config, nodes, bridges = inspect_router(project, key)
-    verify_clients(nodes, bridges)
+    verify_clients(sorted(set(nodes) | {value['node_name']}), bridges)
     disk_gib = value['disk'][0]['size']
     stats = os.statvfs('/srv/crange-router-ha')
     free = stats.f_bavail * stats.f_frsize / 2**30
@@ -165,11 +178,12 @@ def task(plan, file, name, endpoint, **params):
     upid = api(endpoint, 'create', **params)
     if not isinstance(upid,str) or not upid.startswith('UPID:'+plan['node']+':'):
         # A proxied CLI response need not expose the source node's task ID.
-        # Confirm that exact terminal task; never resubmit the mutation.
+        # Find the exact source task, including a still-running or warning
+        # result. Its status is checked below; never resubmit the mutation.
         kind={'stop':'vzstop','start':'vzstart','move-rootfs':'move_volume'}[name]
         rows=api('/nodes/'+plan['node']+'/tasks',vmid=plan['vmid'],limit=20)
         matches=[r for r in rows if r.get('type')==kind and str(r.get('id'))==str(plan['vmid'])
-                 and r.get('starttime',0)>=int(submitted)-1 and r.get('status')=='OK']
+                 and r.get('starttime',0)>=int(submitted)-1]
         if len(matches)!=1:raise ValueError('Proxied router task result is uncertain; preserve its journal.')
         upid=matches[0]['upid']
     if not isinstance(upid,str) or not upid.startswith('UPID:'+plan['node']+':'):
@@ -178,7 +192,14 @@ def task(plan, file, name, endpoint, **params):
     for _ in range(120):
         result=api(f'/nodes/{plan["node"]}/tasks/{upid}/status')
         if result.get('status')=='stopped':
-            if result.get('exitstatus')!='OK':raise ValueError('Native router task failed; preserve its journal.')
+            if result.get('exitstatus')!='OK':
+                if name=='start' and result.get('exitstatus')=='WARNINGS: 1':
+                    log=api(f'/nodes/{plan["node"]}/tasks/{upid}/log',limit=100)
+                    messages=[r.get('t','').strip() for r in log if r.get('t','').strip()]
+                    if (len(log)<100 and messages==['WARN: Systemd 252 detected. You may need to enable nesting.','TASK WARNINGS: 1']
+                            and api(f'/nodes/{plan["node"]}/lxc/{plan["vmid"]}/status/current').get('status')=='running'):
+                        return
+                raise ValueError('Native router task failed; preserve its journal.')
             return
         time.sleep(1)
     raise ValueError('Native router task is still pending; do not replay it.')
@@ -187,7 +208,7 @@ def task(plan, file, name, endpoint, **params):
 @contextmanager
 def pause_controller():
     """Close job submission before serializing this one-time operator action."""
-    services=['crange.service','crange-guac-broker.service']
+    services=['crange.service','crange-guac-broker.service','crange-router-ha.timer']
     stopped=[]
     try:
         for service in services:
@@ -195,6 +216,8 @@ def pause_controller():
             stopped.append(service)
         active=controller("import json,sqlite3;d=sqlite3.connect('/var/lib/crange-jobs/jobs.sqlite3');print(json.dumps(d.execute(\"SELECT COUNT(*) FROM jobs WHERE status IN ('queued','running','reconcile-required')\").fetchone()[0]))",root=True)
         if active:raise ValueError('Controller jobs are active; defer router conversion.')
+        active=controller("import json,subprocess;p=subprocess.run(['systemctl','is-active','--quiet','crange-router-ha.service']);print(json.dumps(p.returncode==0))",root=True)
+        if active:raise ValueError('Router HA reconciliation is active; defer manual conversion.')
         for service in ('crange-worker.service','crange-network-worker.service'):
             controller('import json,subprocess;subprocess.run('+repr(['systemctl','stop',service])+",check=True);print('{}')",root=True)
             stopped.append(service)
@@ -213,7 +236,7 @@ def apply_reviewed(project, key, plan_id):
     state,address,value,config,nodes,bridges=inspect_router(project,key)
     if sha(state)!=plan['state_sha256'] or sha(config_identity(config))!=plan['config_sha256'] or nodes!=plan['eligible_nodes']:
         raise ValueError('Router or cluster changed since review; create a fresh review.')
-    verify_clients(nodes,bridges)
+    verify_clients(sorted(set(nodes) | {value['node_name']}),bridges)
     node,vmid=plan['node'],plan['vmid'];base=f'/nodes/{node}/lxc/{vmid}'
     if 'move-rootfs' in plan['actions']:
         task(plan,file,'stop',base+'/status/stop')
@@ -234,12 +257,27 @@ from crange_router_ha import refresh_storage
 print(json.dumps(refresh_storage(Path(PROJECT_PATH),ADDRESS,VMID,STORAGE)))
 """.replace('PROJECT_PATH',repr('/home/crange/crange/terraform/environments/project-%03d'%project)).replace('ADDRESS',repr(address)).replace('VMID',repr(vmid)).replace('STORAGE',repr(STORE))
     controller(code, timeout=150)
+    return finish_enrollment(project,key,state,plan,file,current,address)
+
+
+def finish_enrollment(project,key,state,plan,file,current,address):
+    vmid=plan['vmid'];nodes=plan['eligible_nodes']
     plan.update(phase='enrolling-native-ha');save(file,plan)
-    api('/cluster/ha/resources','create',sid=f'ct:{vmid}',state='ignored',failback=0,max_restart=1,max_relocate=4)
-    run(['ha-manager','rules','add','node-affinity',f'crange-p{project:03d}-ct{vmid}',
-         '--resources',f'ct:{vmid}','--nodes',','.join(nodes),'--strict','1'])
+    managed=[row for row in api('/cluster/ha/resources') if row.get('sid')==f'ct:{vmid}']
+    if not managed:
+        api('/cluster/ha/resources','create',sid=f'ct:{vmid}',state='ignored',failback=0,max_restart=1,max_relocate=4)
+    elif len(managed)!=1 or managed[0].get('state') not in ('ignored','started') or managed[0].get('failback')!=0:
+        raise ValueError('Existing HA service differs from its enrollment journal.')
+    rule=f'crange-p{project:03d}-ct{vmid}'
+    existing=[row for row in api('/cluster/ha/rules') if row.get('rule')==rule]
+    if not existing:
+        run(['ha-manager','rules','add','node-affinity',rule,
+             '--resources',f'ct:{vmid}','--nodes',','.join(nodes),'--strict','1'])
+    else:
+        verify_rule(existing[0],vmid,nodes)
     api(f'/cluster/ha/resources/ct:{vmid}','set',state='started')
-    registration={'vmid':vmid,'identity_sha256':sha(config_identity(current)),'eligible_nodes':nodes}
+    registration={'vmid':vmid,'identity_sha256':sha(config_identity(current)),
+                  'eligible_nodes':nodes,'initial_node':plan['node']}
     publish="""import grp,json,os
 from pathlib import Path
 p=Path('/etc/crange/router-ha');p.mkdir(parents=True,mode=0o750,exist_ok=True)
@@ -254,6 +292,137 @@ t=f.with_suffix('.tmp');t.write_text(json.dumps(r,indent=2));os.chown(t,0,grp.ge
     controller(publish,root=True)
     plan.update(phase='enrolled',registration=registration);save(file,plan)
     return {k:plan[k] for k in ('phase','project_id','router_key','vmid','node','eligible_nodes','failback')}
+
+
+def automatic(project, key, origin_plan_id):
+    """Worker entry point: a completed, exact create plan is mandatory."""
+    guard(project,key)
+    if not re.fullmatch(r'[a-f0-9]{32}',str(origin_plan_id)):
+        raise ValueError('Automatic HA requires an exact completed plan.')
+    read="""import json
+from pathlib import Path
+p=Path('/home/crange/crange/terraform/environments/project-PROJECT')
+summary=json.loads((p/'.crange-plans'/'PLAN.json').read_text())
+policy=Path('/etc/crange/router-ha/policy.json')
+for item in (policy,*policy.parents):
+ s=item.stat()
+ if item.is_symlink() or s.st_uid!=0 or s.st_mode&0o022:raise SystemExit('Untrusted HA policy.')
+if json.loads(policy.read_text()).get('automatic_enrollment') is not True:raise SystemExit('Automatic HA is disabled.')
+from sys import path
+path.insert(0,'/home/crange/crange/scripts')
+from crange_project_lifecycle import require_active
+require_active(p)
+print(json.dumps(summary))
+""".replace('PROJECT',f'{project:03d}').replace('PLAN',origin_plan_id)
+    summary=controller(read)
+    state=snapshot(project);address,value=router(state,key)
+    try:
+        applied=datetime.fromisoformat(summary.get('applied_at','')).timestamp()
+    except (ValueError,TypeError):
+        raise ValueError('Automatic HA requires a successfully applied creation plan.') from None
+    if (summary.get('plan_id')!=origin_plan_id or not 0<applied<=time.time()+5 or
+            not any(row.get('address')==address and row.get('actions')==['create'] for row in summary.get('changes',[]))):
+        raise ValueError('Router is not a completed creation from the requested plan.')
+    # Idempotent completion never replays a disk move, stop, or start.
+    registration=controller("import json;from pathlib import Path;p=Path('/etc/crange/router-ha/project-%03d.json');print(p.read_text() if p.exists() else '{}')"%project,root=True)
+    entry=registration.get('routers',{}).get(address)
+    if entry:
+        current=api(f'/nodes/{value["node_name"]}/lxc/{value["vm_id"]}/config')
+        managed=[r for r in api('/cluster/ha/resources') if r.get('sid')==f'ct:{value["vm_id"]}']
+        if (registration.get('state_lineage')!=state['lineage'] or entry.get('vmid')!=value['vm_id'] or
+                sha(config_identity(current))!=entry.get('identity_sha256') or len(managed)!=1 or
+                managed[0].get('state')!='started' or managed[0].get('failback')!=0):
+            raise ValueError('Existing HA registration differs; retain its recovery journal.')
+        return {'phase':'enrolled','project_id':project,'router_key':key,'vmid':value['vm_id']}
+    # Recover only our own interrupted HA enrollment, never an unrelated HA
+    # resource that happens to have the same VMID or project tags.
+    pending=[(p,json.loads(p.read_text())) for p in ROOT.glob('*.json')]
+    pending=[(p,r) for p,r in pending if r.get('origin_plan_id')==origin_plan_id and
+             r.get('project_id')==project and r.get('router_key')==key and
+             r.get('vmid')==value['vm_id'] and r.get('phase')=='enrolling-native-ha']
+    if len(pending)>1:raise ValueError('Ambiguous interrupted HA enrollment journals.')
+    if pending:
+        file,plan=pending[0]
+        rows=[r for r in api('/cluster/resources',type='vm') if r.get('vmid')==value['vm_id']]
+        online={r['node'] for r in api('/nodes') if r.get('status')=='online'}
+        if (len(rows)!=1 or rows[0].get('pool')!='crange-iac' or rows[0].get('type')!='lxc' or
+                rows[0].get('node') not in online or rows[0]['node'] not in plan['eligible_nodes'] or
+                plan.get('state_lineage')!=state['lineage']):
+            raise ValueError('Interrupted HA enrollment has not reached an exclusive online identity.')
+        current=api(f'/nodes/{rows[0]["node"]}/lxc/{value["vm_id"]}/config')
+        if sha(config_identity(current))!=plan.get('shared_config_sha256'):
+            raise ValueError('Interrupted HA enrollment configuration differs.')
+        return finish_enrollment(project,key,state,plan,file,current,address)
+    reviewed=review(project,key)
+    journal=ROOT/(reviewed['plan_id']+'.json');record=json.loads(journal.read_text())
+    record['origin_plan_id']=origin_plan_id;save(journal,record)
+    # The parent worker holds the project operation lock. Pausing that same
+    # worker would interrupt the creation that authorized this enrollment.
+    return apply_reviewed(project,key,reviewed['plan_id'])
+
+
+def refresh_eligibility(project):
+    """Admit returning workers only after their shared store and bridges work."""
+    guard(project,'router:project')
+    read="""import json
+from pathlib import Path
+p=Path('/etc/crange/router-ha/project-PROJECT.json')
+for item in (p,*p.parents):
+ s=item.stat()
+ if item.is_symlink() or s.st_uid!=0 or s.st_mode&0o022:raise SystemExit('Untrusted router registry.')
+print(p.read_text())
+""".replace('PROJECT',f'{project:03d}')
+    registry=controller(read,root=True);state=snapshot(project)
+    if registry.get('project_id')!=project or registry.get('state_lineage')!=state.get('lineage'):
+        raise ValueError('Eligibility registry lineage differs.')
+    before=json.loads(json.dumps(registry));added={}
+    online={r['node'] for r in api('/nodes') if r.get('status')=='online'}
+    resources=api('/cluster/resources',type='vm')
+    for address,entry in registry['routers'].items():
+        missing=(online & NODES)-set(entry['eligible_nodes'])
+        if not missing:continue
+        matches=[r for r in resources if r.get('vmid')==entry['vmid']]
+        if len(matches)!=1 or matches[0].get('type')!='lxc' or matches[0].get('pool')!='crange-iac':
+            raise ValueError('Registered router identity is ambiguous.')
+        if matches[0]['node'] not in online:continue
+        current=api(f'/nodes/{matches[0]["node"]}/lxc/{entry["vmid"]}/config')
+        if sha(config_identity(current))!=entry['identity_sha256']:
+            raise ValueError('Router identity changed before worker admission.')
+        bridges=[]
+        for field in ('net0','net1'):
+            match=re.search(r'(?:^|,)bridge=([^,]+)',current.get(field,''))
+            if not match:raise ValueError('Router bridge identity is missing.')
+            bridges.append(match[1])
+        ready=[]
+        for node in sorted(missing):
+            try:verify_clients([node],bridges)
+            except (RuntimeError,ValueError,OSError,subprocess.SubprocessError):continue
+            ready.append(node)
+        if not ready:continue
+        managed=[r for r in api('/cluster/ha/resources') if r.get('sid')==f'ct:{entry["vmid"]}']
+        if len(managed)!=1 or managed[0].get('state')!='started' or managed[0].get('failback')!=0:
+            raise ValueError('Native HA policy changed before worker admission.')
+        rule=f'crange-p{project:03d}-ct{entry["vmid"]}'
+        rules=[r for r in api('/cluster/ha/rules') if r.get('rule')==rule]
+        if len(rules)!=1:raise ValueError('Router affinity rule is missing.')
+        target=sorted(set(entry['eligible_nodes'])|set(ready))
+        # A prior successful rule update may precede a crash before registry
+        # publication. Accept only that exact verified extension on retry.
+        actual=set(str(rules[0].get('nodes','')).split(','))
+        if actual==set(target):verify_rule(rules[0],entry['vmid'],target)
+        else:
+            verify_rule(rules[0],entry['vmid'],entry['eligible_nodes'])
+            api('/cluster/ha/rules/'+rule,'set',type='node-affinity',nodes=','.join(target),digest=rules[0]['digest'])
+        entry['eligible_nodes']=target;added[str(entry['vmid'])]=ready
+    if added:
+        publish="""import json,os
+from pathlib import Path
+p=Path('/etc/crange/router-ha/project-PROJECT.json');old=BEFORE;new=AFTER
+if json.loads(p.read_text())!=old:raise SystemExit('Registry changed before eligibility publication.')
+t=p.with_suffix('.tmp');t.write_text(json.dumps(new,indent=2));s=p.stat();os.chown(t,s.st_uid,s.st_gid);t.chmod(0o640);t.replace(p);print('{}')
+""".replace('PROJECT',f'{project:03d}').replace('BEFORE',repr(before)).replace('AFTER',repr(registry))
+        controller(publish,root=True)
+    return {'phase':'eligibility-verified','project_id':project,'added':added}
 
 
 def apply(project,key,plan_id):
@@ -309,12 +478,14 @@ t=p.with_suffix('.tmp');t.write_text(json.dumps(before,indent=2));s=p.stat();os.
 
 if __name__=='__main__':
     parser=argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('action',choices=('review','apply','retire'));parser.add_argument('project',type=int)
+    parser.add_argument('action',choices=('review','apply','retire','automatic','refresh'));parser.add_argument('project',type=int)
     parser.add_argument('router',nargs='?');parser.add_argument('--plan-id');parser.add_argument('--vmid',type=int)
     args=parser.parse_args()
     ROOT.mkdir(parents=True,mode=0o700,exist_ok=True)
     with (ROOT/'operator.lock').open('a') as lock:
         fcntl.flock(lock,fcntl.LOCK_EX)
-        result=(review(args.project,args.router) if args.action=='review' else
+        result=(refresh_eligibility(args.project) if args.action=='refresh' else
+                automatic(args.project,args.router,args.plan_id) if args.action=='automatic' else
+                review(args.project,args.router) if args.action=='review' else
                 retire(args.project,args.vmid) if args.action=='retire' else apply(args.project,args.router,args.plan_id))
     print(json.dumps(result,indent=2))

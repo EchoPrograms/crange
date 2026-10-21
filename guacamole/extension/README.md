@@ -83,6 +83,15 @@ current managed project's team and copies declared addresses. Unknown or
 unmatched native sessions keep their native controls without invented ownership.
 The toolbar may be hidden; Ctrl+Alt+Shift opens it again.
 
+Click the toolbar grip to collapse it to a slim arrow handle on the viewport
+edge. Drag the floating grip to move the expanded controls; drag the collapsed
+handle along any edge, then click it to expand. Its arrow points inward.
+Position and visibility persist locally per account. Arrow keys and Home also
+move/reset the handle. Dragging dismisses pending/visible hover help and
+suppresses it until the gesture ends; pointer cancellation and lost capture
+release that suppression. Running status text stays neutral while its green dot
+pulses gently; reduced-motion preferences disable the pulse.
+
 Square corner tokens and typography/spacing direction are recorded in
 [interface-design.md](../../docs/interface-design.md). Run
 `node tests/test_guac_workspace.cjs` with the existing Guacamole UI/auth checks

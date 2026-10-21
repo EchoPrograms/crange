@@ -8,6 +8,13 @@ from unittest.mock import patch
 from crange_jobs import JobStore
 
 class EmergencyPowerTests(unittest.TestCase):
+    def test_stop_supersedes_restart_so_it_cannot_restart_after_emergency_stop(self):
+        with tempfile.TemporaryDirectory() as directory:
+            store=JobStore(Path(directory)/'jobs.sqlite3')
+            restart=store.submit('alice',3,'guac-box-control',{'resource_key':'vm:web','action':'restart'})
+            store.submit('alice',3,'guac-box-control',{'resource_key':'vm:web','action':'stop'})
+            self.assertEqual(store.get(restart,['3'])['status'],'interrupted')
+
     def test_stop_supersedes_only_its_boxes_shutdown(self):
         with tempfile.TemporaryDirectory() as directory:
             store = JobStore(Path(directory) / 'jobs.sqlite3')

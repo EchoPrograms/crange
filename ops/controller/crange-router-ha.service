@@ -1,0 +1,16 @@
+[Unit]
+Description=Reconcile CRANGE native HA router assignments
+After=network-online.target crange-proxmox-compat.service
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=crange
+Group=crange
+Environment=HOME=/home/crange
+WorkingDirectory=/home/crange/crange
+ExecStart=/usr/bin/python3 /home/crange/crange/scripts/crange_router_ha_service.py
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+TimeoutStartSec=10min

@@ -1,0 +1,11 @@
+[Unit]
+Description=Check CRANGE router HA recovery and node reconnects
+
+[Timer]
+OnBootSec=30s
+OnUnitInactiveSec=30s
+AccuracySec=5s
+Unit=crange-router-ha.service
+
+[Install]
+WantedBy=timers.target

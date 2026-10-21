@@ -5,9 +5,11 @@ const fs = require('node:fs');
 const vm = require('node:vm');
 const directives = {}, configs = [];
 const moduleStub = {config(args) {configs.push(args.at(-1));return this;},run() {return this;},directive(name,args) {directives[name]=args.at(-1);return this;}};
-const document = {addEventListener(){},removeEventListener(){}};
-const local=new Map(),sessionLocal=new Map(),events={};const handle={addEventListener(n,f){events[n]=f;},removeEventListener(){},setPointerCapture(){}};const shell={style:{},offsetWidth:700,offsetHeight:44,classList:{toggle(){}},getBoundingClientRect(){return{left:parseInt(this.style.left||10),top:parseInt(this.style.top||10)}}};
-const sandbox={URL,Math,Date,Object,angular:{module(){return moduleStub;}},document,window:{confirm(){return true;},innerWidth:1400,innerHeight:900,addEventListener(){},removeEventListener(){},requestAnimationFrame(fn){fn();},sessionStorage:{getItem(k){return sessionLocal.get(k);},setItem(k,v){sessionLocal.set(k,v);}},localStorage:{getItem(k){return local.get(k);},setItem(k,v){local.set(k,v);}}},navigator:{},Intl,Number};
+const dragClasses=new Set();const document = {addEventListener(){},removeEventListener(){},dispatchEvent(){},documentElement:{classList:{add(n){dragClasses.add(n)},remove(n){dragClasses.delete(n)}}}};
+const local=new Map(),sessionLocal=new Map(),events={},tabEvents={};const handle={addEventListener(n,f){events[n]=f;},removeEventListener(){},setPointerCapture(){},focus(){}};
+const reopen={addEventListener(n,f){tabEvents[n]=f;},removeEventListener(){},setPointerCapture(){},focus(){},offsetWidth:18,offsetHeight:56};
+const shell={style:{},offsetWidth:700,offsetHeight:44,classList:{toggle(){}},getBoundingClientRect(){return{left:parseInt(this.style.left||10),top:parseInt(this.style.top||10)}}};
+const sandbox={CustomEvent:class{constructor(type){this.type=type}},URL,Math,Date,Object,angular:{module(){return moduleStub;}},document,window:{confirm(){return true;},innerWidth:1400,innerHeight:900,addEventListener(){},removeEventListener(){},requestAnimationFrame(fn){fn();},sessionStorage:{getItem(k){return sessionLocal.get(k);},setItem(k,v){sessionLocal.set(k,v);}},localStorage:{getItem(k){return local.get(k);},setItem(k,v){local.set(k,v);}}},navigator:{},Intl,Number};
 vm.runInNewContext(fs.readFileSync('guacamole/extension/workspace.js','utf8'),sandbox);
 async function flush(){await new Promise(resolve=>setImmediate(resolve));}
 (async()=>{
@@ -30,7 +32,7 @@ async function flush(){await new Promise(resolve=>setImmediate(resolve));}
  const interval=fn=>{timers.push(fn);return fn;};interval.cancel=()=>{};
  const scope={menu:{shown:false},focusedClient:{id:'native-ci',name:'CI SSH',protocol:null,clientProperties:{scale:1}},$watch(name,fn){watchers[name]=fn;},$on(){},$evalAsync(fn){fn();},disconnect(){}};
  let destination=null;const toolbar=directives.crangeSessionToolbar(http,interval,{url(value){destination=value;}},{getCurrentToken(){return 'test-token';},getDataSource(){return 'postgresql';}},preferenceService,{toggleFullscreenMode(){}});
- toolbar.link(scope,{0:{querySelector(s){return s.includes('shell')?shell:handle;}}});await flush();assert.equal(scope.crSession.box.resource_key,'container:ci');
+ toolbar.link(scope,{0:{querySelector(s){return s.includes('shell')?shell:s.includes('reopen')?reopen:handle;}}});await flush();assert.equal(scope.crSession.box.resource_key,'container:ci');
  scope.crSession.power('shutdown');await flush();scope.crSession.power('stop');await flush();
  const submissions=requests.filter(r=>r.operation==='submit');assert.deepEqual(submissions.map(r=>r.action),['shutdown','stop']);assert.equal(submissions[1].resource_key,'container:ci');assert.equal(submissions[1].project,100);
  scope.crSession.displayScale=1000;scope.crSession.setScale();assert.equal(scope.focusedClient.clientProperties.scale,1.5);
@@ -42,7 +44,17 @@ async function flush(){await new Promise(resolve=>setImmediate(resolve));}
  session.hostDraft.ip='192.0.2.20';session.saveHost();assert.equal(session.network.length,2);
  session.editHost(session.network[1]);session.deleteHost();assert.equal(session.network.length,1);
  session.hide();assert.equal(session.visible,false);session.show();assert.equal(session.visible,true);
- events.pointerdown({button:0,clientX:15,clientY:15,preventDefault(){},stopPropagation(){}});events.pointermove({clientX:500,clientY:300,preventDefault(){},stopPropagation(){}});events.pointerup({preventDefault(){},stopPropagation(){}});assert.equal(shell.style.left,'495px');assert.equal(shell.style.top,'295px');
+ const event=(extra={})=>({button:0,pointerId:1,currentTarget:handle,preventDefault(){},stopPropagation(){},...extra});
+ events.pointerdown(event({clientX:15,clientY:15}));assert(dragClasses.has('cr-session-dragging'));events.pointermove(event({clientX:500,clientY:300}));events.pointerup(event());assert(!dragClasses.has('cr-session-dragging'));assert.equal(shell.style.left,'495px');assert.equal(shell.style.top,'295px');
+ events.click(event());assert.equal(session.visible,true,'a drag must not collapse the toolbar');
+ events.click(event());assert.equal(session.visible,false,'clicking the handle collapses controls');
+ tabEvents.pointerdown(event({currentTarget:reopen,clientX:18,clientY:300}));tabEvents.pointermove(event({currentTarget:reopen,clientX:1395,clientY:500}));tabEvents.pointerup(event({currentTarget:reopen}));
+ assert.equal(shell.style.left,'1382px','collapsed tab snaps flush to the right edge');
+ tabEvents.click(event());assert.equal(session.visible,false,'dragging the tab must not expand it');
+ tabEvents.click(event());assert.equal(session.visible,true);assert.equal(shell.style.left,'495px','expanded toolbar retains its floating position');
+ events.pointerdown(event({clientX:500,clientY:300}));events.pointermove(event({pointerId:2,clientX:900,clientY:700}));assert.equal(shell.style.left,'495px','second pointer cannot steal a drag');
+ events.pointercancel(event());events.pointerdown(event({clientX:500,clientY:300}));events.pointerup(event());events.click(event());assert.equal(session.visible,false,'a cancelled gesture must not break the next click');
+ watchers['menu.shown'](true);assert.equal(session.visible,true,'native menu shortcut expands the docked controls');assert.equal(session.panel,'options');
  assert.equal(requests.filter(r=>r.operation==='submit').length,2,'map edits never submit server jobs');
  console.log('Guacamole workspace: preference validation, native template preservation, authorized power payload and force-stop override passed.');
 })().catch(error=>{console.error(error);process.exitCode=1;});

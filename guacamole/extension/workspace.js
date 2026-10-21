@@ -111,9 +111,9 @@
     }]);
 
     var toolbar = `
-<div class="cr-session-shell" ng-class="{'align-right': crSession.alignment === 'right'}">
+<div class="cr-session-shell" ng-class="{'align-right': crSession.alignment === 'right', 'is-collapsed': !crSession.visible}">
   <div class="cr-session-toolbar" ng-show="crSession.visible" role="toolbar" aria-label="Remote session controls">
-    <button type="button" class="cr-session-icon cr-session-drag" aria-label="Move session toolbar" crange-help="Drag to move. Arrow keys move the toolbar; Home resets its position">${icon('drag')}</button>
+    <button type="button" class="cr-session-icon cr-session-drag" aria-label="Collapse session controls" aria-expanded="true" crange-help="Click to collapse; drag to move. Arrow keys move the toolbar; Home resets its position">${icon('drag')}</button>
     ${button('home', 'Return to project', 'crSession.home()')}
     <button type="button" class="cr-session-disconnect" ng-click="crSession.disconnect()" crange-help="Disconnect the current remote session. The server keeps running">Disconnect</button>
     <button type="button" class="cr-session-name cr-session-selector" ng-click="crSession.toggle('connections')" aria-expanded="{{crSession.panel === 'connections'}}" aria-label="Select connections"><span>{{focusedClient.name || getName(clientGroup)}}</span><span class="cr-protocol-label" ng-if="focusedClient.protocol">{{focusedClient.protocol | uppercase}}</span><span class="cr-session-count" ng-if="clientGroup.clients.length > 1">{{clientGroup.clients.length}} selected</span><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="m5 8 5 5 5-5"/></svg></button>
@@ -123,7 +123,7 @@
     <button type="button" ng-click="crSession.toggle('options')" aria-expanded="{{crSession.panel === 'options'}}">${icon('options')}<span>Options</span></button>
     ${button('close', 'Hide session toolbar (Ctrl+Alt+Shift to reopen)', 'crSession.hide()')}
   </div>
-  <button type="button" class="cr-session-reopen" ng-if="!crSession.visible" ng-click="crSession.show()" aria-label="Show session controls">${icon('options')}<span>Session controls</span></button>
+  <button type="button" class="cr-session-reopen" ng-show="!crSession.visible" aria-label="Show session controls" aria-expanded="false" crange-help="Click to expand; drag along the screen edge. Arrow keys move the tab"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2.5" aria-hidden="true"><path d="m7 4 6 6-6 6"/></svg></button>
   <section class="cr-session-popover cr-session-connections" ng-if="crSession.panel === 'connections'" aria-label="Select connections">
     <header><h2>Connections</h2>${button('close', 'Close connection selector', 'crSession.close()')}</header>
     <p class="cr-help">Select connections to view together. Unchecking removes a connection from this view.</p>
@@ -251,8 +251,8 @@
             s.setScale = function () { var client = scope.focusedClient, scale = Number(s.displayScale); if (client && scale >= 0.1 && scale <= 3) { client.clientProperties.autoFit = false; client.clientProperties.scale = scale; } };
             s.close = function () { s.panel = null; s.advanced = false; scope.menu.shown = false; };
             s.toggle = function (panel) { if (s.panel === panel) s.close(); else { s.panel = panel; s.advanced = false; scope.menu.shown = true; } };
-            s.show = function () { s.visible = true; saveLocal(userKey + '/hidden', false); window.requestAnimationFrame(clampToolbar); };
-            s.hide = function () { s.close(); s.visible = false; saveLocal(userKey + '/hidden', true); window.requestAnimationFrame(clampToolbar); };
+            s.show = function () { s.visible = true; saveLocal(userKey + '/hidden', false); window.requestAnimationFrame(function () { if(!position)position={x:s.alignment==='right'?window.innerWidth-shell.offsetWidth-10:10,y:10};clampToolbar(); handle.focus(); }); };
+            s.hide = function () { s.close(); var rect=shell.getBoundingClientRect(); position={x:rect.left,y:rect.top};saveLocal(userKey+'/position',position);dock=nearestEdge(rect.left+16,rect.top+16); saveLocal(userKey+'/dock',dock); s.visible = false; saveLocal(userKey + '/hidden', true); window.requestAnimationFrame(function () { clampToolbar(); reopen.focus(); }); };
             function returnToProject(){if(s.box){try{window.sessionStorage.setItem('crange-return-project',String(s.box.project));window.localStorage.setItem('crange-selected-project',String(s.box.project));}catch(ignored){}}$location.url('/');}
             s.home = function () { if (prefs.crangeExitBehavior === 'disconnect') scope.disconnect(); s.close(); returnToProject(); };
             s.disconnect = function () { scope.disconnect(); s.close(); returnToProject(); };
@@ -287,7 +287,7 @@
             scope.$watch('focusedClient.clientProperties.scale', function (scale) { if (scale >= 0.1 && scale <= 3) s.displayScale = Math.round(scale * 100) / 100; });
             scope.$watch('focusedClient.name', function () { matchClient(); status(); });
             scope.$watch('focusedClient.protocol', function () { matchClient(); status(); });
-            scope.$watch('menu.shown', function (shown) { if (shown && !s.panel) { s.visible = true; s.panel = 'options'; } else if (!shown) { s.panel = null; s.advanced = false; } });
+            scope.$watch('menu.shown', function (shown) { if (shown && !s.panel) { if(!s.visible)s.show();s.panel = 'options'; } else if (!shown) { s.panel = null; s.advanced = false; } });
             function keydown(event) { if (event.key === 'Escape' && s.panel) { event.preventDefault(); scope.$evalAsync(s.close); } }
             document.addEventListener('keydown', keydown);
             function refreshNetwork() {
@@ -295,12 +295,25 @@
             }
             refreshNetwork();
             var statusTimer = $interval(status, 10000), networkTimer = $interval(refreshNetwork, 30000);
-            var shell = element[0].querySelector('.cr-session-shell'), handle = element[0].querySelector('.cr-session-drag'), drag = null;
+            var shell = element[0].querySelector('.cr-session-shell'), handle = element[0].querySelector('.cr-session-drag'), reopen=element[0].querySelector('.cr-session-reopen'), drag = null, suppressClick=false;
             var position = stored(userKey + '/position', null);
+            var dock=stored(userKey+'/dock',{edge:'left',offset:0.15});
+            if (!dock || ['left','right','top','bottom'].indexOf(dock.edge)<0 || !Number.isFinite(dock.offset)) dock={edge:'left',offset:0.15};
             if (stored(userKey + '/hidden', false)) s.visible = false;
+            function nearestEdge(x,y) {
+                var edges=[['left',x],['right',window.innerWidth-x],['top',y],['bottom',window.innerHeight-y]];
+                edges.sort(function(a,b){return a[1]-b[1];});
+                var edge=edges[0][0], vertical=edge==='left'||edge==='right';
+                return {edge:edge,offset:Math.max(0,Math.min(1,(vertical?y:x)/(vertical?window.innerHeight:window.innerWidth)))};
+            }
             function clampToolbar() {
                 if (!shell) return;
-                if (position && Number.isFinite(position.x) && Number.isFinite(position.y)) {
+                ['left','right','top','bottom'].forEach(function(edge){shell.classList.toggle('dock-'+edge,!s.visible&&dock.edge===edge);});
+                if (!s.visible) {
+                    var width=reopen.offsetWidth||18,height=reopen.offsetHeight||56;
+                    shell.style.left=Math.round(dock.edge==='left'?0:dock.edge==='right'?Math.max(0,window.innerWidth-width):Math.max(0,Math.min(window.innerWidth-width,dock.offset*window.innerWidth-width/2)))+'px';
+                    shell.style.top=Math.round(dock.edge==='top'?0:dock.edge==='bottom'?Math.max(0,window.innerHeight-height):Math.max(0,Math.min(window.innerHeight-height,dock.offset*window.innerHeight-height/2)))+'px';shell.style.right='auto';
+                } else if (position && Number.isFinite(position.x) && Number.isFinite(position.y)) {
                     shell.style.left = Math.round(Math.max(6, Math.min(position.x, window.innerWidth - shell.offsetWidth - 6))) + 'px';
                     shell.style.top = Math.round(Math.max(6, Math.min(position.y, window.innerHeight - shell.offsetHeight - 6))) + 'px'; shell.style.right = 'auto';
                 }
@@ -309,24 +322,49 @@
                 shell.classList.toggle('panels-left', rect.left > window.innerWidth / 2);
             }
             function pointerDown(event) {
-                if (event.button !== 0) return;
+                if (event.button !== 0 || drag || event.isPrimary === false) return;
                 event.preventDefault(); event.stopPropagation();
-                var rect = shell.getBoundingClientRect(); drag = {x: event.clientX - rect.left, y: event.clientY - rect.top};
-                if (handle.setPointerCapture) handle.setPointerCapture(event.pointerId);
+                suppressClick=false;
+                var rect = shell.getBoundingClientRect(),target=event.currentTarget;
+                drag = {id:event.pointerId,target:target,x:event.clientX-rect.left,y:event.clientY-rect.top,startX:event.clientX,startY:event.clientY,moved:false};
+                document.documentElement.classList.add('cr-session-dragging');
+                document.dispatchEvent(new CustomEvent('crange-session-drag-start'));
+                if (target.setPointerCapture) target.setPointerCapture(event.pointerId);
             }
-            function pointerMove(event) { if (!drag) return; event.preventDefault(); event.stopPropagation(); position = {x: event.clientX - drag.x, y: event.clientY - drag.y}; clampToolbar(); }
-            function pointerUp(event) { if (!drag) return; event.preventDefault(); event.stopPropagation(); drag = null; var rect = shell.getBoundingClientRect(); position = {x: rect.left, y: rect.top}; saveLocal(userKey + '/position', position); }
+            function pointerMove(event) {
+                if (!drag || event.pointerId!==drag.id) return;
+                event.preventDefault();event.stopPropagation();
+                if(Math.hypot(event.clientX-drag.startX,event.clientY-drag.startY)<5&&!drag.moved)return;
+                drag.moved=true;
+                if(s.visible)position={x:event.clientX-drag.x,y:event.clientY-drag.y};
+                else dock=nearestEdge(event.clientX,event.clientY);
+                clampToolbar();
+            }
+            function finishDrag(event,cancelled) {
+                if(!drag || (event && event.pointerId!==undefined && event.pointerId!==drag.id))return;
+                var previous=drag;drag=null;suppressClick=previous.moved||cancelled;
+                document.documentElement.classList.remove('cr-session-dragging');
+                if(previous.target.hasPointerCapture&&previous.target.hasPointerCapture(previous.id))previous.target.releasePointerCapture(previous.id);
+                if(s.visible){var rect=shell.getBoundingClientRect();position={x:rect.left,y:rect.top};saveLocal(userKey+'/position',position);}
+                else saveLocal(userKey+'/dock',dock);
+            }
+            function pointerUp(event){finishDrag(event,false);}
+            function pointerCancel(event){finishDrag(event,true);}
+            function blurred(){finishDrag(null,true);}
+            function toggleControls(event){event.preventDefault();event.stopPropagation();if(suppressClick){suppressClick=false;return;}scope.$evalAsync(s.visible?s.hide:s.show);}
             function moveKeys(event) {
                 if (['ArrowLeft','ArrowRight','ArrowUp','ArrowDown','Home'].indexOf(event.key) === -1) return;
                 event.preventDefault(); event.stopPropagation(); var rect = shell.getBoundingClientRect(), step = event.shiftKey ? 40 : 10;
-                position = event.key === 'Home' ? {x: 10, y: 10} : {x: rect.left + (event.key === 'ArrowRight' ? step : event.key === 'ArrowLeft' ? -step : 0), y: rect.top + (event.key === 'ArrowDown' ? step : event.key === 'ArrowUp' ? -step : 0)};
-                clampToolbar(); saveLocal(userKey + '/position', position);
+                if(s.visible)position = event.key === 'Home' ? {x: 10, y: 10} : {x: rect.left + (event.key === 'ArrowRight' ? step : event.key === 'ArrowLeft' ? -step : 0), y: rect.top + (event.key === 'ArrowDown' ? step : event.key === 'ArrowUp' ? -step : 0)};
+                else dock=event.key==='Home'?{edge:'left',offset:0.15}:nearestEdge(rect.left+(reopen.offsetWidth||18)/2+(event.key==='ArrowRight'?step:event.key==='ArrowLeft'?-step:0),rect.top+(reopen.offsetHeight||56)/2+(event.key==='ArrowDown'?step:event.key==='ArrowUp'?-step:0));
+                clampToolbar(); saveLocal(userKey + (s.visible?'/position':'/dock'), s.visible?position:dock);
             }
-            handle.addEventListener('pointerdown', pointerDown); handle.addEventListener('pointermove', pointerMove); handle.addEventListener('pointerup', pointerUp); handle.addEventListener('pointercancel', pointerUp); handle.addEventListener('keydown', moveKeys);
-            window.addEventListener('resize', clampToolbar); window.requestAnimationFrame(clampToolbar);
+            function bind(target,method){[['pointerdown',pointerDown],['pointermove',pointerMove],['pointerup',pointerUp],['pointercancel',pointerCancel],['lostpointercapture',pointerCancel],['keydown',moveKeys],['click',toggleControls]].forEach(function(pair){target[method](pair[0],pair[1]);});}
+            bind(handle,'addEventListener');bind(reopen,'addEventListener');
+            window.addEventListener('blur',blurred);window.addEventListener('resize', clampToolbar); window.requestAnimationFrame(clampToolbar);
             scope.$on('$destroy', function () {
                 destroyed = true; document.removeEventListener('keydown', keydown); window.removeEventListener('resize', clampToolbar);
-                handle.removeEventListener('pointerdown', pointerDown); handle.removeEventListener('pointermove', pointerMove); handle.removeEventListener('pointerup', pointerUp); handle.removeEventListener('pointercancel', pointerUp); handle.removeEventListener('keydown', moveKeys);
+                blurred();window.removeEventListener('blur',blurred);bind(handle,'removeEventListener');bind(reopen,'removeEventListener');
                 $interval.cancel(statusTimer); $interval.cancel(networkTimer); if (poll) $interval.cancel(poll);
             });
         }};

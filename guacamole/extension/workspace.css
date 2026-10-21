@@ -124,6 +124,23 @@
 /* The toolbar moves without capturing pointer events from the remote desktop. */
 .cr-session-drag { cursor: grab !important; touch-action: none; }
 .cr-session-drag:active { cursor: grabbing !important; }
+.cr-session-dragging .cr-tooltip { display: none !important; }
+.cr-session-shell.is-collapsed { max-width: 56px; }
+.cr-session-reopen { width: 18px; min-width: 18px; height: 56px; min-height: 18px; padding: 2px !important; cursor: grab !important; touch-action: none; color: var(--cr-text) !important; background: #171717 !important; border: 1px solid var(--cr-line-strong) !important; border-radius: 0 !important; }
+.cr-session-reopen svg { width: 12px; height: 12px; }
+.dock-right .cr-session-reopen svg { transform: rotate(180deg); }
+.dock-top .cr-session-reopen svg { transform: rotate(90deg); }
+.dock-bottom .cr-session-reopen svg { transform: rotate(-90deg); }
+.dock-top .cr-session-reopen, .dock-bottom .cr-session-reopen { width: 56px; min-width: 56px; height: 18px; }
+.cr-session-reopen:active { cursor: grabbing !important; }
+.dock-left .cr-session-reopen { border-left: 0 !important; }
+.dock-right .cr-session-reopen { border-right: 0 !important; }
+.dock-top .cr-session-reopen { border-top: 0 !important; }
+.dock-bottom .cr-session-reopen { border-bottom: 0 !important; }
+@media (pointer: coarse) {
+ .cr-session-reopen { width: 24px; min-width: 24px; }
+ .dock-top .cr-session-reopen, .dock-bottom .cr-session-reopen { width: 56px; min-width: 56px; height: 24px; }
+}
 .cr-session-shell .cr-session-popover { left: 0; right: auto; }
 .cr-session-shell.panels-left .cr-session-popover { left: auto; right: 0; }
 .cr-session-shell.panels-up .cr-session-popover { top: auto; bottom: calc(100% + 8px); }

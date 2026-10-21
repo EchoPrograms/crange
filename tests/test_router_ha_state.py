@@ -31,7 +31,7 @@ def fixture():
     registry = {'schema_version': 1, 'project_id': 100, 'state_lineage': state['lineage'],
                 'routers': {ADDRESS: {'vmid': 118, 'identity_sha256': ha.digest(ha.config_identity(config)),
                                      'eligible_nodes': ['proxmox2', 'proxmox3', 'proxmox4']}}}
-    resource = {'vmid': 118, 'type': 'lxc', 'node': 'proxmox4', 'status': 'running', 'name': 'p100t002-router'}
+    resource = {'vmid': 118, 'type': 'lxc', 'node': 'proxmox4', 'status': 'running', 'name': 'p100t002-router', 'pool':'crange-iac'}
     status = [{'type': 'quorum', 'quorate': 1},
               {'type': 'master', 'node': 'proxmox3', 'status': 'proxmox3 (active, now)', 'timestamp': 995},
               {'type': 'lrm', 'node': 'proxmox4', 'status': 'proxmox4 (active, now)', 'timestamp': 995},

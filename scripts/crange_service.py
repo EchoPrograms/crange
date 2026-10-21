@@ -85,6 +85,9 @@ def install(username, root):
     for directory in (web_home / '.local', web_home / '.local/share', target_auth.parent):
         os.chown(directory, web.pw_uid, group.gr_gid)
         os.chmod(directory, 0o710)
+    # Both service accounts write this SQLite database. Its journal must be
+    # creatable by the worker, with the same shared group as the database.
+    os.chmod(target_auth.parent, 0o2770)
     if not target_auth.exists():
         original = Path(account.pw_dir) / '.local/share/crange/auth.sqlite3'
         if original.is_file():

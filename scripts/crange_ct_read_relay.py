@@ -53,7 +53,7 @@ RELAY_CODE_SHA256 = globals().get('_RELAY_SOURCE_DIGEST') or hashlib.sha256(Path
 NETWORK_GUAC_NODE = 'proxmox4'
 NETWORK_GUAC_VMID = 110
 NETWORK_GUAC_ADDRESS = '10.60.0.10'
-ROUTER_HA_OPERATOR_SHA256 = '9697231ce5c180c95624a76fe813991ca352d2265c99835b001abd1e1c7b19ac'
+ROUTER_HA_OPERATOR_SHA256 = '086a64f5a69385fb4e1fe20a9fbbbf75243b42cc5cd0755056535d2f2fac94e2'
 WINDOWS_SEED_CLEANUP_DIR = Path('/var/lib/crange-windows-seed-cleanup')
 WINDOWS_SEED_CLEANUP_NODE_IPS = {f'proxmox{i}': f'10.0.0.{100 + i}' for i in range(1, 7)}
 
@@ -74,6 +74,18 @@ def identity_module_preamble():
 def validate_request(value, config, peer_uid):
     if peer_uid != config['peer_uid']:
         raise ValueError('Service user authentication failed.')
+    if isinstance(value,dict) and value.get('command')=='router-ha-refresh':
+        if (set(value)!={'command','node','project_id'} or value.get('node')!='proxmox4' or
+                type(value.get('project_id')) is not int or not 1<=value['project_id']<=255 or value['project_id'] in (60,61)):
+            raise ValueError('Invalid fixed router HA refresh request.')
+        return 'proxmox4',None,value['command'],None
+    if isinstance(value,dict) and value.get('command')=='router-ha-enroll':
+        if (set(value)!={'command','node','project_id','router_key','plan_id'} or value.get('node')!='proxmox4' or
+                type(value.get('project_id')) is not int or not 1<=value['project_id']<=255 or value['project_id'] in (60,61) or
+                not re.fullmatch(r'router:(?:project|staging|team:(?:[1-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-3])|custom:[a-z][a-z0-9_-]{0,63})',str(value.get('router_key',''))) or
+                not re.fullmatch(r'[a-f0-9]{32}',str(value.get('plan_id','')))):
+            raise ValueError('Invalid fixed router HA enrollment request.')
+        return 'proxmox4',None,value['command'],None
     if isinstance(value,dict) and value.get('command') == 'router-ha-retire':
         if (set(value) != {'command','node','project_id','vmid'} or value.get('node') != 'proxmox4' or
                 type(value.get('project_id')) is not int or not 1 <= value['project_id'] <= 255 or
@@ -986,14 +998,17 @@ def recover_export_lock(request, *, read=None, execute=None, boot_time=None, evi
 
 
 def host_read(request, marker, source_marker=None, source_pool='crange-probes', *, policy=None):
-    if request.get('command') == 'router-ha-retire':
+    if request.get('command') in ('router-ha-retire','router-ha-enroll','router-ha-refresh'):
         if socket.gethostname().split('.')[0] != 'proxmox4':raise ValueError('Router HA retirement must use the core.')
         helper=Path('/usr/local/lib/crange/router_ha_operator.py');info=helper.lstat()
         if (not stat.S_ISREG(info.st_mode) or info.st_uid != 0 or info.st_mode & 0o022 or
                 hashlib.sha256(helper.read_bytes()).hexdigest() != ROUTER_HA_OPERATOR_SHA256):
             raise ValueError('Router HA operator differs from its trusted source.')
-        return subprocess.check_output(['/usr/bin/python3',str(helper),'retire',str(request['project_id']),
-                                        '--vmid',str(request['vmid'])],text=True,timeout=55).strip()
+        args=(['refresh',str(request['project_id'])] if request['command']=='router-ha-refresh' else
+              ['automatic',str(request['project_id']),request['router_key'],'--plan-id',request['plan_id']]
+              if request['command']=='router-ha-enroll' else ['retire',str(request['project_id']),'--vmid',str(request['vmid'])])
+        return subprocess.check_output(['/usr/bin/python3',str(helper),*args],text=True,
+                                       timeout=300 if request['command'] in ('router-ha-enroll','router-ha-refresh') else 55).strip()
     if request.get('command') == 'capture-export-unlock':
         if socket.gethostname().split('.')[0] != request['node']: raise ValueError('Export recovery reached another node.')
         return json.dumps(recover_export_lock(request))
@@ -1216,7 +1231,7 @@ print(json.dumps({'generalized':True,'previous_machine_id':old,'machine_id_empty
 
 def dispatch(value, config, peer_uid, run=subprocess.run):
     node, vmid, command, marker = validate_request(value, config, peer_uid)
-    if command == 'router-ha-retire':
+    if command in ('router-ha-retire','router-ha-enroll','router-ha-refresh'):
         if socket.gethostname().split('.')[0] != 'proxmox4':raise ValueError('Router HA retirement requires the local core relay.')
         return {'value':host_read(value,marker,policy=config)}
     if command in ('windows-seed-cleanup-ready', 'windows-seed-cleanup'):
@@ -1275,7 +1290,9 @@ def dispatch(value, config, peer_uid, run=subprocess.run):
 def audit_scope(request, passed):
     if not passed:
         return {}
-    fields = (('node','command','project_id','vmid') if request.get('command') == 'router-ha-retire'
+    fields = (('node','command','project_id') if request.get('command')=='router-ha-refresh' else
+              ('node','command','project_id','router_key','plan_id') if request.get('command')=='router-ha-enroll' else
+              ('node','command','project_id','vmid') if request.get('command') == 'router-ha-retire'
               else ('node', 'command') if request.get('command','').startswith(('range-storage-','range-library-')) else ('node', 'command') if request.get('command') in ('sealed-windows-source-proof','capture-bridge-prepare')
               else ('command',) if request.get('command') == 'windows-seed-cleanup-ready'
               else ('command', 'build_id') if request.get('command') == 'windows-seed-cleanup'

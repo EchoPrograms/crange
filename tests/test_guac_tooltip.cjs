@@ -1,0 +1,16 @@
+'use strict';
+const assert=require('node:assert/strict'),fs=require('node:fs'),vm=require('node:vm');
+let factory;const events={},targetEvents={},classes=new Set(),timers=new Map(),children=[];let next=0;
+const target={getAttribute(){return null},setAttribute(){},removeAttribute(){},getBoundingClientRect(){return{left:20,bottom:50,top:20}},addEventListener(n,f){targetEvents[n]=f},removeEventListener(n){delete targetEvents[n]}};
+const document={head:null,documentElement:{classList:{contains(n){return classes.has(n)}}},addEventListener(n,f){events[n]=f},removeEventListener(n){delete events[n]},createElement(){return{style:{},offsetWidth:120,offsetHeight:30,setAttribute(){},remove(){children.splice(children.indexOf(this),1)}}},body:{appendChild(n){children.push(n)}}};
+const moduleStub={config(){return this},run(){return this},directive(n,a){if(n==='crangeHelp')factory=a.at(-1);return this}};
+vm.runInNewContext(fs.readFileSync('guacamole/extension/ui.js','utf8'),{angular:{module(){return moduleStub}},document,window:{innerWidth:1200,innerHeight:800,setTimeout(fn){const id=++next;timers.set(id,fn);return id},clearTimeout(id){timers.delete(id)}},URL});
+let destroy;factory().link({$on(_n,fn){destroy=fn}},{0:target},{crangeHelp:'Drag to move'});
+const flush=()=>{const pending=[...timers.values()];timers.clear();pending.forEach(fn=>fn())};
+targetEvents.mouseenter();flush();assert.equal(children.length,1);
+classes.add('cr-session-dragging');events['crange-session-drag-start']();assert.equal(children.length,0);
+targetEvents.mouseenter();flush();assert.equal(children.length,0);
+classes.delete('cr-session-dragging');targetEvents.mouseenter();targetEvents.pointerdown();flush();assert.equal(children.length,0);
+targetEvents.mouseenter();classes.add('cr-session-dragging');flush();assert.equal(children.length,0,'pending help must not appear during drag');
+classes.delete('cr-session-dragging');targetEvents.mouseenter();flush();assert.equal(children.length,1);destroy();assert.equal(children.length,0);assert.equal(events['crange-session-drag-start'],undefined);
+console.log('Guacamole hover help: immediate drag dismissal, suppressed pending help and listener cleanup passed.');

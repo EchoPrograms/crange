@@ -2011,3 +2011,39 @@ Thirteen focused tests and real namespace recovery passed. See
 The separate automatic router-HA enrollment/reconciliation implementation
 remains in progress; the host recovery work does not constitute its deployment
 or a physical failover acceptance test.
+
+
+### Router HA automation and interactive controls — October 20
+
+All seven Project100 routers are enrolled in native HA on the core shared
+store. The two original Proxmox1 routers were converted in place after the host
+returned, then native HA moved them to Proxmox4 and the scheduled observer
+adopted their assignments. Proxmox1 remains excluded as a recovery destination.
+Proxmox4 is still the required storage/controller core. Ordinary team guests
+remain assigned to their nodes, per the agreed scope.
+
+Automatic creation enrollment, exact-state adoption, and verified readmission
+of a returning worker passed on disposable Project253. Native relocation and
+scheduled adoption passed; a worker-eligibility simulation passed. Physical
+host-loss fencing/rejoin was not tested. The fixture's Ansible SSH timeout is
+recorded separately from successful HA acceptance. Its three routers, networks,
+route/gateway, configuration and empty registration were removed. A shared
+SQLite journal-directory permission prevented the final purge audit; the
+installer and live directory were repaired, a worker write/rollback passed,
+and the missing audit was recorded.
+
+The controller now has four concurrent routine power workers plus its separate
+normal and emergency lanes. Same-guest operations remain ordered and conflicting
+infrastructure work retains its project scope. The Access toolbar collapses to
+a slim draggable edge handle, and hover help closes/suppresses during drag.
+Running labels use neutral text with pulsing green dots and reduced-motion
+support. These changes are deployed. Full Python regression: 1,202 tests, one
+skipped; Guacamole JavaScript interaction checks pass. See
+[router automation](router-ha-automation.md),
+[live HA evidence](router-ha-automatic-acceptance.json), and
+[power/session behavior](power-queue-and-session-ui.md).
+
+A new user request to repair all VM/container placement templates is underway.
+Five Linux maintained-base publication jobs were requeued after checking their
+retained allocations. This does not assert their publication or all-node
+readiness; the earlier missing-image-ID and failed-publication records remain.

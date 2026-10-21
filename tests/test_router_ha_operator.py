@@ -47,6 +47,30 @@ class RouterOperatorTests(unittest.TestCase):
                 patch.object(operator,'api',side_effect=[None,[{**task,'id':'999'}]]):
             with self.assertRaisesRegex(ValueError,'uncertain'):
                 operator.task({'node':'proxmox2','vmid':118},Path(temp)/'receipt.json','move-rootfs','/nodes/proxmox2/lxc/118/move_volume')
+    def test_proxied_start_is_observed_while_pending_without_resubmission(self):
+        with tempfile.TemporaryDirectory() as temp:
+            plan={'node':'proxmox2','vmid':118}
+            native={'type':'vzstart','id':'118','starttime':1000,'upid':'UPID:proxmox2:ABC:'}
+            with patch.object(operator.time,'time',return_value=1000),patch.object(operator.time,'sleep'),\
+                    patch.object(operator,'api',side_effect=[None,[native],{'status':'running'},
+                        {'status':'stopped','exitstatus':'OK'}]) as api:
+                operator.task(plan,Path(temp)/'receipt.json','start','/nodes/proxmox2/lxc/118/status/start')
+            self.assertEqual(sum(len(c.args)>1 and c.args[1]=='create' for c in api.call_args_list),1)
+
+    def test_systemd_warning_requires_exact_log_and_running_guest(self):
+        warning='WARN: Systemd 252 detected. You may need to enable nesting.'
+        for messages,running,accepted in [([warning,'','TASK WARNINGS: 1'],True,True),
+                ([warning,'TASK WARNINGS: 1'],False,False),
+                (['WARN: disk unavailable','TASK WARNINGS: 1'],True,False)]:
+            with self.subTest(messages=messages,running=running),tempfile.TemporaryDirectory() as temp:
+                answers=['UPID:proxmox2:ABC:',{'status':'stopped','exitstatus':'WARNINGS: 1'},
+                    [{'t':message} for message in messages],{'status':'running' if running else 'stopped'}]
+                with patch.object(operator,'api',side_effect=answers):
+                    args=({'node':'proxmox2','vmid':118},Path(temp)/'receipt.json','start','/nodes/proxmox2/lxc/118/status/start')
+                    if accepted:operator.task(*args)
+                    else:
+                        with self.assertRaisesRegex(ValueError,'task failed'):operator.task(*args)
+
     def test_wrong_operator_host_and_invalid_scope_never_call_api(self):
         for uid,host,project,key in [(1000,'proxmox4',100,'router:project'),(0,'proxmox2',100,'router:project'),
                 (0,'proxmox4',60,'router:project'),(0,'proxmox4',100,'vm:server'),

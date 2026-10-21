@@ -61,8 +61,9 @@
                 }
                 function show() {
                     hide();
-                    if (!attrs.crangeHelp) return;
+                    if (!attrs.crangeHelp || document.documentElement.classList.contains('cr-session-dragging')) return;
                     timer = window.setTimeout(function () {
+                        if (document.documentElement.classList.contains('cr-session-dragging')) return;
                         tooltip = document.createElement('div');
                         tooltip.className = 'cr-tooltip';
                         tooltip.id = tooltipId;
@@ -81,7 +82,9 @@
                 target.addEventListener('focus', show);
                 target.addEventListener('blur', hide);
                 target.addEventListener('click', hide);
+                target.addEventListener('pointerdown', hide);
                 target.addEventListener('keydown', keydown);
+                document.addEventListener('crange-session-drag-start', hide);
                 scope.$on('$destroy', function () {
                     hide();
                     target.removeEventListener('mouseenter', show);
@@ -89,7 +92,9 @@
                     target.removeEventListener('focus', show);
                     target.removeEventListener('blur', hide);
                     target.removeEventListener('click', hide);
+                    target.removeEventListener('pointerdown', hide);
                     target.removeEventListener('keydown', keydown);
+                    document.removeEventListener('crange-session-drag-start', hide);
                 });
             }
         };
