@@ -7,6 +7,7 @@ Administrator base publication uses fixed source IDs on Proxmox4. Sources remain
 - Capacity discovery restarts once after a proven guest move, so HA relocation cannot omit or double-charge commitments.
 - Temporary API capacity errors retry reads and observation of the original provider task only. Mutations are never replayed.
 - Maintained Debian and Ubuntu VM bases may test a 1 GB / 1 core verification profile on smaller nodes. This remains a proposal until the real clone boot, unique identity and cleanup pass; deployment sizes remain user-configured.
+- A terminal container restore failure caused by temporary library activation can release its exact failed reservation only after fresh node inventory, local-volume absence, task status and archive-pin checks. A reused VMID on another node is preserved; an uncertain task or remaining volume blocks recovery.
 - Capture and cache storage preferences fall back to another approved pool only before allocation. Memory, CPU, disk, quota, node admission, ownership and snapshot requirements still apply. An uncertain allocation retains its exact journal and reservation.
 - Disconnected systemd probes may clear only a sole `systemd-networkd-wait-online.service` failure. No services are masked or disabled, and subsequent readiness must be normal. Other failed units remain errors.
 - Debian 13 derivatives enable LXC nesting while retaining unprivileged isolation, matching the scenario-container module. This addresses systemd credential/mount failures on current PVE hosts.
@@ -22,6 +23,6 @@ Proxmox1 remains reserved for routers. Proxmox4 remains the required storage/quo
 
 ## Validation
 
-The repair suite passed 1,216 tests with one existing skip before final live publication acceptance. Live image/cache results are recorded separately when acceptance completes.
+The repair suite passed 1,220 tests with one existing skip before final live publication acceptance. Live image/cache results are recorded separately when acceptance completes.
 
 Proxmox documents the systemd nesting requirement in its [container documentation change](https://lists.proxmox.com/pipermail/pve-devel/2025-October/076158.html).

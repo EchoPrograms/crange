@@ -415,6 +415,55 @@ def reserve_cache_storage(ledger, *, datastore_id, auto_storage=False, **scope):
     raise PlacementError('No approved cache datastore has headroom: ' + json.dumps(failures, sort_keys=True))
 
 
+def reconcile_failed_container_restore(api, ledger, journal, record, image):
+    """Retire a failed library restore only after proving its allocation absent."""
+    from urllib.parse import quote
+    job,node,vmid=record.get('job_id'),record.get('node'),record.get('template_id')
+    tasks=record.get('provider_tasks',[]);storage=record.get('datastore_id')
+    if (record.get('state')!='allocated' or record.get('kind')!='lxc' or record.get('probe_id') is not None or
+            type(vmid) is not int or record.get('allocation_node')!=node or len(tasks)!=1 or image.get('kind')!='container' or
+            not re.fullmatch(r'proxmox[1-6]',str(node)) or not re.fullmatch(r'[a-zA-Z0-9_-]+',str(storage)) or
+            record.get('source_node')!=image.get('artifact',{}).get('node') or
+            record.get('source_id')!=image.get('artifact',{}).get('source_id') or
+            not re.fullmatch(r'cache-[a-f0-9]{32}',str(job)) or
+            not re.fullmatch(rf'UPID:{re.escape(str(node))}:[A-Fa-f0-9]+:[A-Fa-f0-9]+:[A-Fa-f0-9]+:vzrestore:{vmid}:[^:\r\n]+:',str(tasks[0].get('upid',''))) or
+            tasks[0].get('node')!=node or record.get('artifact_sha256')!=image.get('artifact_sha256')):
+        raise DistributionError('Failed container restore is outside exact recovery scope.')
+    task=api.request('GET',f'/nodes/{node}/tasks/{quote(tasks[0]["upid"],safe="")}/status')
+    expected=f"unable to restore CT {vmid} - unable to activate storage 'crange-library' - directory '/mnt/pve/crange-library' does not exist or is unreachable"
+    if task.get('status')!='stopped' or not re.fullmatch(re.escape(expected)+r'\.?',str(task.get('exitstatus',''))):
+        raise DistributionError('Container restore is not the known terminal library-activation failure.')
+    saved=ledger.get_job(job);allocation=record.get('reservation',{})
+    if (saved.get('state')!='running' or saved.get('allocations')!=[allocation] or
+            allocation.get('operation')!='cache_prepare' or allocation.get('image')!=record.get('image_id') or
+            allocation.get('artifact_sha256')!=image.get('artifact_sha256') or
+            allocation.get('resolved',{}).get('node_name')!=node or
+            allocation.get('resolved',{}).get('datastore_id')!=storage):
+        raise DistributionError('Failed restore reservation differs; retain it.')
+    pin=_root()/'artifact-pins'/(job+'.json');value=json.loads(pin.read_text())
+    if value!={'job_id':job,'state':'active','volume_id':image.get('artifact',{}).get('volume_id'),'artifact_sha256':image.get('artifact_sha256')}:
+        raise DistributionError('Failed restore archive pin differs; retain it.')
+    live=api.request('GET','/cluster/resources',{'type':'vm'})
+    active=api.request('GET',f'/nodes/{node}/tasks',{'source':'active','limit':1000})
+    volumes=api.request('GET',f'/nodes/{node}/storage/{storage}/content')
+    if (not isinstance(live,list) or not isinstance(active,list) or len(active)>=1000 or not isinstance(volumes,list) or
+            any(row.get('node')==node and str(row.get('vmid'))==str(vmid) for row in live) or
+            any(str(row.get('id'))==str(vmid) or row.get('upid')==tasks[0]['upid'] for row in active) or
+            any(str(row.get('vmid'))==str(vmid) or re.search(rf'(?:vm|base)-{vmid}-',str(row.get('volid',''))) for row in volumes)):
+        raise DistributionError('Failed restore still has a guest, volume or active task; retain it.')
+    evidence={'verified':True,'inventory_complete':True,'target_absent':True,'node':node,'template_id':vmid,
+              'active_task_scan_complete':True,'history_scan_complete':True,'local_volumes_absent':True,
+              'failed_restore_upid':tasks[0]['upid'],'failed_restore_exitstatus':task['exitstatus'],
+              'vmid_present_elsewhere':any(str(row.get('vmid'))==str(vmid) for row in live),
+              'cluster_guest_inventory_sha256':hashlib.sha256(json.dumps(live,sort_keys=True,separators=(',',':')).encode()).hexdigest()}
+    tasks[0]['state']='confirmed-terminal'
+    record.update(state='reconciled-absent',absence_verified=True,absence_evidence=evidence)
+    journal(record)
+    ledger.reconcile_job(job,operation_terminal=True,allocations_reconciled=True)
+    pin.unlink()
+    print(f'Reconciled terminal failed restore {job}; no guest, volume or provider task was deleted or replayed.',flush=True)
+
+
 def prepare_cache(*, project_id, image_id, node_name, datastore_id='local-lvm',
                   additional_capacity=None, owner='cli', job_id=None, acceptance_policy_path=None, _controlled_acceptance_policy=None,
                   auto_storage=False):
@@ -479,6 +528,9 @@ def prepare_cache(*, project_id, image_id, node_name, datastore_id='local-lvm',
                     if (previous.get('image_id') == image_id and previous.get('node') == node_name and
                             (auto_storage or previous.get('datastore_id') == datastore_id) and previous.get('state') not in
                             ('evicted', 'cleaned-owned', 'reconciled-absent')):
+                        if previous.get('state')=='allocated' and previous.get('kind')=='lxc' and previous.get('provider_tasks'):
+                            reconcile_failed_container_restore(api,ledger,journal,previous,image)
+                            continue
                         if (_controlled_acceptance_policy is not None and image['kind']=='container'
                                 and previous.get('state') in ('converting-template','verifying')):
                             updated = _resume_accepted_container_restore(api,ledger,journal,policy,catalog,image,previous,project_id)

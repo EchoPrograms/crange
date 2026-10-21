@@ -1980,6 +1980,7 @@ def capture_container(api, *, project, node, source_id, name, description, slug,
                                     atomic_json(receipt_path,receipt)
                             if time.monotonic()>=deadline: raise
                             time.sleep(2)
+                    print(f'Captured container identity on {node}/{vmid}; preparing fresh clone identities.',flush=True)
                     prepared = (generalize or generalize_capture_container)(node, vmid, marker)
                     if (prepared.get('generalized') is not True or prepared.get('machine_id_empty') is not True
                             or prepared.get('previous_machine_id') != identity['source_identity']['machine_id']):
@@ -1995,10 +1996,12 @@ def capture_container(api, *, project, node, source_id, name, description, slug,
                 config = api.container(node, vmid)
                 if int(config.get('template', 0)) != 1 or _source_config_identity(config, vmid) != identity['source_config_sha256']:
                     raise DistributionError('Container template changed after identity capture.')
+            print(f'Exporting stopped container template {node}/{vmid} to the central library.',flush=True)
             export_image(api, node=node, kind='container', vmid=vmid, storage=backup,
                 job_id=export_job, journal=journal, hash_volume=SSHVolumeHasher(),
                 approved_backup_storage=map(tuple, policy.get('approved_backup_storage', [])),
                 identity_record=identity)
+            print('Container archive verified; checking an independent disposable clone.',flush=True)
         if receipt.get('state')=='verified':
             _verified_capture_probe({**receipt,'probe_job':receipt.get('probe_job',probe_job)},identity,project)
             print('Reusing accepted immutable container and completed clone verification; no new copy or probe.',flush=True)

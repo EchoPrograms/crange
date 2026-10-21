@@ -875,7 +875,13 @@ class FileJournal:
                 raise DistributionError('Completed export requires one verified artifact and terminal UPID.')
         if new_state == 'reconciled-absent':
             evidence = incoming.get('absence_evidence')
-            if (old_state != 'allocated' or old_tasks or new_tasks or
+            failed_restore = (incoming.get('kind')=='lxc' and len(old_tasks)==len(new_tasks)==1 and
+                isinstance(evidence,dict) and evidence.get('local_volumes_absent') is True and
+                evidence.get('failed_restore_upid')==new_tasks[0].get('upid') and
+                re.fullmatch(rf"UPID:{re.escape(str(incoming.get('node')))}:[A-Fa-f0-9]+:[A-Fa-f0-9]+:[A-Fa-f0-9]+:vzrestore:{incoming.get('template_id')}:[^:\r\n]+:",str(new_tasks[0].get('upid',''))) and
+                re.fullmatch(rf"unable to restore CT {incoming.get('template_id')} - unable to activate storage 'crange-library' - directory '/mnt/pve/crange-library' does not exist or is unreachable\.?",str(evidence.get('failed_restore_exitstatus',''))) and
+                new_tasks[0].get('state')=='confirmed-terminal')
+            if (old_state != 'allocated' or ((old_tasks or new_tasks) and not failed_restore) or
                     incoming.get('absence_verified') is not True or not isinstance(evidence, dict) or
                     evidence.get('verified') is not True or evidence.get('inventory_complete') is not True or
                     evidence.get('target_absent') is not True or
