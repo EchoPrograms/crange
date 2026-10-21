@@ -26,3 +26,13 @@ Proxmox1 remains reserved for routers. Proxmox4 remains the required storage/quo
 The repair suite passed 1,220 tests with one existing skip before final live publication acceptance. Live image/cache results are recorded separately when acceptance completes.
 
 Proxmox documents the systemd nesting requirement in its [container documentation change](https://lists.proxmox.com/pipermail/pve-devel/2025-October/076158.html).
+
+## Live acceptance
+
+The dashboard exposes five VM choices (Alpine, Parrot, Debian 13, Windows Server 2025 Desktop Experience, and Ubuntu 24.04) and four container choices (Alpine, Debian 12 stock, Debian 13, and Ubuntu 24.04). Each selectable choice has a published logical image ID and passes a read-only placement plan against real cluster inventory, existing reservations and Project 100 staging-network requirements. The authenticated projects API returned HTTP 200 in 0.02 seconds.
+
+The five repaired maintained Linux bases passed independent fresh-clone readiness, unique machine-ID and SSH host-key checks. Ready local caches were also checked for actual Proxmox ownership, stopped state and immutable-template status. See `platform-template-acceptance.json` for the final observed replica matrix and proof summary.
+
+Debian 13 and Ubuntu 24.04 VM caches are available on Proxmox2, Proxmox5 and Proxmox6. Proxmox3's approved local pool lacks the disk headroom needed for their cache plus disposable verification peak; its admission remains closed rather than overcommitting physical capacity. This does not block automatic placement on the other workers. The router-only restriction on Proxmox1 and existing source/core role of Proxmox4 remain unchanged.
+
+The legacy unversioned Windows creation alias is superseded by the verified Server 2025 base. Its original reference remains intact for existing guests and pinned releases. New scenario release images remain available through release workflows and are not OS base choices.

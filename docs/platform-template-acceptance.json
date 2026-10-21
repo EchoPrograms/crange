@@ -1,0 +1,493 @@
+{
+  "observed_at": "2026-10-21T04:34:55.346082+00:00",
+  "images": {
+    "debian-13-vm-base-v3": {
+      "kind": "vm",
+      "verified": true,
+      "artifact_sha256": "99cde137682ac8cbb3fd7215439135a3fa28b2370b832791f8d1eaec2382b738",
+      "source_revision": "platform-debian-13-vm-e4562eef6dd48a14974afbba30966d1c301d4f5abffda33a43d47fe2fd34ca59",
+      "approved_projects": [
+        "*"
+      ],
+      "fresh_clone": {
+        "passed": true,
+        "identity_unique": true,
+        "readiness": "running",
+        "state": "source-probed",
+        "provider_tasks_terminal": true
+      },
+      "caches": [
+        {
+          "node": "proxmox5",
+          "template_id": 243,
+          "storage": "crange-thin",
+          "passed": true,
+          "identity_unique": true,
+          "owned": true,
+          "immutable": true,
+          "stopped": true
+        },
+        {
+          "node": "proxmox6",
+          "template_id": 244,
+          "storage": "local-lvm",
+          "passed": true,
+          "identity_unique": true,
+          "owned": true,
+          "immutable": true,
+          "stopped": true
+        },
+        {
+          "node": "proxmox2",
+          "template_id": 258,
+          "storage": "local-lvm",
+          "passed": true,
+          "identity_unique": true,
+          "owned": true,
+          "immutable": true,
+          "stopped": true
+        }
+      ],
+      "distribution": {
+        "errors": {
+          "proxmox3": "No approved cache datastore has headroom: {\"local-lvm\": \"cache preparation has insufficient disk_gb headroom\"}"
+        },
+        "excluded": {
+          "proxmox1": "Node is reserved for router containers.",
+          "proxmox4": "Node needs verified enrollment before automatic placement."
+        },
+        "image_id": "debian-13-vm-base-v3",
+        "ready": [
+          "proxmox2",
+          "proxmox5",
+          "proxmox6"
+        ]
+      }
+    },
+    "ubuntu-24-04-vm-base-v3": {
+      "kind": "vm",
+      "verified": true,
+      "artifact_sha256": "3a8f95563a42cef9dddaa2256aeb654144f3a6f58e40b4e6ebbf7539e61c79c0",
+      "source_revision": "platform-ubuntu-24-04-vm-345e5246d745c13a72adc157f723317636d595cfe189113a27ad7ddf973ea650",
+      "approved_projects": [
+        "*"
+      ],
+      "fresh_clone": {
+        "passed": true,
+        "identity_unique": true,
+        "readiness": "running",
+        "state": "source-probed",
+        "provider_tasks_terminal": true
+      },
+      "caches": [
+        {
+          "node": "proxmox5",
+          "template_id": 245,
+          "storage": "crange-thin",
+          "passed": true,
+          "identity_unique": true,
+          "owned": true,
+          "immutable": true,
+          "stopped": true
+        },
+        {
+          "node": "proxmox6",
+          "template_id": 246,
+          "storage": "local-lvm",
+          "passed": true,
+          "identity_unique": true,
+          "owned": true,
+          "immutable": true,
+          "stopped": true
+        },
+        {
+          "node": "proxmox2",
+          "template_id": 259,
+          "storage": "local-lvm",
+          "passed": true,
+          "identity_unique": true,
+          "owned": true,
+          "immutable": true,
+          "stopped": true
+        }
+      ],
+      "distribution": {
+        "errors": {
+          "proxmox3": "No approved cache datastore has headroom: {\"local-lvm\": \"cache preparation has insufficient disk_gb headroom\"}"
+        },
+        "excluded": {
+          "proxmox1": "Node is reserved for router containers.",
+          "proxmox4": "Node needs verified enrollment before automatic placement."
+        },
+        "image_id": "ubuntu-24-04-vm-base-v3",
+        "ready": [
+          "proxmox2",
+          "proxmox5",
+          "proxmox6"
+        ]
+      }
+    },
+    "debian-13-container-base-v3": {
+      "kind": "container",
+      "verified": true,
+      "artifact_sha256": "95dd5ff53d4e055b26975a015ac77d84bccb023d9192e20b30c73ceac490361d",
+      "source_revision": "platform-debian-13-container-397df7345b125399eb74fcae950559e2f2d10bd443a101209ea23cdef08460c6",
+      "approved_projects": [
+        "*"
+      ],
+      "fresh_clone": {
+        "passed": true,
+        "identity_unique": true,
+        "readiness": "running",
+        "state": "source-probed",
+        "provider_tasks_terminal": true
+      },
+      "caches": [
+        {
+          "node": "proxmox2",
+          "template_id": 254,
+          "storage": "local-lvm",
+          "passed": true,
+          "identity_unique": true,
+          "owned": true,
+          "immutable": true,
+          "stopped": true
+        },
+        {
+          "node": "proxmox3",
+          "template_id": 255,
+          "storage": "local-lvm",
+          "passed": true,
+          "identity_unique": true,
+          "owned": true,
+          "immutable": true,
+          "stopped": true
+        },
+        {
+          "node": "proxmox5",
+          "template_id": 256,
+          "storage": "crange-thin",
+          "passed": true,
+          "identity_unique": true,
+          "owned": true,
+          "immutable": true,
+          "stopped": true
+        },
+        {
+          "node": "proxmox6",
+          "template_id": 257,
+          "storage": "local-lvm",
+          "passed": true,
+          "identity_unique": true,
+          "owned": true,
+          "immutable": true,
+          "stopped": true
+        }
+      ],
+      "distribution": {
+        "errors": {},
+        "excluded": {
+          "proxmox1": "Node is reserved for router containers.",
+          "proxmox4": "Node needs verified enrollment before automatic placement."
+        },
+        "image_id": "debian-13-container-base-v3",
+        "ready": [
+          "proxmox2",
+          "proxmox3",
+          "proxmox5",
+          "proxmox6"
+        ]
+      }
+    },
+    "alpine-container-base-v3": {
+      "kind": "container",
+      "verified": true,
+      "artifact_sha256": "c04022585890692c8f315a4b536e21d55fcca97dc9226c291c752fa79b05d295",
+      "source_revision": "platform-alpine-container-1e48dec21def6e2e71db4e37c0863898eab14e3f652ee72b7b5fd2ea34512ab6",
+      "approved_projects": [
+        "*"
+      ],
+      "fresh_clone": {
+        "passed": true,
+        "identity_unique": true,
+        "readiness": "default",
+        "state": "source-probed",
+        "provider_tasks_terminal": true
+      },
+      "caches": [
+        {
+          "node": "proxmox2",
+          "template_id": 250,
+          "storage": "local-lvm",
+          "passed": true,
+          "identity_unique": true,
+          "owned": true,
+          "immutable": true,
+          "stopped": true
+        },
+        {
+          "node": "proxmox3",
+          "template_id": 251,
+          "storage": "local-lvm",
+          "passed": true,
+          "identity_unique": true,
+          "owned": true,
+          "immutable": true,
+          "stopped": true
+        },
+        {
+          "node": "proxmox5",
+          "template_id": 252,
+          "storage": "crange-thin",
+          "passed": true,
+          "identity_unique": true,
+          "owned": true,
+          "immutable": true,
+          "stopped": true
+        },
+        {
+          "node": "proxmox6",
+          "template_id": 253,
+          "storage": "local-lvm",
+          "passed": true,
+          "identity_unique": true,
+          "owned": true,
+          "immutable": true,
+          "stopped": true
+        }
+      ],
+      "distribution": {
+        "errors": {},
+        "excluded": {
+          "proxmox1": "Node is reserved for router containers.",
+          "proxmox4": "Node needs verified enrollment before automatic placement."
+        },
+        "image_id": "alpine-container-base-v3",
+        "ready": [
+          "proxmox2",
+          "proxmox3",
+          "proxmox5",
+          "proxmox6"
+        ]
+      }
+    },
+    "ubuntu-24-04-container-base-v4": {
+      "kind": "container",
+      "verified": true,
+      "artifact_sha256": "6cc388de9e88150c7a231ea0c7ea8201780d7c151487e88faeec59047b5835fd",
+      "source_revision": "platform-ubuntu-24-04-container-9a2acdddb35107b4e5ae8907278a8726d3e591e7a38a5d8ec880396da6a94453",
+      "approved_projects": [
+        "*"
+      ],
+      "fresh_clone": {
+        "passed": true,
+        "identity_unique": true,
+        "readiness": "running",
+        "state": "source-probed",
+        "provider_tasks_terminal": true
+      },
+      "caches": [
+        {
+          "node": "proxmox3",
+          "template_id": 247,
+          "storage": "local-lvm",
+          "passed": true,
+          "identity_unique": true,
+          "owned": true,
+          "immutable": true,
+          "stopped": true
+        },
+        {
+          "node": "proxmox5",
+          "template_id": 248,
+          "storage": "crange-thin",
+          "passed": true,
+          "identity_unique": true,
+          "owned": true,
+          "immutable": true,
+          "stopped": true
+        },
+        {
+          "node": "proxmox6",
+          "template_id": 249,
+          "storage": "local-lvm",
+          "passed": true,
+          "identity_unique": true,
+          "owned": true,
+          "immutable": true,
+          "stopped": true
+        },
+        {
+          "node": "proxmox2",
+          "template_id": 260,
+          "storage": "local-lvm",
+          "passed": true,
+          "identity_unique": true,
+          "owned": true,
+          "immutable": true,
+          "stopped": true
+        }
+      ],
+      "distribution": {
+        "errors": {},
+        "excluded": {
+          "proxmox1": "Node is reserved for router containers.",
+          "proxmox4": "Node needs verified enrollment before automatic placement."
+        },
+        "image_id": "ubuntu-24-04-container-base-v4",
+        "ready": [
+          "proxmox2",
+          "proxmox3",
+          "proxmox5",
+          "proxmox6"
+        ]
+      }
+    }
+  },
+  "node_restrictions": {
+    "proxmox1": "router-only",
+    "proxmox4": "required core/source reader; application placement not enrolled"
+  },
+  "placement_checks": {
+    "vm:alpine-3-24-portable": {
+      "image_id": "alpine-3-24-portable-20261005",
+      "placement": {
+        "node_name": "proxmox6",
+        "datastore_id": "local-lvm",
+        "template_id": 153,
+        "template_file_id": null,
+        "template_node": "proxmox6",
+        "clone_mode": "linked",
+        "verified_local_cache": true
+      }
+    },
+    "vm:approved-base": {
+      "image_id": "parrot-jumpbox-20261007-v1",
+      "placement": {
+        "node_name": "proxmox6",
+        "datastore_id": "local-hdd",
+        "template_id": 169,
+        "template_file_id": null,
+        "template_node": "proxmox6",
+        "clone_mode": "linked",
+        "verified_local_cache": true
+      }
+    },
+    "vm:debian-13-vm-base-v3": {
+      "image_id": "debian-13-vm-base-v3",
+      "placement": {
+        "node_name": "proxmox6",
+        "datastore_id": "local-lvm",
+        "template_id": 244,
+        "template_file_id": null,
+        "template_node": "proxmox6",
+        "clone_mode": "linked",
+        "verified_local_cache": true
+      }
+    },
+    "vm:mhl-windows-server-2025-base-p100-v1": {
+      "image_id": "mhl-windows-server-2025-base-p100-v1",
+      "placement": {
+        "node_name": "proxmox6",
+        "datastore_id": "local-hdd",
+        "template_id": 219,
+        "template_file_id": null,
+        "template_node": "proxmox6",
+        "clone_mode": "linked",
+        "verified_local_cache": true
+      }
+    },
+    "vm:ubuntu-24-04-vm-base-v3": {
+      "image_id": "ubuntu-24-04-vm-base-v3",
+      "placement": {
+        "node_name": "proxmox6",
+        "datastore_id": "local-lvm",
+        "template_id": 246,
+        "template_file_id": null,
+        "template_node": "proxmox6",
+        "clone_mode": "linked",
+        "verified_local_cache": true
+      }
+    },
+    "container:alpine-container-base-v3": {
+      "image_id": "alpine-container-base-v3",
+      "placement": {
+        "node_name": "proxmox6",
+        "datastore_id": "local-lvm",
+        "template_id": 253,
+        "template_file_id": null,
+        "template_node": "proxmox6",
+        "clone_mode": "linked",
+        "verified_local_cache": true
+      }
+    },
+    "container:debian-13-container-base-v3": {
+      "image_id": "debian-13-container-base-v3",
+      "placement": {
+        "node_name": "proxmox6",
+        "datastore_id": "local-lvm",
+        "template_id": 257,
+        "template_file_id": null,
+        "template_node": "proxmox6",
+        "clone_mode": "linked",
+        "verified_local_cache": true
+      }
+    },
+    "container:mhl-debian12-stock": {
+      "image_id": "debian-12-router-v1",
+      "placement": {
+        "node_name": "proxmox6",
+        "datastore_id": "local-hdd",
+        "template_id": null,
+        "template_file_id": "crange-library:vztmpl/debian-12-standard_12.12-1_amd64.tar.zst",
+        "template_node": "proxmox6",
+        "clone_mode": "archive",
+        "verified_local_cache": false
+      }
+    },
+    "container:ubuntu-24-04-container-base-v4": {
+      "image_id": "ubuntu-24-04-container-base-v4",
+      "placement": {
+        "node_name": "proxmox6",
+        "datastore_id": "local-lvm",
+        "template_id": 249,
+        "template_file_id": null,
+        "template_node": "proxmox6",
+        "clone_mode": "linked",
+        "verified_local_cache": true
+      }
+    }
+  },
+  "dashboard_api": {
+    "status": 200,
+    "seconds": 0.02,
+    "choices": [
+      {
+        "project_id": 100,
+        "vm_templates": [
+          "alpine-3-24-portable",
+          "approved-base",
+          "debian-13-vm-base-v3",
+          "mhl-windows-server-2025-base-p100-v1",
+          "ubuntu-24-04-vm-base-v3"
+        ],
+        "container_templates": [
+          "alpine-container-base-v3",
+          "debian-13-container-base-v3",
+          "mhl-debian12-stock",
+          "ubuntu-24-04-container-base-v4"
+        ]
+      }
+    ]
+  },
+  "regression": {
+    "tests": 1220,
+    "skipped": 1,
+    "result": "passed",
+    "code_commit": "96fd4108d60f6335f2795decab6ca8aee0bcf463"
+  },
+  "limits": [
+    "Proxmox3 lacks additional VM cache/verification disk headroom; automatic placement uses other approved workers.",
+    "Proxmox1 remains router-only; Proxmox4 remains the required core/source reader."
+  ]
+}
