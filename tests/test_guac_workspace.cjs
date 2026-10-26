@@ -9,6 +9,7 @@ const dragClasses=new Set(),shellClasses=new Set();const document = {activeEleme
 const local=new Map(),sessionLocal=new Map(),events={},tabEvents={},windowEvents={};const handle={addEventListener(n,f){events[n]=f;},removeEventListener(){},setPointerCapture(){},focus(){}};
 const reopen={addEventListener(n,f){tabEvents[n]=f;},removeEventListener(){},setPointerCapture(){},focus(){},offsetWidth:18,offsetHeight:56};
 const shell={style:{},offsetWidth:700,offsetHeight:44,classList:{toggle(n,on){if(on)shellClasses.add(n);else shellClasses.delete(n);}},getBoundingClientRect(){return{left:parseInt(this.style.left||10),top:parseInt(this.style.top||10),width:this.style.width==='100vw'?1400:700,height:44}}};
+const viewClasses=new Set(),viewStyle={};const clientView={classList:{toggle(n,on){if(on)viewClasses.add(n);else viewClasses.delete(n);},remove(n){viewClasses.delete(n);}},style:{setProperty(n,v){viewStyle[n]=v;},removeProperty(n){delete viewStyle[n];}}};
 let now=1000;class FakeDate extends Date {static now(){return now;}}
 const sandbox={CustomEvent:class{constructor(type){this.type=type}},URL,Math,Date:FakeDate,Object,angular:{module(){return moduleStub;}},document,window:{confirm(){return true;},innerWidth:1400,innerHeight:900,addEventListener(n,f){windowEvents[n]=f;},removeEventListener(){},requestAnimationFrame(fn){fn();},sessionStorage:{getItem(k){return sessionLocal.get(k);},setItem(k,v){sessionLocal.set(k,v);},removeItem(k){sessionLocal.delete(k);}},localStorage:{getItem(k){return local.get(k);},setItem(k,v){local.set(k,v);},removeItem(k){local.delete(k);}}},navigator:{},Intl,Number};
 vm.runInNewContext(fs.readFileSync('guacamole/extension/workspace.js','utf8'),sandbox);
@@ -50,7 +51,7 @@ async function flush(){await new Promise(resolve=>setImmediate(resolve));}
  const scope={menu:{shown:false},focusedClient:first,clientGroup:{clients:[first,second]},closeClientTile(client){this.closed=client;},$watch(name,fn){watchers[name]=fn;},$on(name,fn){scopeEvents[name]=fn;return()=>{delete scopeEvents[name];};},$evalAsync(fn){fn();},disconnect(){this.disconnected=true;}};
  let destination=null;const toolbar=directives.crangeSessionToolbar(http,interval,{url(value){destination=value;}},{getCurrentToken(){return 'test-token';},getDataSource(){return 'postgresql';}},preferenceService,{toggleFullscreenMode(){}},injector);
  const tabButtons=[{focus(){document.activeElement=this;}},{focus(){document.activeElement=this;}}];
- toolbar.link(scope,{0:{parentNode:{querySelectorAll(){return tabButtons;}},querySelector(s){return s.includes('shell')?shell:s.includes('reopen')?reopen:handle;}}});await flush();assert.equal(scope.crSession.box.resource_key,'container:ci');
+ toolbar.link(scope,{0:{parentNode:{querySelector(){return clientView;},querySelectorAll(){return tabButtons;}},querySelector(s){return s.includes('shell')?shell:s.includes('reopen')?reopen:handle;}}});await flush();assert.equal(scope.crSession.box.resource_key,'container:ci');
  await flush();assert.equal(scope.crSession.clipboardText,'cached clipboard','compact clipboard field loads from Guacamole clipboard service');
  scope.crSession.clipboardText='synthetic paste';scope.crSession.updateClipboard();assert.equal(clipboardUpdates.at(-1).data,'synthetic paste');assert.equal(clipboardUpdates.at(-1).type,'text/plain');
  scopeEvents.guacClipboard({},new ClipboardData({type:'text/plain',data:'remote copy'}));assert.equal(scope.crSession.clipboardText,'remote copy','remote clipboard updates the compact field');
@@ -82,13 +83,16 @@ async function flush(){await new Promise(resolve=>setImmediate(resolve));}
  tabEvents.click(event());assert.equal(session.visible,true);assert.equal(shell.style.left,'495px','expanded toolbar retains its floating position');
  events.pointerdown(event({clientX:500,clientY:300}));events.pointermove(event({clientX:700,clientY:10}));events.pointerup(event());
  assert.equal(shellClasses.has('is-top-docked'),true,'dragging within 16 pixels of the top docks the expanded toolbar');assert.equal(shell.style.left,'0px');assert.equal(shell.style.right,'0px');assert.equal(shell.style.width,'100vw');
+ assert.equal(viewClasses.has('cr-session-docked-view'),true);assert.equal(viewStyle['--cr-session-toolbar-height'],'44px','the remote viewport reserves the actual toolbar height');
  const ciToolbarKey='crange-session/'+encodeURIComponent('postgresql/anonymous')+'/connection/'+encodeURIComponent('postgresql/native-ci')+'/toolbar';
  const topSaved=JSON.parse(local.get(ciToolbarKey));assert.equal(topSaved.topDocked,true,'expanded top-dock state persists per connection');assert.equal(topSaved.dock.edge,'right','expanded docking keeps the minimized-tab position separate');
  assert(!local.get(ciToolbarKey).includes('synthetic paste')&&!local.get(ciToolbarKey).includes('remote copy'),'clipboard text is never persisted in toolbar preferences');
  events.click(event());events.click(event());assert.equal(session.visible,false,'top-docked controls still collapse');assert.equal(JSON.parse(local.get(ciToolbarKey)).topDocked,true);
+ assert.equal(viewClasses.has('cr-session-docked-view'),false,'minimizing restores the full remote viewport');
  tabEvents.click(event({currentTarget:reopen}));assert.equal(session.visible,true,'reopening restores expanded top-docked layout');assert.equal(shellClasses.has('is-top-docked'),true);
  events.pointerdown(event({clientX:12,clientY:10}));events.pointermove(event({clientX:400,clientY:100}));events.pointerup(event());
  assert.equal(shellClasses.has('is-top-docked'),false,'dragging away from the top returns to floating mode');assert.equal(shell.style.left,'388px','undocking preserves the pointer offset across the width transition');assert.equal(shell.style.width,'');
+ assert.equal(viewClasses.has('cr-session-docked-view'),false);assert.equal(viewStyle['--cr-session-toolbar-height'],'0px','floating controls restore the full remote viewport');
  const undocked=JSON.parse(local.get(ciToolbarKey));assert.equal(undocked.topDocked,false);assert.deepEqual(undocked.position,{x:388,y:90});
  events.pointerdown(event({clientX:400,clientY:100}));events.pointermove(event({pointerId:2,clientX:900,clientY:700}));assert.equal(shell.style.left,'388px','second pointer cannot steal a drag');
  events.pointercancel(event());events.pointerdown(event({clientX:400,clientY:100}));events.pointerup(event());events.click(event());assert.equal(session.visible,false,'a cancelled gesture must not break the next click');

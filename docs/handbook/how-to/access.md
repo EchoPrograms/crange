@@ -40,7 +40,7 @@ CRANGE remembers the expanded position, top-docked or floating mode, minimized-t
 
 ## Clipboard access
 
-The expanded toolbar has a compact, single-line **Clipboard** field for quick text entry and paste. Its display-scale controls provide minus, percentage and plus controls for the focused connection. The full clipboard editor remains in **Options** and is available through **Ctrl+Alt+Shift**.
+The toolbar docked across the top has a compact, single-line **Clipboard** field for quick text entry and paste, plus minus, percentage and plus display-scale controls for the focused connection. Docking makes the remote session shorter so the toolbar does not cover it. Dragging the handle away restores the compact floating toolbar and the full session area. The full clipboard editor remains in **Options** and is available through **Ctrl+Alt+Shift**.
 
 Selecting connections or opening session controls does not request clipboard permission. Automatic clipboard sync runs only when the browser has already granted clipboard-read access. If it requires approval or does not support that permission, use **Options → Clipboard** to paste text into Guacamole's clipboard editor. Ordinary fields keep their normal paste behavior.
 

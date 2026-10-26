@@ -194,6 +194,7 @@
             var username = typeof auth.getCurrentUsername === 'function' ? auth.getCurrentUsername() : 'anonymous';
             var userKey = 'crange-session/' + encodeURIComponent(auth.getDataSource() + '/' + username);
             var shell = element[0].querySelector('.cr-session-shell'), handle = element[0].querySelector('.cr-session-drag'), reopen=element[0].querySelector('.cr-session-reopen'), drag = null, suppressClick=false;
+            var clientView = element[0].parentNode.querySelector('.client-view'), clientInset = null;
             var activeToolbarKey = null, position = null, dock = {edge:'bottom',offset:0}, topDocked = false;
             function toolbarKey(client) {
                 if (!client || client.id === undefined || client.id === null) return null;
@@ -356,6 +357,14 @@
                 var edge=edges[0][0], vertical=edge==='left'||edge==='right';
                 return {edge:edge,offset:Math.max(0,Math.min(1,(vertical?y:x)/(vertical?window.innerHeight:window.innerWidth)))};
             }
+            function resizeClientView() {
+                if (!clientView || destroyed) return;
+                var height = s.visible && topDocked ? Math.ceil(shell.getBoundingClientRect().height) : 0;
+                if (height === clientInset) return;
+                clientInset = height;
+                clientView.style.setProperty('--cr-session-toolbar-height', height + 'px');
+                clientView.classList.toggle('cr-session-docked-view', height > 0);
+            }
             function clampToolbar() {
                 if (!shell) return;
                 shell.classList.toggle('is-top-docked',s.visible&&topDocked);
@@ -374,6 +383,7 @@
                 var rect = shell.getBoundingClientRect();
                 shell.classList.toggle('panels-up', rect.top > window.innerHeight / 2);
                 shell.classList.toggle('panels-left', rect.left > window.innerWidth / 2);
+                resizeClientView();
             }
             function pointerDown(event) {
                 if (event.button !== 0 || drag || event.isPrimary === false) return;
@@ -419,10 +429,14 @@
             }
             function bind(target,method){[['pointerdown',pointerDown],['pointermove',pointerMove],['pointerup',pointerUp],['pointercancel',pointerCancel],['lostpointercapture',pointerCancel],['keydown',moveKeys],['click',toggleControls]].forEach(function(pair){target[method](pair[0],pair[1]);});}
             bind(handle,'addEventListener');bind(reopen,'addEventListener');
+            var toolbarResize = window.ResizeObserver ? new window.ResizeObserver(resizeClientView) : null;
+            if (toolbarResize) toolbarResize.observe(shell);
             window.addEventListener('blur',blurred);window.addEventListener('resize', clampToolbar); window.requestAnimationFrame(clampToolbar);
             scope.$on('$destroy', function () {
                 destroyed = true; if (unlistenClipboard) unlistenClipboard(); window.removeEventListener('keydown', keydown, true); window.removeEventListener('keyup', keyup, true); window.removeEventListener('resize', clampToolbar);
                 blurred();window.removeEventListener('blur',blurred);bind(handle,'removeEventListener');bind(reopen,'removeEventListener');
+                if (toolbarResize) toolbarResize.disconnect();
+                if (clientView) { clientView.classList.remove('cr-session-docked-view'); clientView.style.removeProperty('--cr-session-toolbar-height'); }
                 $interval.cancel(statusTimer); $interval.cancel(networkTimer); if (poll) $interval.cancel(poll);
             });
         }};

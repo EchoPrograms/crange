@@ -14,7 +14,7 @@
     * { box-sizing: border-box; }
     html, body { width: 100%; height: 100%; margin: 0; overflow: hidden; }
     body.client { min-height: 100vh; }
-    .client-view { position: absolute; inset: 0; }
+    .client-view { position: absolute; top: 0; left: 0; width: 100%; height: 100%; }
     .client-view-content { display: flex; flex-direction: column; width: 100%; height: 100%; }
     .client-body { position: relative; flex: 1 1 auto; min-width: 0; min-height: 0; padding: 28px; }
     .native-panes { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; width: 100%; height: 100%; }
@@ -59,9 +59,9 @@
   <script type="text/ng-template" id="app/client/templates/guacClientZoom.html"><div class="client-zoom"><div class="client-zoom-editor"><div ng-click="zoomOut()" class="client-zoom-out"><img src="images/settings/zoom-out.svg" alt="-"></div><div class="client-zoom-state"><input type="number" guac-zoom-ctrl ng-model="client.clientProperties.scale" ng-model-options="{ updateOn: 'blur submit' }" ng-change="zoomSet()">%</div><div ng-click="zoomIn()" class="client-zoom-in"><img src="images/settings/zoom-in.svg" alt="+"></div></div><div class="client-zoom-autofit"><label><input ng-model="client.clientProperties.autoFit" ng-change="changeAutoFit()" ng-disabled="autoFitDisabled()" type="checkbox" id="auto-fit">{{'CLIENT.TEXT_ZOOM_AUTO_FIT' | translate}}</label></div></div></script>
 </head>
 <body class="client" ng-controller="FixtureController">
+  <crange-session-toolbar></crange-session-toolbar>
   <main class="client-view"><div class="client-view-content">
     <div class="client-body">
-      <crange-session-toolbar></crange-session-toolbar>
       <div class="native-panes" aria-label="Synthetic native Guacamole connection panes">
         <section class="native-pane"><h2>Synthetic RDP guest</h2><code>Display · keyboard · clipboard · resize remain Guacamole-owned</code><p>Connection pane stays visible beneath session controls.</p></section>
         <section class="native-pane"><h2>Second native pane</h2><code>Ctrl+Alt+Shift opens the full Options menu</code></section>

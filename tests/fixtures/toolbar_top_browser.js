@@ -22,6 +22,27 @@ async page => {
   await toolbar.waitFor({state: 'visible'});
   const clipboard = page.getByRole('textbox', {name: 'Clipboard'});
   const scaleInput = page.getByRole('spinbutton', {name: 'Display scale percent'});
+  check(!await clipboard.isVisible() && !await scaleInput.isVisible(), 'Floating toolbar retains its compact layout without docked clipboard or scale controls');
+  check(await page.locator('.client-view').evaluate(node => node.getBoundingClientRect().top === 0 && node.getBoundingClientRect().height === innerHeight), 'Floating toolbar keeps the full remote viewport');
+
+  const handle = page.locator('.cr-session-drag');
+  let rect = await handle.boundingBox();
+  await page.mouse.move(rect.x + rect.width / 2, rect.y + rect.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(620, 8, {steps: 8});
+  await page.mouse.up();
+  const shell = page.locator('.cr-session-shell');
+  const docked = await shell.boundingBox();
+  check(docked && docked.x === 0 && docked.y === 0 && docked.width === 1440, 'Dragging within 16 pixels of the top snaps the expanded toolbar into a full-width row');
+  check(await page.locator('.cr-session-drag').evaluate(node => node.parentElement.firstElementChild === node), 'Collapse and drag handle stays at the far-left end of the top row');
+  check(await page.evaluate(() => JSON.parse(Object.values(localStorage).find(value => value.includes('topDocked'))).topDocked), 'Top-docked expanded state persists for this connection');
+  await page.waitForFunction(() => {
+    const view = document.querySelector('.client-view').getBoundingClientRect();
+    const bar = document.querySelector('.cr-session-shell').getBoundingClientRect();
+    return view.top === Math.ceil(bar.bottom) && view.bottom === innerHeight;
+  });
+  check(await clipboard.isVisible() && await scaleInput.isVisible(), 'Docked row reveals clipboard and native scale controls');
+  check(await page.locator('.client-view').evaluate(node => node.getBoundingClientRect().top > 0), 'Docking reduces the remote session height without covering its first lines');
   check(await scaleInput.inputValue() === '100', 'Native Guacamole zoom component renders its percentage scale input');
   await page.getByRole('button', {name: 'Zoom in'}).click();
   check(Math.abs(await page.evaluate(() => window.__fixture.scope.focusedClient.clientProperties.scale) - 1.1) < 0.001, 'Zoom in uses the native 10 percent scale behavior');
@@ -36,17 +57,6 @@ async page => {
   check(await clipboard.inputValue() === 'remote clipboard update', 'Remote Guacamole clipboard events update the compact field without a read prompt');
   check(await page.evaluate(() => Object.values(localStorage).every(value => !value.includes('remote clipboard update') && !value.includes('synthetic pasted text'))), 'Clipboard content is not persisted in browser storage');
 
-  const handle = page.locator('.cr-session-drag');
-  let rect = await handle.boundingBox();
-  await page.mouse.move(rect.x + rect.width / 2, rect.y + rect.height / 2);
-  await page.mouse.down();
-  await page.mouse.move(620, 8, {steps: 8});
-  await page.mouse.up();
-  const shell = page.locator('.cr-session-shell');
-  const docked = await shell.boundingBox();
-  check(docked && docked.x === 0 && docked.y === 0 && docked.width === 1440, 'Dragging within 16 pixels of the top snaps the expanded toolbar into a full-width row');
-  check(await page.locator('.cr-session-drag').evaluate(node => node.parentElement.firstElementChild === node), 'Collapse and drag handle stays at the far-left end of the top row');
-  check(await page.evaluate(() => JSON.parse(Object.values(localStorage).find(value => value.includes('topDocked'))).topDocked), 'Top-docked expanded state persists for this connection');
   await page.screenshot({path: 'output/playwright/guac-toolbar-top-desktop.png', fullPage: true});
 
   await page.keyboard.down('Control');
@@ -64,6 +74,8 @@ async page => {
   await handle.click();
   await page.getByRole('button', {name: 'Show session controls'}).waitFor({state: 'visible'});
   check(await page.locator('.cr-session-reopen:visible').count() === 1, 'Top-docked controls can still collapse');
+  await page.waitForFunction(() => document.querySelector('.client-view').getBoundingClientRect().top === 0);
+  check(await page.locator('.client-view').evaluate(node => node.getBoundingClientRect().height === innerHeight), 'Collapsing releases all reserved toolbar space');
   const minimized = await page.locator('.cr-session-reopen').boundingBox();
   check(minimized && minimized.x <= 1 && minimized.y > 840, 'Collapsing keeps the independent bottom-left minimized dock');
   await page.reload();
@@ -72,10 +84,25 @@ async page => {
   await page.waitForFunction(() => document.querySelector('.cr-session-shell').getBoundingClientRect().width === innerWidth);
   check((await shell.boundingBox()).width === 1440, 'Reopening after refresh restores the top-docked full-width row');
 
+  rect = await handle.boundingBox();
+  await page.mouse.move(rect.x + rect.width / 2, rect.y + rect.height / 2);
+  await page.mouse.down(); await page.mouse.move(420, 350, {steps: 8}); await page.mouse.up();
+  check(!await clipboard.isVisible() && !await scaleInput.isVisible(), 'Undocking restores the original floating controls');
+  check(await page.locator('.client-view').evaluate(node => node.getBoundingClientRect().top === 0 && node.getBoundingClientRect().height === innerHeight), 'Undocking restores the full remote session height');
+  await page.screenshot({path: 'output/playwright/guac-toolbar-floating.png', fullPage: true});
+  rect = await handle.boundingBox();
+  await page.mouse.move(rect.x + rect.width / 2, rect.y + rect.height / 2);
+  await page.mouse.down(); await page.mouse.move(620, 8, {steps: 8}); await page.mouse.up();
   await page.setViewportSize({width: 390, height: 844});
   const mobileBox = await shell.boundingBox();
   const mobile = await page.evaluate(() => ({width: innerWidth, docWidth: document.documentElement.scrollWidth, toolbarWidth: document.querySelector('.cr-session-toolbar').scrollWidth, shellWidth: document.querySelector('.cr-session-shell').getBoundingClientRect().width}));
   check(mobileBox && mobile.shellWidth === mobile.width && mobile.docWidth <= mobile.width && mobile.toolbarWidth <= mobile.width, 'Mobile docked toolbar wraps controls without horizontal page overflow');
+  await page.waitForFunction(() => {
+    const view = document.querySelector('.client-view').getBoundingClientRect();
+    const bar = document.querySelector('.cr-session-shell').getBoundingClientRect();
+    return view.top === Math.ceil(bar.bottom) && view.bottom === innerHeight;
+  });
+  check(await page.locator('.client-view').evaluate(node => node.getBoundingClientRect().height < innerHeight), 'Wrapped mobile toolbar reserves its full measured height');
   await page.keyboard.down('Control'); await page.keyboard.down('Alt'); await page.keyboard.down('Shift');
   await page.locator('.cr-session-options').waitFor({state: 'visible'});
   await page.keyboard.up('Shift'); await page.keyboard.up('Alt'); await page.keyboard.up('Control');
