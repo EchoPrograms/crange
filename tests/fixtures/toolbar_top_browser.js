@@ -42,6 +42,14 @@ async page => {
     return view.top === Math.ceil(bar.bottom) && view.bottom === innerHeight;
   });
   check(await clipboard.isVisible() && await scaleInput.isVisible(), 'Docked row reveals clipboard and native scale controls');
+  const scaleLayout = await page.locator('.cr-session-zoom').evaluate(node => {
+    const rect = selector => node.querySelector(selector).getBoundingClientRect();
+    const group = rect('.client-zoom-editor'), state = rect('.client-zoom-state'), unit = rect('.cr-zoom-unit');
+    const buttons = [rect('.client-zoom-out'), rect('.client-zoom-in')];
+    return {height: group.height, unitInside: unit.left >= state.left && unit.right <= state.right && unit.top >= state.top && unit.bottom <= state.bottom, buttonsAligned: buttons.every(button => Math.abs(button.top - group.top - 1) < 1 && Math.abs(button.height - group.height + 2) < 1), spinner: getComputedStyle(node.querySelector('input')).appearance};
+  });
+  check(scaleLayout.height === 32 && scaleLayout.unitInside && scaleLayout.buttonsAligned && scaleLayout.spinner === 'textfield', 'Scale buttons, number and percent form one aligned control without native spinner arrows');
+  check((await clipboard.boundingBox()).height === scaleLayout.height, 'Clipboard and scale controls share a consistent docked height');
   check(await page.locator('.client-view').evaluate(node => node.getBoundingClientRect().top > 0), 'Docking reduces the remote session height without covering its first lines');
   check(await scaleInput.inputValue() === '100', 'Native Guacamole zoom component renders its percentage scale input');
   await page.getByRole('button', {name: 'Zoom in'}).click();

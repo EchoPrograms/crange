@@ -54,6 +54,7 @@
         if (key === 'app/settings/templates/settingsPreferences.html') return preferences;
         if (key === 'app/client/templates/guacClientZoom.html') {
             return value.replace('<input type="number" guac-zoom-ctrl', '<input type="number" aria-label="Display scale percent" guac-zoom-ctrl')
+                .replace('ng-change="zoomSet()">%', 'ng-change="zoomSet()"><span class="cr-zoom-unit" aria-hidden="true">%</span>')
                 .replace('<div ng-click="zoomOut()" class="client-zoom-out"><img src="images/settings/zoom-out.svg" alt="-"></div>', '<button type="button" ng-click="zoomOut()" class="client-zoom-out" aria-label="Zoom out"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M3 8h10"/></svg></button>')
                 .replace('<div ng-click="zoomIn()" class="client-zoom-in"><img src="images/settings/zoom-in.svg" alt="+"></div>', '<button type="button" ng-click="zoomIn()" class="client-zoom-in" aria-label="Zoom in"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M3 8h10M8 3v10"/></svg></button>');
         }

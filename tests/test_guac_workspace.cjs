@@ -30,6 +30,7 @@ async function flush(){await new Promise(resolve=>setImmediate(resolve));}
  assert.match(templates['app/client/templates/guacClientZoom.html'],/<button type="button" ng-click="zoomOut\(\)" class="client-zoom-out" aria-label="Zoom out">/,'native zoom-out action becomes keyboard-accessible');
  assert.match(templates['app/client/templates/guacClientZoom.html'],/<button type="button" ng-click="zoomIn\(\)" class="client-zoom-in" aria-label="Zoom in">/,'native zoom-in action becomes keyboard-accessible');
  assert.match(templates['app/client/templates/guacClientZoom.html'],/guac-zoom-ctrl/,'native percent input and conversion directive remain intact');
+ assert.match(templates['app/client/templates/guacClientZoom.html'],/<span class="cr-zoom-unit" aria-hidden="true">%<\/span>/,'percent unit remains inside the aligned scale field');
  assert.match(templates['app/client/templates/client.html'],/<crange-session-toolbar>/);assert.match(templates['app/client/templates/client.html'],/<guac-tiled-clients>/);assert.match(templates['app/client/templates/client.html'],/menu.shown && crSession.advanced/);
  assert.match(directives.crangeSessionToolbar({},()=>{},{},{},{preferences:{}},{}).template,/context="connectionListContext"/);
  assert.match(directives.crangeSessionToolbar({},()=>{},{},{},{preferences:{}},{},{}).template,/aria-label="Select connections"/);
