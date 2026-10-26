@@ -1,0 +1,23 @@
+{
+  "name": "crange-handbook",
+  "private": true,
+  "version": "1.0.0",
+  "scripts": {
+    "prestart": "python3 ../generate-reference.py",
+    "start": "docusaurus start --host 127.0.0.1 --port 8769",
+    "prebuild": "python3 ../generate-reference.py",
+    "build": "docusaurus build",
+    "serve": "docusaurus serve --host 127.0.0.1 --port 8769",
+    "clear": "docusaurus clear"
+  },
+  "dependencies": {
+    "@docusaurus/core": "3.10.2",
+    "@docusaurus/preset-classic": "3.10.2",
+    "@easyops-cn/docusaurus-search-local": "0.55.3",
+    "react": "19.0.0",
+    "react-dom": "19.0.0"
+  },
+  "engines": {
+    "node": ">=20.0"
+  }
+}

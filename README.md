@@ -4,6 +4,8 @@ CRANGE manages isolated Proxmox cyber-range projects through reviewed Terraform,
 
 ## Documentation
 
+Start with the **[local Docusaurus handbook](docs/README.md)** for the getting-started walkthrough, illustrated web UI guides, architecture, administration and generated reference. Run `npm --prefix docs/website ci`, then `npm --prefix docs/website start` to preview it at `http://127.0.0.1:8769`.
+
 - [User guide](docs/user-guide.md): projects, Team 0 staging, machines, releases, access and jobs.
 - [Administrator guide](docs/administrator-guide.md): controller setup, accounts, images, distribution, backups and troubleshooting.
 - [Architecture](docs/architecture.md): control plane, networking, security and source map.
@@ -11,7 +13,7 @@ CRANGE manages isolated Proxmox cyber-range projects through reviewed Terraform,
 - [Template workflows](docs/admin-templates.md), [custom jump boxes](docs/custom-jump-boxes.md), [guest accounts](docs/box-user-management.md), [Guacamole integration](docs/guacamole-integration.md).
 - [Distribution operations](docs/distribution-operations.md), [library deployment](docs/library-deployment.md), [storage audit](docs/template-storage-audit.md), [acceptance plan](DISTRIBUTION-PLAN.md).
 
-The guides describe checked-in behavior. Automatic placement is enabled only for the restricted P1 Alpine pilot (`alpine-3-24-20261005` on `proxmox1`, with verified `p003t254` networking); it is not multi-node acceptance, and the catalog still records `captured_source_identity: false`. The deployed library does not establish rollout readiness. Existing detailed audit/delivery documents are historical evidence, not installation instructions.
+The handbook describes the checked-out implementation and distinguishes current limitations from intended behavior. Installed image/node/network eligibility remains governed by protected policy, verified replicas and capacity. Proxmox1 is eligible for ordinary workloads; Proxmox6's HDD write approval is explicit to its approved pool. Older guides and detailed audit/delivery records below are supporting historical material and may describe earlier restrictions.
 
 ## Dashboard
 

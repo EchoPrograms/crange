@@ -48,3 +48,9 @@ output/
 **/.crange-lifecycle.json
 *.sqlite3
 *.sqlite3-*
+
+# Local documentation dependencies and build output
+docs/website/node_modules/
+docs/website/.docusaurus/
+docs/website/build/
+docs/handbook/generated/
