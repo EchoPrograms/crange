@@ -14,7 +14,7 @@
         '      <input type="submit" name="login" class="login cr-login-primary" ng-disabled="submitted" value="{{\'LOGIN.ACTION_LOGIN\' | translate}}">',
         '      <input type="submit" name="login" class="continue-login cr-login-primary" ng-disabled="submitted" value="{{\'LOGIN.ACTION_CONTINUE\' | translate}}">',
         '    </form>',
-        '    <footer class="cr-login-footer"><a href="https://crange.brogano.dev/">CRANGE Control<svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2.2" aria-hidden="true"><path d="M4 10h12m-5-5 5 5-5 5"/></svg></a></footer>',
+        '    <footer class="cr-login-footer"><a href="https://docs.range.brogano.dev/" target="_blank" rel="noopener noreferrer">Documentation</a><a href="https://crange.brogano.dev/">CRANGE Control<svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2.2" aria-hidden="true"><path d="M4 10h12m-5-5 5 5-5 5"/></svg></a></footer>',
         '  </div>',
         '</div>'
     ].join('\n');

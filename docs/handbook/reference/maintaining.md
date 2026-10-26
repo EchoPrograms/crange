@@ -45,3 +45,22 @@ Captures go to `output/playwright/handbook-*.png`. Review them visually, then co
 Run the static build, browse the getting-started path on desktop and mobile, open local search and test a distinctive query such as `cleanup` or `gateway`, and confirm no external network requests are required. Check screenshot readability and that referenced actions match current UI labels.
 
 Commit source, configuration, dependency lock and safe published screenshots. Do not commit `node_modules`, `.docusaurus`, static build output, generated references, browser artifacts or live lab state. Source updates do not publish to any external hosting service.
+
+## Controller network service
+
+The installed static site is served independently on **http://10.60.0.20:8769** by
+`crange-docs.service`. The unit in `ops/controller/crange-docs.service` runs a
+read-only Python static file server as a dynamic unprivileged user. It does not
+start Control, a worker, Node.js or a documentation builder. It starts at boot.
+
+The static files are in versioned `/var/www/crange-docs-releases/` directories,
+with `/var/www/crange-docs` pointing to the active build. Replacing that symlink
+publishes a new complete build without changing any lab service. Preserve a prior
+build for rollback. Install the unit under `/etc/systemd/system/`, then enable
+it with `systemctl enable --now crange-docs.service`.
+
+The intended public/private-proxy hostname is **https://docs.range.brogano.dev**.
+Point your existing Nginx upstream or Cloudflare Tunnel origin at
+`http://10.60.0.20:8769`. Configure TLS/access policy in that proxy. CRANGE Control
+and Access link to this hostname; the documentation service does not configure
+DNS, Nginx or Cloudflare.

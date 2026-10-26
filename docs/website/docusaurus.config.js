@@ -1,7 +1,7 @@
 // Static local documentation; no analytics, remote fonts or hosted search.
 module.exports = {
   title: 'CRANGE', tagline: 'Build, release and run your cyber range',
-  url: 'http://localhost:8769', baseUrl: '/', favicon: 'img/favicon.svg',
+  url: 'https://docs.range.brogano.dev', baseUrl: '/', favicon: 'img/favicon.svg',
   organizationName: 'EchoPrograms', projectName: 'crange',
   onBrokenLinks: 'throw',
   markdown: {format: 'md', hooks: {onBrokenMarkdownLinks: 'throw'}},

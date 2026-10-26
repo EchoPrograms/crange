@@ -18,10 +18,19 @@ npm --prefix docs/website run build
 npm --prefix docs/website run serve
 ```
 
-The server binds only to loopback. Stop it with Ctrl+C. The entire
+These preview commands bind only to loopback. Stop them with Ctrl+C. The entire
 `docs/website/build/` directory can also be copied to an existing private static
 web server. Package installation initially needs Internet/package access;
 reading the completed static site needs no external service.
+
+The installed controller service serves the static build on
+`http://10.60.0.20:8769/`. Its systemd unit is
+`ops/controller/crange-docs.service`. The intended proxy hostname is
+`https://docs.range.brogano.dev/`; Control and Access link there. The network
+must permit the proxy or reader to reach the controller. Port 8769 uses HTTP;
+TLS, DNS and any Cloudflare Tunnel are configured separately. See
+[Controller network service](handbook/reference/maintaining.md#controller-network-service)
+for installation and update details.
 
 The documentation server is independent of Control and never starts a worker,
 reads credentials, submits jobs or restarts infrastructure. Generated CLI,
