@@ -161,9 +161,9 @@ td:first-child { color: #f0f0f0; }
 .action-panel form { display: grid; gap: 12px; }
 .action-panel form > select { display: none; }
 .action-panel form > button { justify-self: start; }
-#job-fields, .resource-form { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 16px; min-width: 0; }
+#job-fields, .resource-form { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 16px; min-width: 0; align-items: start; align-content: start; }
 #job-fields > p, #job-fields > fieldset, #job-fields > label:has(textarea), #job-fields > label:has(select[multiple]), #job-fields > label:has([name=template]), #job-fields > label:has([name=machines]), .resource-form > p, .resource-form > fieldset, .resource-form > button { grid-column: 1/-1; }
-#job-fields > label { gap: 6px; }
+#job-fields > label, .resource-form > label { gap: 6px; align-content: start; }
 #job-fields > input[type=hidden] { display: none; }
 .check-choice { display: flex; align-items: center; gap: 7px; }
 .check-choice + .check-choice { margin-top: 7px; }

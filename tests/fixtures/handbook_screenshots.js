@@ -23,7 +23,7 @@ async page => {
  const shot = async name => {await page.locator('#content[aria-busy="false"]').waitFor(); await page.screenshot({path:'output/playwright/handbook-'+name+'.png',fullPage:true});};
  await nav('Project Overview').click(); await shot('overview');
  await nav('Scenario').click(); await page.getByRole('tab',{name:'Workspace',exact:true}).click(); await shot('workspace');
- await page.getByRole('button',{name:'Add VM',exact:true}).click(); await page.locator('#action-panel').waitFor({state:'visible'}); await page.locator('#job-fields [name=ip]').fill('20'); await shot('add-machine'); await page.locator('#close-action').click();
+ await page.getByRole('button',{name:'Add VM',exact:true}).click(); await page.locator('#action-panel').waitFor({state:'visible'}); await page.locator('#job-fields [name=name]').fill('web-01'); await page.locator('#job-fields [name=ip]').fill('20'); await page.locator('#action-title').click(); await page.locator('#action-panel').screenshot({path:'output/playwright/handbook-add-machine.png'}); await page.locator('#close-action').click();
  await page.getByRole('tab',{name:'Releases',exact:true}).click(); await shot('releases');
  await page.getByRole('tab',{name:'Team deployments',exact:true}).click(); await shot('deployments');
  await page.getByRole('button',{name:'Choose a release',exact:true}).click(); await page.getByRole('button',{name:'1.0.0 · Ready to deploy',exact:true}).waitFor(); await shot('release-picker'); await page.keyboard.press('Escape');
