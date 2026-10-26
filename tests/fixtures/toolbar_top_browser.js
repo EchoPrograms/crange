@@ -1,0 +1,93 @@
+async page => {
+  const checks = [];
+  const errors = [];
+  const check = (condition, label) => { if (!condition) throw new Error(label); checks.push(label); };
+  page.on('pageerror', error => errors.push(error.message));
+  page.on('console', message => { if (message.type() === 'error') errors.push(message.text()); });
+  await page.route('**/app/ext/crange-theme/assets/fonts/*.woff2', route => {
+    const name = new URL(route.request().url()).pathname.split('/').pop();
+    return route.fulfill({path: 'guacamole/extension/assets/fonts/' + name});
+  });
+  await page.setViewportSize({width: 1440, height: 900});
+  await page.goto('http://127.0.0.1:8786/tests/fixtures/toolbar_top.html');
+  await page.evaluate(() => localStorage.clear());
+  await page.reload();
+  await page.waitForSelector('.cr-session-reopen');
+  check(await page.locator('.native-pane:visible').count() === 2, 'Synthetic native panes remain visible with the toolbar closed');
+  const reopen = page.getByRole('button', {name: 'Show session controls'});
+  const initialHandle = await reopen.boundingBox();
+  check(initialHandle && initialHandle.x <= 1 && initialHandle.y > 840, 'Fresh minimized handle remains bottom-left');
+  await reopen.click();
+  const toolbar = page.locator('.cr-session-toolbar');
+  await toolbar.waitFor({state: 'visible'});
+  const clipboard = page.getByRole('textbox', {name: 'Clipboard'});
+  const scaleInput = page.getByRole('spinbutton', {name: 'Display scale percent'});
+  check(await scaleInput.inputValue() === '100', 'Native Guacamole zoom component renders its percentage scale input');
+  await page.getByRole('button', {name: 'Zoom in'}).click();
+  check(Math.abs(await page.evaluate(() => window.__fixture.scope.focusedClient.clientProperties.scale) - 1.1) < 0.001, 'Zoom in uses the native 10 percent scale behavior');
+  check(await page.evaluate(() => window.__fixture.scope.focusedClient.clientProperties.autoFit) === false, 'Manual zoom disables native fit-to-window behavior');
+  await scaleInput.fill('150'); await scaleInput.press('Tab');
+  await page.waitForFunction(() => Math.abs(window.__fixture.scope.focusedClient.clientProperties.scale - 1.5) < 0.001);
+  check(await scaleInput.inputValue() === '150', 'Keyboard input retains Guacamole percent-to-scale conversion');
+  await clipboard.fill('synthetic pasted text');
+  check(await page.evaluate(() => window.__clipboardUpdates.at(-1)) === 'synthetic pasted text', 'Compact clipboard input publishes through Guacamole clipboardService');
+  check(await page.evaluate(() => window.__nativeClipboardReads || 0) === 0, 'Initial clipboard sync uses the decorated service without invoking an automatic browser read');
+  await page.evaluate(() => window.__fixture.scope.$broadcast('guacClipboard', {type: 'text/plain', data: 'remote clipboard update'}));
+  check(await clipboard.inputValue() === 'remote clipboard update', 'Remote Guacamole clipboard events update the compact field without a read prompt');
+  check(await page.evaluate(() => Object.values(localStorage).every(value => !value.includes('remote clipboard update') && !value.includes('synthetic pasted text'))), 'Clipboard content is not persisted in browser storage');
+
+  const handle = page.locator('.cr-session-drag');
+  let rect = await handle.boundingBox();
+  await page.mouse.move(rect.x + rect.width / 2, rect.y + rect.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(620, 8, {steps: 8});
+  await page.mouse.up();
+  const shell = page.locator('.cr-session-shell');
+  const docked = await shell.boundingBox();
+  check(docked && docked.x === 0 && docked.y === 0 && docked.width === 1440, 'Dragging within 16 pixels of the top snaps the expanded toolbar into a full-width row');
+  check(await page.locator('.cr-session-drag').evaluate(node => node.parentElement.firstElementChild === node), 'Collapse and drag handle stays at the far-left end of the top row');
+  check(await page.evaluate(() => JSON.parse(Object.values(localStorage).find(value => value.includes('topDocked'))).topDocked), 'Top-docked expanded state persists for this connection');
+  await page.screenshot({path: 'output/playwright/guac-toolbar-top-desktop.png', fullPage: true});
+
+  await page.keyboard.down('Control');
+  await page.keyboard.down('Alt');
+  await page.keyboard.down('Shift');
+  await page.locator('.cr-session-options').waitFor({state: 'visible'});
+  await page.keyboard.up('Shift'); await page.keyboard.up('Alt'); await page.keyboard.up('Control');
+  const options = await page.locator('.cr-session-options').boundingBox();
+  const optionsViewport = await page.evaluate(() => ({width: innerWidth, height: innerHeight}));
+  check(options && options.y >= docked.height && options.y + options.height <= optionsViewport.height, 'Ctrl+Alt+Shift opens the unchanged full Options menu below the docked toolbar');
+  check(await page.locator('.cr-session-options guac-clipboard').count() === 1, 'Full Guacamole clipboard editor remains in Options');
+  check(await page.locator('.cr-session-options .cr-help').count() === 0, 'Options menu omits the removed redundant Advanced controls description');
+  await page.getByRole('button', {name: 'Close session options'}).click();
+
+  await handle.click();
+  await page.getByRole('button', {name: 'Show session controls'}).waitFor({state: 'visible'});
+  check(await page.locator('.cr-session-reopen:visible').count() === 1, 'Top-docked controls can still collapse');
+  const minimized = await page.locator('.cr-session-reopen').boundingBox();
+  check(minimized && minimized.x <= 1 && minimized.y > 840, 'Collapsing keeps the independent bottom-left minimized dock');
+  await page.reload();
+  await page.waitForSelector('.cr-session-reopen');
+  await page.getByRole('button', {name: 'Show session controls'}).click();
+  await page.waitForFunction(() => document.querySelector('.cr-session-shell').getBoundingClientRect().width === innerWidth);
+  check((await shell.boundingBox()).width === 1440, 'Reopening after refresh restores the top-docked full-width row');
+
+  await page.setViewportSize({width: 390, height: 844});
+  const mobileBox = await shell.boundingBox();
+  const mobile = await page.evaluate(() => ({width: innerWidth, docWidth: document.documentElement.scrollWidth, toolbarWidth: document.querySelector('.cr-session-toolbar').scrollWidth, shellWidth: document.querySelector('.cr-session-shell').getBoundingClientRect().width}));
+  check(mobileBox && mobile.shellWidth === mobile.width && mobile.docWidth <= mobile.width && mobile.toolbarWidth <= mobile.width, 'Mobile docked toolbar wraps controls without horizontal page overflow');
+  await page.keyboard.down('Control'); await page.keyboard.down('Alt'); await page.keyboard.down('Shift');
+  await page.locator('.cr-session-options').waitFor({state: 'visible'});
+  await page.keyboard.up('Shift'); await page.keyboard.up('Alt'); await page.keyboard.up('Control');
+  const mobileOptions = await page.locator('.cr-session-options').boundingBox();
+  check(mobileOptions && mobileOptions.x >= 0 && mobileOptions.x + mobileOptions.width <= 391 && mobileOptions.y + mobileOptions.height <= 845, 'Mobile Options menu stays within the viewport');
+  await page.screenshot({path: 'output/playwright/guac-toolbar-top-mobile.png', fullPage: true});
+
+  await page.evaluate(() => window.__fixture.scope.$apply(() => { const s = window.__fixture.scope.crSession; s.box = {state: 'running'}; s.toggle('power'); }));
+  await page.locator('.cr-session-power-menu').waitFor({state: 'visible'});
+  check(await page.locator('.cr-session-power-menu').count() === 1, 'Server power actions remain available');
+  check(await page.locator('.cr-session-power-menu .cr-help').count() === 0, 'Power menu omits the removed redundant description');
+  check(await page.locator('.cr-session-power-menu > button').first().evaluate(node => getComputedStyle(node).borderTopColor) === 'rgba(0, 0, 0, 0)', 'Power actions use plain borderless menu rows');
+  check(errors.length === 0, 'Synthetic toolbar fixture has no browser errors');
+  return {checks, errors, syntheticGuestRequests: 0};
+}

@@ -52,6 +52,11 @@
     // Keeping the original client markup also retains optional extensions.
     function transform(key, value) {
         if (key === 'app/settings/templates/settingsPreferences.html') return preferences;
+        if (key === 'app/client/templates/guacClientZoom.html') {
+            return value.replace('<input type="number" guac-zoom-ctrl', '<input type="number" aria-label="Display scale percent" guac-zoom-ctrl')
+                .replace('<div ng-click="zoomOut()" class="client-zoom-out"><img src="images/settings/zoom-out.svg" alt="-"></div>', '<button type="button" ng-click="zoomOut()" class="client-zoom-out" aria-label="Zoom out"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M3 8h10"/></svg></button>')
+                .replace('<div ng-click="zoomIn()" class="client-zoom-in"><img src="images/settings/zoom-in.svg" alt="+"></div>', '<button type="button" ng-click="zoomIn()" class="client-zoom-in" aria-label="Zoom in"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M3 8h10M8 3v10"/></svg></button>');
+        }
         if (key === 'app/client/templates/client.html' && value.indexOf('<crange-session-toolbar') === -1) {
             return value.replace('<guac-viewport>', '<guac-viewport><crange-session-toolbar></crange-session-toolbar>')
                 .replace('ng-class="{open: menu.shown}" id="guac-menu"', 'ng-class="{open: menu.shown && crSession.advanced}" id="guac-menu"')
@@ -68,7 +73,7 @@
             return cache;
         }]);
     }]).run(['$templateCache', function (cache) {
-        ['app/client/templates/client.html', 'app/settings/templates/settingsPreferences.html'].forEach(function (key) {
+        ['app/client/templates/client.html', 'app/client/templates/guacClientZoom.html', 'app/settings/templates/settingsPreferences.html'].forEach(function (key) {
             var existing = cache.get(key);
             if (typeof existing === 'string') cache.put(key, existing);
         });
@@ -110,6 +115,8 @@
 <div class="cr-session-shell" ng-class="{'align-right': crSession.alignment === 'right', 'is-collapsed': !crSession.visible}">
   <div class="cr-session-toolbar" ng-show="crSession.visible" role="toolbar" aria-label="Remote session controls">
     <button type="button" class="cr-session-icon cr-session-drag" aria-label="Collapse session controls" aria-expanded="true" crange-help="Click to collapse; drag to move. Arrow keys move the toolbar; Home resets its position">${icon('drag')}</button>
+    <guac-client-zoom class="cr-session-zoom" ng-if="focusedClient" client="focusedClient"></guac-client-zoom>
+    <input class="cr-session-clipboard" type="text" aria-label="Clipboard" placeholder="Clipboard" autocomplete="off" spellcheck="false" ng-model="crSession.clipboardText" ng-change="crSession.updateClipboard()">
     ${button('home', 'Return to project', 'crSession.home()')}
     <button type="button" class="cr-session-disconnect" ng-click="crSession.disconnect()" crange-help="Disconnect the current remote session. The server keeps running">Disconnect</button>
     <button type="button" class="cr-session-name cr-session-selector" ng-click="crSession.toggle('connections')" aria-expanded="{{crSession.panel === 'connections'}}" aria-label="Select connections"><span>{{focusedClient.name || getName(clientGroup)}}</span><span class="cr-protocol-label" ng-if="focusedClient.protocol">{{focusedClient.protocol | uppercase}}</span><span class="cr-session-count" ng-if="clientGroup.clients.length > 1">{{clientGroup.clients.length}} selected</span><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="m5 8 5 5 5-5"/></svg></button>
@@ -139,7 +146,6 @@
       <label>Touch input<select ng-model="menu.emulateAbsoluteMouse" ng-options="choice.value as choice.label for choice in crSession.mouseChoices"></select></label>
     </div>
     <button type="button" ng-click="crSession.openAdvanced()">Advanced controls</button>
-    <p class="cr-help">Advanced controls include devices, file transfer, sharing and protocol settings.</p>
   </section>
   <section class="cr-session-popover cr-session-power-menu" ng-if="crSession.panel === 'power'" aria-label="Server power controls">
     <header><h2>Server power</h2>${button('close', 'Close power controls', 'crSession.close()')}</header>
@@ -147,7 +153,6 @@
     <button type="button" ng-if="crSession.box.state === 'running'" ng-click="crSession.power('shutdown')" ng-disabled="crSession.busy">Shut down safely</button>
     <button type="button" ng-if="crSession.box.state === 'running' || crSession.action === 'shutdown'" ng-click="crSession.power('stop')" ng-disabled="crSession.busy && crSession.action !== 'shutdown'" class="cr-danger">Force stop</button>
     <button type="button" ng-if="crSession.box.state === 'running'" ng-click="crSession.power('restart')" ng-disabled="crSession.busy">Restart</button>
-    <p class="cr-help">Power actions affect the server and all connected users. Snapshot management is available on its project page.</p>
   </section>
   <section class="cr-session-popover cr-session-network" ng-if="crSession.panel === 'network'" aria-label="Network map">
     <header><h2>Network map</h2>${button('close', 'Close network map', 'crSession.close()')}</header>
@@ -173,10 +178,15 @@
   <p class="cr-session-feedback" ng-if="crSession.message" ng-class="{'failed': crSession.failed}" role="status">{{crSession.message}}</p>
 </div>`;
 
-    angular.module('client').directive('crangeSessionToolbar', ['$http', '$interval', '$location', 'authenticationService', 'preferenceService', 'guacFullscreen', function ($http, $interval, $location, auth, preferenceService, fullscreen) {
+    angular.module('client').directive('crangeSessionToolbar', ['$http', '$interval', '$location', 'authenticationService', 'preferenceService', 'guacFullscreen', '$injector', function ($http, $interval, $location, auth, preferenceService, fullscreen, $injector) {
         return {restrict: 'E', scope: false, template: toolbar, link: function (scope, element) {
             var prefs = preferenceService.preferences, destroyed = false, boxes = [], poll = null, appliedScale = Object.create(null);
             var s = scope.crSession = {visible: false, alignment: 'left', panel: null, advanced: false, box: null, networkLoading: true, displayScale: Number(prefs.crangeDisplayScale) || 1, network: [], mouseChoices: [{value: true, label: 'Touchscreen'}, {value: false, label: 'Touchpad'}]};
+            var clipboardService = $injector.get('clipboardService'), ClipboardData = $injector.get('ClipboardData');
+            s.clipboardText = '';
+            s.updateClipboard = function () { if (clipboardService) clipboardService.setClipboard(new ClipboardData({type: 'text/plain', data: s.clipboardText || ''})); };
+            var unlistenClipboard = scope.$on('guacClipboard', function (_event, data) { if (data && typeof data.data === 'string') scope.$evalAsync(function () { s.clipboardText = data.data; }); });
+            if (clipboardService && typeof clipboardService.getClipboard === 'function') clipboardService.getClipboard().then(function (data) { if (!destroyed && data && typeof data.data === 'string') scope.$evalAsync(function () { s.clipboardText = data.data; }); }, angular.noop);
             function request(payload) {
                 return $http.post('api/ext/crange-control/control', payload, {headers: {'Guacamole-Token': auth.getCurrentToken(), 'X-Guacamole-Data-Source': auth.getDataSource()}}).then(function (r) { return r.data; });
             }
@@ -184,7 +194,7 @@
             var username = typeof auth.getCurrentUsername === 'function' ? auth.getCurrentUsername() : 'anonymous';
             var userKey = 'crange-session/' + encodeURIComponent(auth.getDataSource() + '/' + username);
             var shell = element[0].querySelector('.cr-session-shell'), handle = element[0].querySelector('.cr-session-drag'), reopen=element[0].querySelector('.cr-session-reopen'), drag = null, suppressClick=false;
-            var activeToolbarKey = null, position = null, dock = {edge:'bottom',offset:0};
+            var activeToolbarKey = null, position = null, dock = {edge:'bottom',offset:0}, topDocked = false;
             function toolbarKey(client) {
                 if (!client || client.id === undefined || client.id === null) return null;
                 return userKey + '/connection/' + encodeURIComponent(auth.getDataSource() + '/' + String(client.id)) + '/toolbar';
@@ -192,7 +202,7 @@
             function validPosition(value) { return value && Number.isFinite(value.x) && Number.isFinite(value.y); }
             function validDock(value) { return value && ['left','right','top','bottom'].indexOf(value.edge) >= 0 && Number.isFinite(value.offset); }
             function saveToolbarState() {
-                if (activeToolbarKey) saveLocal(activeToolbarKey, {position:position,dock:dock,hidden:!s.visible});
+                if (activeToolbarKey) saveLocal(activeToolbarKey, {position:position,dock:dock,topDocked:topDocked,hidden:!s.visible});
             }
             function loadToolbarState(client) {
                 var key = toolbarKey(client);
@@ -202,6 +212,7 @@
                 var saved = stored(key, null);
                 position = saved && validPosition(saved.position) ? saved.position : null;
                 dock = saved && validDock(saved.dock) ? saved.dock : {edge:'bottom',offset:0};
+                topDocked = !!(saved && saved.topDocked);
                 s.visible = !!(saved && saved.hidden === false);
                 window.requestAnimationFrame(function () {
                     if (!position) position = {x:10,y:Math.max(10,window.innerHeight-(shell.offsetHeight||44)-10)};
@@ -347,12 +358,16 @@
             }
             function clampToolbar() {
                 if (!shell) return;
+                shell.classList.toggle('is-top-docked',s.visible&&topDocked);
                 ['left','right','top','bottom'].forEach(function(edge){shell.classList.toggle('dock-'+edge,!s.visible&&dock.edge===edge);});
-                if (!s.visible) {
+                if (s.visible&&topDocked) {
+                    shell.style.left='0px';shell.style.right='0px';shell.style.top='0px';shell.style.width='100vw';shell.style.maxWidth='100vw';
+                } else if (!s.visible) {
                     var width=reopen.offsetWidth||18,height=reopen.offsetHeight||56;
-                    shell.style.left=Math.round(dock.edge==='left'?0:dock.edge==='right'?Math.max(0,window.innerWidth-width):Math.max(0,Math.min(window.innerWidth-width,dock.offset*window.innerWidth-width/2)))+'px';
+                    shell.style.width='';shell.style.maxWidth='';shell.style.left=Math.round(dock.edge==='left'?0:dock.edge==='right'?Math.max(0,window.innerWidth-width):Math.max(0,Math.min(window.innerWidth-width,dock.offset*window.innerWidth-width/2)))+'px';
                     shell.style.top=Math.round(dock.edge==='top'?0:dock.edge==='bottom'?Math.max(0,window.innerHeight-height):Math.max(0,Math.min(window.innerHeight-height,dock.offset*window.innerHeight-height/2)))+'px';shell.style.right='auto';
                 } else if (position && Number.isFinite(position.x) && Number.isFinite(position.y)) {
+                    shell.style.width='';shell.style.maxWidth='';
                     shell.style.left = Math.round(Math.max(6, Math.min(position.x, window.innerWidth - shell.offsetWidth - 6))) + 'px';
                     shell.style.top = Math.round(Math.max(6, Math.min(position.y, window.innerHeight - shell.offsetHeight - 6))) + 'px'; shell.style.right = 'auto';
                 }
@@ -375,7 +390,11 @@
                 event.preventDefault();event.stopPropagation();
                 if(Math.hypot(event.clientX-drag.startX,event.clientY-drag.startY)<5&&!drag.moved)return;
                 drag.moved=true;
-                if(s.visible)position={x:event.clientX-drag.x,y:event.clientY-drag.y};
+                if(s.visible) {
+                    var nextPosition={x:event.clientX-drag.x,y:event.clientY-drag.y};
+                    if(event.clientY<=16) { if(!topDocked) position={x:Math.max(6,nextPosition.x),y:Math.max(6,nextPosition.y)}; topDocked=true; }
+                    else { topDocked=false; position=nextPosition; }
+                }
                 else dock=nearestEdge(event.clientX,event.clientY);
                 clampToolbar();
             }
@@ -384,7 +403,7 @@
                 var previous=drag;drag=null;suppressClick=previous.moved||cancelled;
                 document.documentElement.classList.remove('cr-session-dragging');
                 if(previous.target.hasPointerCapture&&previous.target.hasPointerCapture(previous.id))previous.target.releasePointerCapture(previous.id);
-                if(s.visible){var rect=shell.getBoundingClientRect();position={x:rect.left,y:rect.top};}
+                if(s.visible&&!topDocked){var rect=shell.getBoundingClientRect();position={x:rect.left,y:rect.top};}
                 saveToolbarState();
             }
             function pointerUp(event){finishDrag(event,false);}
@@ -394,7 +413,7 @@
             function moveKeys(event) {
                 if (['ArrowLeft','ArrowRight','ArrowUp','ArrowDown','Home'].indexOf(event.key) === -1) return;
                 event.preventDefault(); event.stopPropagation(); var rect = shell.getBoundingClientRect(), step = event.shiftKey ? 40 : 10;
-                if(s.visible)position = event.key === 'Home' ? {x: 10, y: Math.max(10,window.innerHeight-shell.offsetHeight-10)} : {x: rect.left + (event.key === 'ArrowRight' ? step : event.key === 'ArrowLeft' ? -step : 0), y: rect.top + (event.key === 'ArrowDown' ? step : event.key === 'ArrowUp' ? -step : 0)};
+                if(s.visible) { topDocked=false; position = event.key === 'Home' ? {x: 10, y: Math.max(10,window.innerHeight-shell.offsetHeight-10)} : {x: rect.left + (event.key === 'ArrowRight' ? step : event.key === 'ArrowLeft' ? -step : 0), y: rect.top + (event.key === 'ArrowDown' ? step : event.key === 'ArrowUp' ? -step : 0)}; }
                 else dock=event.key==='Home'?{edge:'bottom',offset:0}:nearestEdge(rect.left+(reopen.offsetWidth||18)/2+(event.key==='ArrowRight'?step:event.key==='ArrowLeft'?-step:0),rect.top+(reopen.offsetHeight||56)/2+(event.key==='ArrowDown'?step:event.key==='ArrowUp'?-step:0));
                 clampToolbar(); saveToolbarState();
             }
@@ -402,7 +421,7 @@
             bind(handle,'addEventListener');bind(reopen,'addEventListener');
             window.addEventListener('blur',blurred);window.addEventListener('resize', clampToolbar); window.requestAnimationFrame(clampToolbar);
             scope.$on('$destroy', function () {
-                destroyed = true; window.removeEventListener('keydown', keydown, true); window.removeEventListener('keyup', keyup, true); window.removeEventListener('resize', clampToolbar);
+                destroyed = true; if (unlistenClipboard) unlistenClipboard(); window.removeEventListener('keydown', keydown, true); window.removeEventListener('keyup', keyup, true); window.removeEventListener('resize', clampToolbar);
                 blurred();window.removeEventListener('blur',blurred);bind(handle,'removeEventListener');bind(reopen,'removeEventListener');
                 $interval.cancel(statusTimer); $interval.cancel(networkTimer); if (poll) $interval.cancel(poll);
             });

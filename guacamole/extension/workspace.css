@@ -54,8 +54,20 @@
 /* Floating session controls never replace or filter the remote display. */
 .cr-session-shell { position: fixed; top: 10px; left: 10px; right: auto; z-index: 50; max-width: calc(100vw - 20px); color: var(--cr-text); font-size: 13px; }
 .cr-session-shell.align-right { left: auto; right: 10px; }
+.cr-session-shell.is-top-docked { left: 0; right: 0; top: 0; width: 100vw; max-width: 100vw; }
 .cr-session-toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; padding: 6px; background: #171717; border: 1px solid var(--cr-line-strong); border-radius: var(--cr-radius); box-shadow: 0 5px 18px #0008; max-width: 100%; }
 .cr-session-toolbar button, .cr-session-popover button, .cr-session-reopen { display: inline-flex; align-items: center; justify-content: center; gap: 7px; min-height: 32px; font-size: 13px; line-height: 1.4; }
+.client .client-zoom .client-zoom-out, .client .client-zoom .client-zoom-in { display: inline-flex; align-items: center; justify-content: center; box-sizing: border-box; width: 32px; height: 32px; max-width: none; margin: 3px; padding: 7px !important; color: var(--cr-text); border: 1px solid var(--cr-line-strong); border-radius: 0; background: transparent; cursor: pointer; }
+.client .client-zoom .client-zoom-out:hover, .client .client-zoom .client-zoom-in:hover { color: #fff; border-color: var(--cr-line-strong); background: #292929; }
+.client .client-zoom .client-zoom-out svg, .client .client-zoom .client-zoom-in svg { display: block; width: 14px; height: 14px; flex: none; }
+.client .client-zoom .client-zoom-state { font-size: 13px; }
+.client .client-zoom .client-zoom-state input { box-sizing: border-box; width: 4em; min-height: 32px; padding: 3px 4px; text-align: right; font-size: 13px; }
+.cr-session-toolbar .client-zoom { display: block; flex: 0 1 auto; min-width: 0; }
+.cr-session-toolbar .client-zoom-editor { display: flex; align-items: center; gap: 2px; }
+.cr-session-toolbar .client-zoom .client-zoom-out, .cr-session-toolbar .client-zoom .client-zoom-in { width: 28px; height: 32px; margin: 0; padding: 7px !important; }
+.cr-session-toolbar .client-zoom .client-zoom-state input { width: 48px; min-height: 32px; }
+.cr-session-toolbar .client-zoom .client-zoom-autofit { display: none; }
+.cr-session-clipboard { flex: 0 1 220px; width: 220px; min-width: min(160px,calc(100vw - 36px)); max-width: calc(100vw - 36px); height: 32px; min-height: 32px !important; padding: 3px 8px !important; }
 .cr-session-shell svg { width: 16px; height: 16px; display: block; flex: none; }
 .cr-session-toolbar .cr-session-icon, .cr-session-popover .cr-session-icon { padding: 5px !important; width: 32px; min-width: 32px; }
 .cr-session-toolbar .cr-session-disconnect { color: var(--cr-text) !important; background: #181818 !important; border-color: var(--cr-control-line) !important; }
@@ -75,7 +87,8 @@
 .cr-network-row > span { overflow-wrap: anywhere; }
 .cr-network-row code { font: inherit; color: #ddd; user-select: all; }
 .cr-session-power-menu { width: min(280px,calc(100vw - 20px)); }
-.cr-session-power-menu > button { width: 100%; justify-content: flex-start; margin-bottom: 5px; }
+.cr-session-power-menu > button { display: block; width: 100%; justify-content: flex-start; margin: 0; padding: 6px 8px !important; text-align: left; border: 1px solid transparent !important; border-radius: 0 !important; background: transparent !important; box-shadow: none !important; }
+.cr-session-power-menu > button:hover { color: #fff !important; background: #2a2a2a !important; }
 .cr-session-shell .cr-danger { color: var(--cr-text) !important; }
 .cr-session-feedback { position: fixed; left: 16px; bottom: 16px; max-width: calc(100vw - 32px); padding: 10px 14px; border: 1px solid var(--cr-line-strong); background: #171717; overflow-wrap: anywhere; }
 .cr-session-feedback.failed { color: var(--cr-text); border-color: var(--cr-line-strong); }
@@ -86,7 +99,7 @@
 .client #guac-menu .header { display: flex; align-items: center; gap: 8px; padding: 10px 12px; border-bottom: 1px solid var(--cr-line); }
 .client #guac-menu .header h2 { flex: 1 1 auto; min-width: 0; margin: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 14px; }
 .client #guac-menu .header > .user-menu, .client #guac-menu .header > guac-user-menu { flex: 0 1 auto; max-width: 45%; margin: 0; }
-.client #guac-menu .cr-advanced-close { display: inline-flex; align-items: center; justify-content: center; flex: none; width: 32px; height: 32px; padding: 0 !important; margin: 0; }
+.client #guac-menu .cr-advanced-close { display: inline-flex; align-items: center; justify-content: center; flex: none; box-sizing: border-box; width: 32px; min-width: 32px; height: 32px; padding: 0 !important; margin: 0; }
 .client #guac-menu .cr-advanced-close svg { display: block; width: 16px; height: 16px; }
 .client #guac-menu .menu-body { position: static !important; overflow: visible !important; padding: 12px; }
 .client #guac-menu .menu-section { margin: 0 0 18px; padding: 0; }
@@ -102,6 +115,9 @@
     .cr-layout-switch { margin-left: 0; }
     .cr-session-name { max-width: calc(100vw - 180px); }
     .cr-session-toolbar { gap: 4px; }
+    .cr-session-clipboard { flex-basis: min(220px,calc(100vw - 36px)); width: min(220px,calc(100vw - 36px)); height: 40px; min-height: 40px !important; }
+    .cr-session-toolbar .client-zoom .client-zoom-out, .cr-session-toolbar .client-zoom .client-zoom-in { min-height: 40px; }
+    .cr-session-toolbar .client-zoom .client-zoom-state input { min-height: 40px; }
     .cr-session-popover { max-height: calc(100dvh - 180px); }
     .settings-view { padding: 12px; }
     .settings-view .page-tabs { overflow-x: auto; }
@@ -320,5 +336,5 @@
 @media (pointer: coarse), (max-width: 600px) {
  .client #guac-menu .client-zoom-in, .client #guac-menu .client-zoom-out { width: 44px; height: 44px; }
  .client #guac-menu .client-zoom-state input { min-height: 44px; }
- .client #guac-menu .cr-advanced-close { width: 44px; height: 44px; }
+ .client #guac-menu .cr-advanced-close { width: 44px; min-width: 44px; height: 44px; }
 }

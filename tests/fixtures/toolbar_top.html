@@ -1,0 +1,72 @@
+<!doctype html>
+<html lang="en" ng-app="client">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Synthetic CRANGE toolbar docking fixture</title>
+  <link rel="stylesheet" href="../../guacamole/extension/theme.css">
+  <link rel="stylesheet" href="../../guacamole/extension/workspace.css">
+  <style>
+    @font-face { font-family: "IBM Plex Sans"; font-style: normal; font-weight: 400; src: url("../../guacamole/extension/assets/fonts/IBMPlexSans-Regular.woff2") format("woff2"); }
+    @font-face { font-family: "IBM Plex Sans"; font-style: normal; font-weight: 500; src: url("../../guacamole/extension/assets/fonts/IBMPlexSans-Medium.woff2") format("woff2"); }
+    @font-face { font-family: "IBM Plex Sans"; font-style: normal; font-weight: 600; src: url("../../guacamole/extension/assets/fonts/IBMPlexSans-SemiBold.woff2") format("woff2"); }
+    @font-face { font-family: "IBM Plex Sans"; font-style: normal; font-weight: 700; src: url("../../guacamole/extension/assets/fonts/IBMPlexSans-Bold.woff2") format("woff2"); }
+    * { box-sizing: border-box; }
+    html, body { width: 100%; height: 100%; margin: 0; overflow: hidden; }
+    body.client { min-height: 100vh; }
+    .client-view { position: absolute; inset: 0; }
+    .client-view-content { display: flex; flex-direction: column; width: 100%; height: 100%; }
+    .client-body { position: relative; flex: 1 1 auto; min-width: 0; min-height: 0; padding: 28px; }
+    .native-panes { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; width: 100%; height: 100%; }
+    .native-pane { display: grid; align-content: start; gap: 14px; min-width: 0; padding: 18px; border: 1px solid #343434; background: #111; }
+    .native-pane h2 { margin: 0; font-size: 16px; }
+    .native-pane code { color: #adadad; }
+    @media (max-width: 600px) { .client-body { padding: 12px; } .native-panes { grid-template-columns: 1fr; grid-template-rows: 1fr 1fr; } }
+  </style>
+  <script src="https://ajax.googleapis.com/ajax/libs/angularjs/1.8.3/angular.js"></script>
+  <script>
+    angular.module('clipboard', ['ng'])
+      .factory('ClipboardData', function () { return function (value) { Object.assign(this, value || {}); }; })
+      .factory('clipboardService', ['$rootScope', '$q', 'ClipboardData', function ($rootScope, $q, ClipboardData) {
+        var current = new ClipboardData({type: 'text/plain', data: ''});
+        return {
+          getClipboard: function () { window.__nativeClipboardReads = (window.__nativeClipboardReads || 0) + 1; return $q.when(current); },
+          setClipboard: function (data) { current = data; (window.__clipboardUpdates || (window.__clipboardUpdates = [])).push(data.data); $rootScope.$broadcast('guacClipboard', data); return $q.when(); },
+          resyncClipboard: function () { return $q.when(current); }
+        };
+      }]);
+    angular.module('client', ['ng', 'clipboard'])
+      .filter('translate', function () { return function (value) { return value; }; })
+      .value('preferenceService', {preferences: {crangeDisplayScale: 1, crangeExitBehavior: 'home', timezone: 'America/Chicago', language: 'en'}, save: angular.noop})
+      .value('authenticationService', {getCurrentToken: function () { return 'synthetic-token'; }, getDataSource: function () { return 'synthetic-source'; }, getCurrentUsername: function () { return 'fixture-user'; }})
+      .value('guacFullscreen', {toggleFullscreenMode: angular.noop})
+      .factory('$http', ['$q', function ($q) { return {get: function (url) { var node = document.getElementById(url); return $q.when({data: node ? node.innerHTML : ''}); }, post: function (_url, payload) { (window.__fixtureRequests || (window.__fixtureRequests = [])).push(payload); if (payload.operation === 'list') return $q.when({data: {boxes: []}}); if (payload.operation === 'status') return $q.when({data: {state: 'unknown'}}); return $q.when({data: {job: {status: 'running'}}}); }}; }])
+      .factory('$interval', function () { var interval = function () { return {}; }; interval.cancel = angular.noop; return interval; })
+      .directive('guacClientZoom', function () { return {restrict: 'E', replace: true, scope: {client: '='}, templateUrl: 'app/client/templates/guacClientZoom.html', controller: ['$scope', function ($scope) { $scope.zoomOut = function () { $scope.client.clientProperties.autoFit = false; $scope.client.clientProperties.scale -= 0.1; }; $scope.zoomIn = function () { $scope.client.clientProperties.autoFit = false; $scope.client.clientProperties.scale += 0.1; }; $scope.zoomSet = angular.noop; $scope.changeAutoFit = function () { if (!$scope.client.clientProperties.autoFit) $scope.client.clientProperties.scale = 1; }; $scope.autoFitDisabled = angular.noop; }]}; })
+      .directive('guacZoomCtrl', function () { return {restrict: 'A', require: 'ngModel', priority: 101, link: function (_scope, _element, _attrs, ngModel) { ngModel.$formatters.push(function (value) { return Math.round(value * 100); }); ngModel.$parsers.push(function (value) { return Math.round(value) / 100; }); }}; })
+      .controller('FixtureController', ['$scope', function ($scope) {
+        $scope.menu = {shown: false, emulateAbsoluteMouse: false, inputMethod: 'none'};
+        $scope.focusedClient = {id: 'synthetic-native-connection', name: 'Synthetic RDP', title: 'Synthetic RDP', protocol: 'rdp', clientProperties: {focused: true, scale: 1, autoFit: true}};
+        $scope.clientGroup = {clients: [$scope.focusedClient]};
+        $scope.getName = function () { return 'Synthetic RDP'; };
+        $scope.disconnect = angular.noop;
+        window.__fixture = {scope: $scope};
+      }]);
+    angular.module('settings', ['ng']);
+  </script>
+  <script src="../../guacamole/extension/clipboard.js"></script>
+  <script src="../../guacamole/extension/workspace.js"></script>
+  <script type="text/ng-template" id="app/client/templates/guacClientZoom.html"><div class="client-zoom"><div class="client-zoom-editor"><div ng-click="zoomOut()" class="client-zoom-out"><img src="images/settings/zoom-out.svg" alt="-"></div><div class="client-zoom-state"><input type="number" guac-zoom-ctrl ng-model="client.clientProperties.scale" ng-model-options="{ updateOn: 'blur submit' }" ng-change="zoomSet()">%</div><div ng-click="zoomIn()" class="client-zoom-in"><img src="images/settings/zoom-in.svg" alt="+"></div></div><div class="client-zoom-autofit"><label><input ng-model="client.clientProperties.autoFit" ng-change="changeAutoFit()" ng-disabled="autoFitDisabled()" type="checkbox" id="auto-fit">{{'CLIENT.TEXT_ZOOM_AUTO_FIT' | translate}}</label></div></div></script>
+</head>
+<body class="client" ng-controller="FixtureController">
+  <main class="client-view"><div class="client-view-content">
+    <div class="client-body">
+      <crange-session-toolbar></crange-session-toolbar>
+      <div class="native-panes" aria-label="Synthetic native Guacamole connection panes">
+        <section class="native-pane"><h2>Synthetic RDP guest</h2><code>Display · keyboard · clipboard · resize remain Guacamole-owned</code><p>Connection pane stays visible beneath session controls.</p></section>
+        <section class="native-pane"><h2>Second native pane</h2><code>Ctrl+Alt+Shift opens the full Options menu</code></section>
+      </div>
+    </div>
+  </div></main>
+</body>
+</html>

@@ -32,13 +32,15 @@ Use the session's connection selector to open several assigned connections. Guac
 
 ## Place the session controls
 
-A connection's options bar starts minimized in the bottom-left corner. Select its small edge tab to open it, or use **Ctrl+Alt+Shift** for quick access to session options. Drag the bar to move the expanded controls; drag the minimized tab to place it along an edge.
+A connection's options bar starts minimized in the bottom-left corner. Select its small edge tab to open it, or use **Ctrl+Alt+Shift** for the full session options menu. Drag the handle at the left to move the expanded controls. Drag the bar against the top edge to dock it across the full top row; drag the same handle away from the top to make it float again. Drag the minimized tab separately to place it along an edge.
 
-CRANGE remembers the expanded position, minimized-tab position and open or closed state separately for each connection and account in that browser. Switching to another connection restores its own arrangement. Clearing browser storage resets these choices.
+CRANGE remembers the expanded position, top-docked or floating mode, minimized-tab position and open or closed state separately for each connection and account in that browser. Switching to another connection restores its own arrangement. Clearing browser storage resets these choices.
 
 **Disconnect** from **Other connections** returns to the main page showing all projects. A managed lab connection returns to its owning project. Disconnecting a remote session leaves the machine running.
 
 ## Clipboard access
+
+The expanded toolbar has a compact, single-line **Clipboard** field for quick text entry and paste. Its display-scale controls provide minus, percentage and plus controls for the focused connection. The full clipboard editor remains in **Options** and is available through **Ctrl+Alt+Shift**.
 
 Selecting connections or opening session controls does not request clipboard permission. Automatic clipboard sync runs only when the browser has already granted clipboard-read access. If it requires approval or does not support that permission, use **Options → Clipboard** to paste text into Guacamole's clipboard editor. Ordinary fields keep their normal paste behavior.
 
