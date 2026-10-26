@@ -91,7 +91,7 @@ main { margin-left: var(--sidebar-width); min-width: 0; padding: 0 0 30px; }
 .project-context { margin: 12px 8px; padding: 12px 0; border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); }
 .project-picker { display: grid; gap: 6px; color: var(--muted); font-size: 12px; }
 .project-picker select { width: 100%; max-width: 100%; min-width: 0; text-overflow: ellipsis; font-size: 12px; }
-#refresh, #guac-link { display: inline-flex; align-items: center; justify-content: center; white-space: nowrap; }
+#refresh, #guac-link, #docs-link { display: inline-flex; align-items: center; justify-content: center; white-space: nowrap; }
 #content { min-width: 0; padding: 16px 18px; }
 .card { min-width: 0; background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); padding: 12px; margin: 12px 0; }
 .card > h3:first-child, .card > h4:first-child { margin-top: 0; }
@@ -283,9 +283,9 @@ td:first-child { color: #f0f0f0; }
 }
 @media(max-width:520px) {
   .page-header { flex-wrap: wrap; }
-  .page-heading { flex: 1; }
-  .header-actions { flex: 0 1 auto; }
-  #guac-link { order: 2; }
+  .page-heading { flex: 1 0 100%; }
+  .header-actions { flex: 0 1 auto; max-width: 100%; flex-wrap: wrap; justify-content: flex-end; }
+  #guac-link, #docs-link { order: 2; }
   #refresh { order: 3; }
   #job-fields, .resource-form, .default-box { grid-template-columns: 1fr; }
   #content > .user-create .user-create-form { grid-template-columns: 1fr; }
@@ -453,6 +453,3 @@ pre, code { font-family: "IBM Plex Mono", ui-monospace, Consolas, monospace; }
 .account-audit > summary { cursor: pointer; padding: 8px 0; font-weight: 600; }
 
 .template-inventory-progress { display: flex; align-items: center; gap: 8px; min-height: 20px; }
-
-.sidebar-docs { display: block; margin: 8px 14px; color: var(--muted); font-size: 13px; }
-.sidebar-docs:hover { color: var(--text); }

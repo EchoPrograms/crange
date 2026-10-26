@@ -135,3 +135,18 @@
   .cr-login .cr-login-form { padding: 24px; }
   .cr-login .cr-login-footer { padding: 14px 24px; }
 }
+
+/* Control documentation stays outside the shared Access login card. */
+#login.cr-login { position: relative; padding-top: 72px; padding-bottom: 72px; }
+#login .cr-login-docs {
+  position: absolute;
+  top: 16px;
+  right: 24px;
+  display: inline-flex;
+  align-items: center;
+  min-height: 44px;
+  color: var(--blue, #91b8df);
+  font-size: 14px;
+  text-decoration: none;
+}
+#login .cr-login-docs:hover { color: #b6d6f5; text-decoration: underline; text-underline-offset: 3px; }
