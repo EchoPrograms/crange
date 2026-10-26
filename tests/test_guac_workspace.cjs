@@ -24,10 +24,13 @@ async function flush(){await new Promise(resolve=>setImmediate(resolve));}
  preferenceService.preferences.timezone='America/Chicago';preferences.presentation.machineLayout='list';preferences.savePresentation();assert.equal(saves,1);assert.equal(preferenceService.preferences.crangeMachineLayout,'list');
  let decorator;
  configs[0]({decorator(_key,definition){decorator=definition.at(-1);}});
- const templates={};decorator({put(key,value){templates[key]=value;return value;}}).put('app/client/templates/client.html','<guac-viewport><div class="client-body" guac-touch-drag="menuDrag"><guac-tiled-clients></guac-tiled-clients></div><div ng-class="{open: menu.shown}" id="guac-menu"><div ng-if="menu.shown" guac-touch-drag="menuDrag"></div></div></guac-viewport>');
+ const templates={};decorator({put(key,value){templates[key]=value;return value;}}).put('app/client/templates/client.html','<guac-viewport><div class="client-body" guac-touch-drag="menuDrag"><guac-tiled-clients></guac-tiled-clients></div><div ng-class="{open: menu.shown}" id="guac-menu"><div ng-if="menu.shown" guac-touch-drag="menuDrag"><div class="header"><h2 ng-hide="rootConnectionGroups">name</h2><h2 class="connection-select-menu" ng-show="rootConnectionGroups"><guac-menu>connections</guac-menu></h2><guac-user-menu local-actions="clientMenuActions"></guac-user-menu></div></div></div></guac-viewport>');
  assert.match(templates['app/client/templates/client.html'],/<crange-session-toolbar>/);assert.match(templates['app/client/templates/client.html'],/<guac-tiled-clients>/);assert.match(templates['app/client/templates/client.html'],/menu.shown && crSession.advanced/);
  assert.match(directives.crangeSessionToolbar({},()=>{},{},{},{preferences:{}},{}).template,/context="connectionListContext"/);
  assert.match(directives.crangeSessionToolbar({},()=>{},{},{},{preferences:{}},{}).template,/aria-label="Select connections"/);
+ assert.doesNotMatch(templates['app/client/templates/client.html'], /connection-select-menu/,'advanced menu omits the duplicate connection selector');
+ assert.match(templates['app/client/templates/client.html'], /<h2>Advanced controls<\/h2>/);
+ assert.match(templates['app/client/templates/client.html'], /cr-advanced-close/,'close button participates in header layout');
  assert.doesNotMatch(templates['app/client/templates/client.html'], /cr-session-tab/,'native client markup has no tab transformations');
  assert.match(templates['app/client/templates/client.html'], /<guac-tiled-clients>/,'native multiple-pane renderer is preserved');
  const requests=[],timers=[],watchers={};

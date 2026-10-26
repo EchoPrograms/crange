@@ -55,7 +55,9 @@
         if (key === 'app/client/templates/client.html' && value.indexOf('<crange-session-toolbar') === -1) {
             return value.replace('<guac-viewport>', '<guac-viewport><crange-session-toolbar></crange-session-toolbar>')
                 .replace('ng-class="{open: menu.shown}" id="guac-menu"', 'ng-class="{open: menu.shown && crSession.advanced}" id="guac-menu"')
-                .replace('ng-if="menu.shown" guac-touch-drag="menuDrag"', 'ng-if="menu.shown && crSession.advanced" guac-touch-drag="menuDrag"');
+                .replace('ng-if="menu.shown" guac-touch-drag="menuDrag"', 'ng-if="menu.shown && crSession.advanced" guac-touch-drag="menuDrag"')
+                .replace(/<h2 ng-hide="rootConnectionGroups">[\s\S]*?<\/h2>\s*<h2 class="connection-select-menu" ng-show="rootConnectionGroups">[\s\S]*?<\/h2>/, '<h2>Advanced controls</h2>')
+                .replace('<guac-user-menu local-actions="clientMenuActions"></guac-user-menu>', '<guac-user-menu local-actions="clientMenuActions"></guac-user-menu>' + button('close', 'Close advanced controls', 'crSession.close()').replace('class="cr-session-icon"', 'class="cr-session-icon cr-advanced-close"'));
         }
         return value;
     }
@@ -168,7 +170,6 @@
     </form>
     <p class="cr-help" ng-if="crSession.box">Names, notes and added hosts stay in this browser for your account. They do not change the lab.</p>
   </section>
-  <div class="cr-session-advanced-close" ng-if="crSession.advanced">${button('close', 'Close advanced controls', 'crSession.close()')}</div>
   <p class="cr-session-feedback" ng-if="crSession.message" ng-class="{'failed': crSession.failed}" role="status">{{crSession.message}}</p>
 </div>`;
 
