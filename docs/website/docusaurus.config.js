@@ -1,7 +1,7 @@
 // Static local documentation; no analytics, remote fonts or hosted search.
 module.exports = {
   title: 'CRANGE', tagline: 'Build, release and run your cyber range',
-  url: 'https://docs.range.brogano.dev', baseUrl: '/', favicon: 'img/favicon.svg',
+  url: 'https://crdocs.brogano.dev', baseUrl: '/', favicon: 'img/favicon.svg',
   organizationName: 'EchoPrograms', projectName: 'crange',
   onBrokenLinks: 'throw',
   markdown: {format: 'md', hooks: {onBrokenMarkdownLinks: 'throw'}},
@@ -23,6 +23,5 @@ module.exports = {
       {to: '/admin/controller/', label: 'Administration', position: 'left'},
     ]},
     docs: {sidebar: {hideable: true, autoCollapseCategories: false}},
-    footer: {style: 'dark', copyright: 'CRANGE handbook · Local documentation'},
   },
 };

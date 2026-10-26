@@ -59,7 +59,7 @@ publishes a new complete build without changing any lab service. Preserve a prio
 build for rollback. Install the unit under `/etc/systemd/system/`, then enable
 it with `systemctl enable --now crange-docs.service`.
 
-The intended public/private-proxy hostname is **https://docs.range.brogano.dev**.
+The intended public/private-proxy hostname is **https://crdocs.brogano.dev**.
 Point your existing Nginx upstream or Cloudflare Tunnel origin at
 `http://10.60.0.20:8769`. Configure TLS/access policy in that proxy. CRANGE Control
 and Access link to this hostname; the documentation service does not configure

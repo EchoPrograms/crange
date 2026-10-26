@@ -4,4 +4,4 @@
 .markdown h1 { font-size: 2.35rem; }
 .markdown { line-height: 1.7; }
 .navbar__title { letter-spacing: .05em; }
-.footer { padding: 1.25rem; }
+html, body { overscroll-behavior-y: none; }
