@@ -26,6 +26,20 @@ Select SSH/RDP/VNC only when the guest has that service and a matching account. 
 
 Use **Refresh connections** when deployed endpoints/grants need republishing. Control launch tickets are short-lived and authorized by a private broker. A copied machine/monitor URL does not grant access.
 
+## Switch between connections
+
+Use the session's connection selector to open several assigned connections. Each has a tab; select a tab to give that connection the full session area. Switching tabs keeps the other sessions connected. Closing a tab disconnects that connection only.
+
+![Browser-style session tabs and a minimized toolbar, using synthetic connections](/img/screenshots/session-tabs.png)
+
+## Place the session controls
+
+A connection's options bar starts minimized in the bottom-left corner. Select its small edge tab to open it, or use **Ctrl+Alt+Shift** for quick access to session options. Drag the bar to move the expanded controls; drag the minimized tab to place it along an edge.
+
+CRANGE remembers the expanded position, minimized-tab position and open or closed state separately for each connection and account in that browser. Switching to another connection restores its own arrangement. Clearing browser storage resets these choices.
+
+**Disconnect** from **Other connections** returns to the main page showing all projects. A managed lab connection returns to its owning project. Disconnecting a remote session leaves the machine running.
+
 ## Dashboard roles
 
 Administrators use **Dashboard users** to create enabled accounts and assign per-project manager/participant roles and team scope. Participants receive assigned access, not project infrastructure authority. The signed-in account cannot disable/delete itself.

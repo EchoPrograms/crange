@@ -1,0 +1,114 @@
+<!doctype html>
+<html lang="en" ng-app="client">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <link rel="icon" href="data:,">
+  <title>CRANGE synthetic Guacamole session tabs</title>
+  <link rel="stylesheet" href="../../guacamole/extension/workspace.css">
+  <style>
+    :root { --cr-text:#eee; --cr-muted:#a8a8a8; --cr-line:#383838; --cr-line-strong:#555; --cr-control-line:#484848; --cr-panel:#171717; --cr-field:#222; --cr-radius:3px; --cr-blue:#9cc5ec; }
+    * { box-sizing:border-box; }
+    html,body { width:100%; height:100%; margin:0; overflow:hidden; background:#101010; color:#eee; font:14px/1.45 Arial,sans-serif; }
+    body.client { padding:0; }
+    .client-view { position:absolute; inset:0; width:100%; height:100%; }
+    .client-view-content { display:flex; flex-direction:column; width:100%; height:100%; }
+    .client-view .client-body { position:relative; flex:1 1 auto; min-width:0; min-height:0; overflow:hidden; }
+    .client-view .client-bottom { flex:0 0 0; }
+    .client-view .client-body guac-tiled-clients { position:absolute; inset:0; width:auto; height:auto; }
+    .tiled-client-grid,.tiled-client-row,.tiled-client-cell { width:100%; height:100%; min-width:0; min-height:0; }
+    .client-tile { min-width:0; min-height:0; margin:0; background:#101010; }
+    .client-tile-header { height:32px; margin:0; padding:5px 12px; color:#ccc; background:#171717; font-size:13px; }
+    .client-tile-disconnect { float:right; }
+    .client,.client-main,.display { display:block; width:100%; height:100%; min-width:0; min-height:0; }
+    .display { overflow:auto; padding:20px; background:#080b0e; }
+    .fixture-desktop { display:grid; align-content:start; gap:16px; width:100%; height:100%; padding:20px; border:1px solid #343b41; background:#0d1115; color:#d7e0e7; }
+    .fixture-host { font-size:20px; font-weight:600; }
+    .fixture-status { color:#a4b4c2; }
+    .fixture-terminal { padding:14px; border:1px solid #30383f; background:#080b0e; font:14px/1.8 ui-monospace,monospace; }
+  </style>
+  <script src="https://ajax.googleapis.com/ajax/libs/angularjs/1.8.3/angular.min.js"></script>
+  <script>
+    angular.module('client', ['ng'])
+      .value('preferenceService', {preferences: {crangeDisplayScale: 1, crangeExitBehavior: 'home', timezone: 'America/Chicago', language: 'en'}, save: angular.noop})
+      .value('authenticationService', {getCurrentToken: function () { return 'synthetic-token'; }, getDataSource: function () { return 'synthetic-source'; }, getCurrentUsername: function () { return 'browser-fixture'; }})
+      .value('guacFullscreen', {toggleFullscreenMode: angular.noop})
+      .factory('$http', ['$q', function ($q) { return {
+        get: function (url) { var template = document.getElementById(url); return $q.when({data: template ? template.innerHTML : ''}); },
+        post: function (_url, payload) {
+          (window.__fixtureRequests || (window.__fixtureRequests = [])).push(payload);
+          if (payload.operation === 'list') return $q.when({data: {boxes: []}});
+          if (payload.operation === 'status') return $q.when({data: {state: 'unknown'}});
+          return $q.when({data: {job: {status: 'running'}}});
+        }
+      }; }])
+      .factory('$interval', function () { var interval = function () { return {}; }; interval.cancel = angular.noop; return interval; })
+      .controller('FixtureController', ['$scope', function ($scope) {
+        var alpha = {id: 'synthetic-connection-alpha', name: 'Synthetic Alpha', title: 'Synthetic Alpha', protocol: 'ssh', clientProperties: {focused: true, scale: 1, autoFit: true}, clientState: {connectionState: 'CONNECTED'}};
+        var bravo = {id: 'synthetic-connection-bravo', name: 'Synthetic Bravo', title: 'Synthetic Bravo', protocol: 'rdp', clientProperties: {focused: true, scale: 1, autoFit: true}, clientState: {connectionState: 'CONNECTED'}};
+        var charlie = {id: 'synthetic-connection-charlie', name: 'Synthetic Charlie', title: 'Synthetic Charlie development system', protocol: 'ssh', clientProperties: {focused: true, scale: 1, autoFit: true}, clientState: {connectionState: 'CONNECTED'}};
+        var delta = {id: 'synthetic-connection-delta', name: 'Synthetic Delta', title: 'Synthetic Delta QA runner', protocol: 'vnc', clientProperties: {focused: true, scale: 1, autoFit: true}, clientState: {connectionState: 'CONNECTED'}};
+        $scope.clientGroup = {clients: [alpha, bravo, charlie, delta]};
+        $scope.focusedClient = alpha;
+        $scope.menu = {shown: false, emulateAbsoluteMouse: false, inputMethod: 'none'};
+        $scope.connectionListContext = {attachedClients: {}};
+        $scope.rootConnectionGroups = null;
+        $scope.getName = function () { return $scope.focusedClient ? $scope.focusedClient.title : 'Synthetic sessions'; };
+        $scope.closeClientTile = function (client) {
+          $scope.clientGroup.clients = $scope.clientGroup.clients.filter(function (item) { return item !== client; });
+          if (!$scope.clientGroup.clients.some(function (item) { return item.clientProperties.focused; }) && $scope.clientGroup.clients.length)
+            $scope.clientGroup.clients[0].clientProperties.focused = true;
+          (window.__closedSessions || (window.__closedSessions = [])).push(client.id);
+        };
+        $scope.disconnect = function () { window.__fixtureGroupDisconnect = true; };
+        $scope.$watch(function () {
+          var clients = $scope.clientGroup.clients;
+          return clients.filter(function (client) { return client.clientProperties.focused; })[0] || null;
+        }, function (client) { if (client) $scope.focusedClient = client; });
+        window.__fixture = {scope: $scope};
+      }])
+      .directive('guacTiledClients', function () {
+        return {
+          restrict: 'E',
+          scope: {onClose: '&', clientGroup: '=', emulateAbsoluteMouse: '='},
+          templateUrl: 'app/client/templates/guacTiledClients.html'
+        };
+      })
+      .directive('guacClient', function () {
+        return {restrict: 'E', replace: true, scope: {client: '=', emulateAbsoluteMouse: '='}, template: '<div class="client"><div class="display"><div class="fixture-desktop"><span class="fixture-host">{{client.title}}</span><span class="fixture-status">Synthetic remote display · connected</span><div class="fixture-terminal">$ session ready<br>$ clipboard · resize · input remain Guacamole-owned</div></div></div></div>'};
+      })
+      .directive('guacClientNotification', function () { return {restrict: 'E', template: ''}; })
+      .directive('guacClientUserCount', function () { return {restrict: 'E', template: ''}; });
+    angular.module('settings', ['ng']);
+  </script>
+  <script src="../../guacamole/extension/workspace.js"></script>
+</head>
+<body class="client" ng-controller="FixtureController">
+  <script type="text/ng-template" id="app/client/templates/client.html">
+    <guac-viewport>
+      <div class="client-view"><div class="client-view-content">
+        <div class="client-body" guac-touch-drag="menuDrag">
+          <guac-tiled-clients on-close="closeClientTile($client)" client-group="clientGroup" emulate-absolute-mouse="menu.emulateAbsoluteMouse"></guac-tiled-clients>
+        </div>
+        <div class="client-bottom"></div>
+      </div></div>
+    </guac-viewport>
+  </script>
+  <!-- Native Guacamole 1.6 guacTiledClients.html structure, with synthetic display content. -->
+  <script type="text/ng-template" id="app/client/templates/guacTiledClients.html">
+    <div class="tiled-client-grid">
+      <div class="tiled-client-row" ng-repeat="clientRow in [clientGroup.clients]">
+        <div class="tiled-client-cell" ng-repeat="client in clientRow">
+          <div class="client-tile" ng-if="client" ng-class="{'focused': client.clientProperties.focused}" ng-click="client.clientProperties.focused = true">
+            <h3 class="client-tile-header"><span class="client-tile-name">{{client.title}}</span><button type="button" class="client-tile-disconnect" ng-click="onClose({'$client': client}); $event.stopPropagation()">Disconnect</button></h3>
+            <guac-client client="client" emulate-absolute-mouse="emulateAbsoluteMouse"></guac-client>
+            <guac-client-notification client="client"></guac-client-notification>
+            <guac-client-user-count client="client"></guac-client-user-count>
+          </div>
+        </div>
+      </div>
+    </div>
+  </script>
+  <ng-include src="'app/client/templates/client.html'"></ng-include>
+</body>
+</html>
