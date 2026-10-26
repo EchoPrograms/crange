@@ -26,11 +26,9 @@ Select SSH/RDP/VNC only when the guest has that service and a matching account. 
 
 Use **Refresh connections** when deployed endpoints/grants need republishing. Control launch tickets are short-lived and authorized by a private broker. A copied machine/monitor URL does not grant access.
 
-## Switch between connections
+## View several connections
 
-Use the session's connection selector to open several assigned connections. Each has a tab; select a tab to give that connection the full session area. Switching tabs keeps the other sessions connected. Closing a tab disconnects that connection only.
-
-![Browser-style session tabs and a minimized toolbar, using synthetic connections](/img/screenshots/session-tabs.png)
+Use the session's connection selector to open several assigned connections. Guacamole displays them together in its native pane layout. Use each pane's controls to focus or close that connection.
 
 ## Place the session controls
 
