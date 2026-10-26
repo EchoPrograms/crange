@@ -624,6 +624,19 @@ def freeze(row, live, previous=None):
         if isinstance(size,bool) or not isinstance(size,(int,float)) or not math.isfinite(size) or size <= 0:
             raise PlacementError('Cannot preserve the existing router disk size from Terraform state.')
         values['disk_gb'] = size
+    elif row.get('kind') == 'container':
+        size = disks[0].get('size') if disks else None
+        if isinstance(size,bool) or not isinstance(size,(int,float)) or not math.isfinite(size) or size <= 0:
+            raise PlacementError('Cannot preserve the existing container root disk size from Terraform state.')
+        requested = row.get('box', {}).get('disk_gb')
+        if requested is None:
+            values['disk_gb'] = size
+        else:
+            if isinstance(requested,bool) or not isinstance(requested,(int,float)) or not math.isfinite(requested) or requested <= 0:
+                raise PlacementError('Container root disk size must be a positive finite number.')
+            if requested < size:
+                raise PlacementError(f'Cannot shrink the existing container root disk below its current size ({size:g} GiB).')
+            values['disk_gb'] = requested
     initialization = live.get('operating_system') or []
     if initialization and initialization[0].get('template_file_id'):
         values['template_file_id'] = initialization[0]['template_file_id']
