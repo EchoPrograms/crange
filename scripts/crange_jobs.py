@@ -321,6 +321,7 @@ def command(operation, project, options):
         "network-edit": ({"name": name, "id": lambda v: integer(v, 1, 253), "node": node, "uplink": lambda v: integer(v, 2, 100), "cores": lambda v: integer(v, 1, 16), "memory": lambda v: integer(v, 512, 65536)}, lambda o: ["network-edit", p, o["name"], "--id", o["id"], "--node", o["node"], "--uplink", o["uplink"], "--cores", o["cores"], "--memory", o["memory"]]),
         "network-remove": ({"name": name}, lambda o: ["network-remove", p, o["name"]]),
         "box-add": ({"name": jump_name, "team": lambda v: integer(v, 0, 253), "node": node, "network": lambda v: '' if v == '' else name(v), "cores": lambda v: integer(v, 1, 16), "memory": lambda v: integer(v, 512, 65536)}, lambda o: ["box-add", p, o["name"], "--team", o["team"], "--node", o["node"], "--cores", o["cores"], "--memory", o["memory"], *(["--network", o["network"]] if o["network"] else [])]),
+        "jumpbox-resources": ({"kind": lambda v: choice(v, ('jumpbox', 'vm', 'container', 'all')), "name": lambda v: '' if v == '' else scenario_key(v), "cores": lambda v: integer(v, 1, 16), "memory": lambda v: integer(v, 4096, 65536)}, lambda o: ['jumpbox-resources', p, '--kind', o['kind'], '--name', o['name'], '--cores', o['cores'], '--memory', o['memory']]),
         "box-remove": ({"name": resource_key}, lambda o: ["box-remove", p, o["name"]]),
         "box-state": ({"name": resource_key, "state": lambda v: v if v in ('start', 'stop') else (_ for _ in ()).throw(ValueError('Invalid power state.'))}, lambda o: ["box-state", p, o["name"], o["state"]]),
         "scenario-add": ({"name": name, "team": lambda v: integer(v, 0, 253), "ip": lambda v: integer(v, 2, 100), "network": lambda v: "" if v == "" else name(v), "template": template_key, "node": node, "cores": lambda v: integer(v, 1, 16), "memory": lambda v: integer(v, 512, 65536), "health": health, "guac_protocols": guac_protocols}, lambda o: ["scenario-add", p, o["name"], "--team", o["team"], "--network", o["network"], "--ip", o["ip"], "--template", o["template"], "--node", o["node"], "--cores", o["cores"], "--memory", o["memory"], "--health", o["health"], "--guac-protocols", o["guac_protocols"]]),
@@ -368,6 +369,8 @@ def command(operation, project, options):
         fields['preferred_node'] = lambda v: '' if v == '' else node(v)
     elif placement_edit and 'preferred_node' in options:
         fields['preferred_node'] = lambda v: '' if v == '' else node(v)
+    if operation == 'jumpbox-resources' and 'disk' in options:
+        fields = {**fields, 'disk': lambda v: integer(v, 8, 1024)}
     if set(options) != set(fields):
         raise ValueError("Unexpected or missing operation fields.")
     validated = {key: validate(options[key]) for key, validate in fields.items()}
@@ -381,6 +384,8 @@ def command(operation, project, options):
         __import__('crange_guac_boxes').snapshot_name(options['snapshot'],
                                                     required=options['action'] != 'list')
     result = build(validated)
+    if operation == 'jumpbox-resources' and 'disk' in validated:
+        result.extend(['--disk', str(validated['disk'])])
     if placement_add or (placement_edit and 'preferred_node' in validated):
         from crange_scheduling import placement_intent
         placement_intent(validated['node'], validated['preferred_node'])

@@ -12,7 +12,7 @@ variable "box" {
     template_id          = optional(number)
     template_node        = optional(string)
     template_file_id     = optional(string)
-    disk_gb              = optional(number, 8)
+    disk_gb              = optional(number)
     full_clone           = optional(bool, true)
     verified_local_cache = optional(bool, false)
     cores                = number

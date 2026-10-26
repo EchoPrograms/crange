@@ -45,10 +45,10 @@ resource "proxmox_virtual_environment_container" "scenario" {
     }
   }
   dynamic "disk" {
-    for_each = var.box.template_file_id == null ? [] : [1]
+    for_each = var.box.template_file_id == null && var.box.disk_gb == null ? [] : [1]
     content {
       datastore_id = var.box.datastore_id
-      size         = var.box.disk_gb
+      size         = coalesce(var.box.disk_gb, 8)
     }
   }
   lifecycle {

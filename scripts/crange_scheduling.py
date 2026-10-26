@@ -652,7 +652,35 @@ def requested_disk_gb(row, image):
         # retain their source allocation; existing disks are always pinned.
         default = row.get('retained', {}).get('disk_gb', row['box'].get('disk_gb', 4))
         return default if image.get('source_type') == 'stock_archive' else max(size, default)
-    return max(size, 8 if row['kind'] == 'container' else size)
+    if row['resource_key'].startswith('jumpbox:') and row['box'].get('disk_gb') is not None:
+        requested = row['box']['disk_gb']
+        if type(requested) is not int or not 8 <= requested <= 1024 or requested < size:
+            raise PlacementError(f'Jump-box disk must be 8–1024 GiB and at least its image size ({size:g} GiB).')
+        return requested
+    if row['kind'] == 'container':
+        requested = row['box'].get('disk_gb', max(math.ceil(size), 8))
+        if type(requested) is not int or not 8 <= requested <= 1024 or requested < size:
+            raise PlacementError(f'Container root disk must be 8–1024 GiB and at least its image size ({size:g} GiB).')
+        return requested
+    return size
+
+
+def disk_growth_requested(row, live):
+    """Only an explicit, measured guest disk growth can leave retention."""
+    if not row['resource_key'].startswith(('jumpbox:', 'container:')):
+        return False
+    requested = row['box'].get('disk_gb')
+    if requested is None:
+        return False
+    if type(requested) is not int or not 8 <= requested <= 1024:
+        raise PlacementError('Guest disk must be an integer from 8 to 1024 GiB.')
+    disks = live.get('disk') or []
+    actual = disks[0].get('size') if len(disks) == 1 else None
+    if isinstance(actual, bool) or not isinstance(actual, (int, float)) or not math.isfinite(actual) or actual <= 0:
+        raise PlacementError('Cannot verify the existing guest system disk size before growth.')
+    if requested < actual:
+        raise PlacementError('An existing guest disk cannot shrink in place.')
+    return requested > actual
 
 
 def reviewed_bootstrap_replacements(path, project_id, owner, bootstrap_node, requests, policy, ledger, router_nodes=None):
@@ -879,7 +907,9 @@ def prepare(path, cfg, plan_id, owner, api=None, *, bootstrap_node=None, bootstr
                 # immutable version; retain it without inventing that identity.
                 row = copy.deepcopy(row)
                 row['image'] = None
-            if not replacement and int(desired.get('cores', current_cpu)) <= current_cpu and int(desired.get('memory_mb', current_memory)) <= current_memory:
+            # Growth follows ordinary pinned admission. Reserving the complete
+            # final footprint is conservative and grants no replacement credit.
+            if not replacement and not disk_growth_requested(row, live) and int(desired.get('cores', current_cpu)) <= current_cpu and int(desired.get('memory_mb', current_memory)) <= current_memory:
                 frozen = freeze(row,live,previous)
                 frozen['declared_template'] = desired.get('template')
                 placements.append(frozen);continue

@@ -5,6 +5,70 @@ FIELDS = {'jumpbox': 'jump_boxes', 'vm': 'scenario_boxes', 'container': 'scenari
 PORTS = {'ssh': 22, 'rdp': 3389, 'vnc': 5900}
 
 
+def resize(project, kind, name, cores, memory, disk=None):
+    """Stage bounded CPU/RAM changes without changing identity or guest power."""
+    from crange import CrangeError, project_dir, json_config, save_config
+    if kind not in (*FIELDS, 'all'):
+        raise CrangeError('Choose a declared jump-box kind.')
+    if type(cores) is not int or not 1 <= cores <= 16:
+        raise CrangeError('CPU cores must be an integer from 1 to 16.')
+    if type(memory) is not int or not 4096 <= memory <= 65536:
+        raise CrangeError('Jump-box memory must be an integer from 4096 to 65536 MiB.')
+    if disk is not None and (kind != 'jumpbox' or type(disk) is not int or not 8 <= disk <= 1024):
+        raise CrangeError('An explicit disk size requires one Linux jump box and 8–1024 GiB.')
+    path = project_dir(str(project))
+    cfg = json_config(path)
+    if kind == 'all':
+        if name:
+            raise CrangeError('A project-wide resize cannot specify a single box.')
+        boxes = [(k, key, box) for k, field in FIELDS.items()
+                 for key, box in cfg.get(field, {}).items()
+                 if k == 'jumpbox' or box.get('is_jumpbox')]
+    else:
+        box = cfg.get(FIELDS[kind], {}).get(name)
+        if not isinstance(box, dict) or (kind != 'jumpbox' and not box.get('is_jumpbox')):
+            raise CrangeError('Choose a declared jump box in this project.')
+        boxes = [(kind, name, box)]
+    if not boxes:
+        raise CrangeError('No declared jump boxes are present in this project.')
+    from crange import templates_for
+    approvals = templates_for(path) if any(k == 'vm' for k, _, _ in boxes) else {}
+    for selected_kind, _, box in boxes:
+        profile = approvals.get(box.get('template'), {}).get('profile', {})
+        if selected_kind == 'vm' and profile.get('os_type') != 'l26' and memory < 8192:
+            raise CrangeError('Windows jump boxes require at least 8192 MiB RAM.')
+    if disk is not None:
+        from crange_scheduling import read_settings, applied_resources
+        from crange_proxmox_disk import size_bytes
+        from crange import ProxmoxAPI
+        _, catalog = read_settings()
+        box = boxes[0][2]
+        image = catalog.get('images', {}).get(box.get('image'), {})
+        size = image.get('disk_gb')
+        if (image.get('verified') is not True or image.get('kind') != 'vm'
+                or image.get('init_system') not in ('systemd','openrc')
+                or type(size) not in (float,int) or not 0 < size <= disk
+                or not any(value in image.get('approved_projects', []) for value in ('*',int(project)))):
+            raise CrangeError('Jump-box disk must be at least its approved verified Linux image size.')
+        current = applied_resources(path).get('jumpbox:' + name)
+        if current:
+            native = ProxmoxAPI().vm(current['node_name'], int(current['vm_id']))
+            try:
+                actual = size_bytes(native.get('scsi0', '')) / 2**30
+            except ValueError as exc:
+                raise CrangeError('Cannot verify the existing jump-box system disk size.') from exc
+            if disk < actual:
+                raise CrangeError('An existing jump-box disk cannot shrink in place. Rebuild from a smaller image.')
+        box['disk_gb'] = disk
+    for _, _, box in boxes:
+        box.update(cores=cores, memory_mb=memory)
+    # save_config enforces the aggregate project quotas before its atomic write.
+    save_config(path, cfg)
+    print(f'Updated resources for {len(boxes)} jump box(es): {cores} vCPUs, {memory} MiB RAM. '
+          'Stage and review changes before deploying. A shutdown/start may be required '
+          'for the guest to use the new allocation.')
+
+
 def services(value):
     if not isinstance(value, list) or not 1 <= len(value) <= 3:
         raise ValueError('Select one to three remote services.')

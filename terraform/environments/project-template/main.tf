@@ -61,10 +61,20 @@ variable "jump_boxes" {
     node_name   = string
     cores       = optional(number, 2)
     memory_mb   = optional(number, 4096)
+    disk_gb     = optional(number)
     full_clone  = optional(bool, false)
     started     = optional(bool, true)
   }))
   default = {}
+
+  validation {
+    condition = alltrue([
+      for box in values(var.jump_boxes) : box.disk_gb == null ? true : (
+        box.disk_gb == floor(box.disk_gb) && box.disk_gb >= 8 && box.disk_gb <= 1024
+      )
+    ])
+    error_message = "Optional jump-box disks must be integer GiB sizes from 8 to 1024."
+  }
 
   validation {
     condition = alltrue([
@@ -171,6 +181,7 @@ variable "scenario_containers" {
     node_name     = string
     cores         = optional(number, 1)
     memory_mb     = optional(number, 1024)
+    disk_gb       = optional(number)
     started       = optional(bool, true)
     guac_protocol = optional(string, "ssh")
     health_checks = optional(list(object({
@@ -430,6 +441,7 @@ module "jumpbox" {
     full_clone    = each.value.full_clone
     cores         = each.value.cores
     memory_mb     = each.value.memory_mb
+    disk_gb       = each.value.disk_gb
     started       = each.value.started
     dns_servers   = ["10.60.2.1"]
     }, { for field, value in try(var.resolved_placements["jumpbox:${each.key}"], {}) : field => value if value != null && field != "clone_mode" }, try(var.resolved_placements["jumpbox:${each.key}"].clone_mode, null) == null ? {} : {
@@ -487,6 +499,7 @@ module "scenario_container" {
     template_file_id = try(local.approved_container_templates[each.value.template].template_file_id, null)
     cores            = each.value.cores
     memory_mb        = each.value.memory_mb
+    disk_gb          = each.value.disk_gb
     started          = each.value.started
     }, { for field, value in try(var.resolved_placements["container:${each.key}"], {}) : field => value if value != null && field != "clone_mode" }, try(var.resolved_placements["container:${each.key}"].clone_mode, null) == null ? {} : {
     full_clone           = var.resolved_placements["container:${each.key}"].clone_mode == "full"

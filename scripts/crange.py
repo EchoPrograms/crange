@@ -1274,6 +1274,9 @@ def cmd_apply_saved(args: argparse.Namespace, path: Path) -> None:
     plan = directory / f'{args.plan_id}.tfplan'
     try:
         record = json.loads(manifest.read_text())
+        if record.get('applied_at') and not plan.exists():
+            from crange_apply_resume import resume
+            return resume(sys.modules[__name__], args, path, manifest, record)
         plan_bytes = plan.read_bytes()
     except (OSError, json.JSONDecodeError) as exc:
         raise CrangeError(f'Saved plan is unavailable: {exc}') from exc
@@ -1597,6 +1600,8 @@ def cmd_configure_team(args: argparse.Namespace) -> None:
             raise CrangeError(str(exc)) from exc
         for key, reason in skipped:
             print(f'Skipping {key}: {reason}. Run configuration again after it becomes available.', flush=True)
+    from crange_linux_jump_initialize import initialize_selected
+    initialize_selected(path, cfg, resource_keys, team)
     refreshed = refresh_created_guests(path, team, **({'resource_keys': resource_keys} if resource_keys is not None else {}))
     if refreshed:
         print("Refreshed SSH identities for newly applied guests: " + ", ".join(refreshed), flush=True)
@@ -1905,6 +1910,12 @@ def cmd_configure(args: argparse.Namespace) -> None:
     output = getattr(args, 'inventory_path', None) or ROOT / "ansible" / "inventory" / "generated" / f"project-{int(args.project):03d}.json"
     if not getattr(args, 'inventory_path', None):
         run([sys.executable, str(ROOT / "scripts" / "generate-project-inventory.py"), "--terraform-dir", str(path), "--output", str(output)])
+    if args.target in ('access', 'boxes', 'all'):
+        linux_inventory = json.loads(output.read_text())
+        linux_hosts = linux_inventory.get('all', {}).get('children', {}).get('jumpboxes', {}).get('hosts', {})
+        if linux_hosts:
+            from crange_linux_jump_initialize import initialize_inventory
+            initialize_inventory(path, linux_hosts)
     windows_inventory = None
     windows_credentials = {}
     windows_context = {}
@@ -4440,6 +4451,12 @@ def make_parser() -> argparse.ArgumentParser:
     q.set_defaults(func=cmd_jumpbox_settings)
     q = sub.add_parser("box-list"); q.add_argument("project"); q.set_defaults(func=cmd_boxes)
     q = sub.add_parser("box-state", help="Start/stop a deployed jump box, or set its state before deployment"); q.add_argument("project"); q.add_argument("name"); q.add_argument("state", choices=("start", "stop")); q.set_defaults(func=cmd_box_state)
+    q = sub.add_parser('jumpbox-resources', help='Stage CPU and memory changes for existing jump boxes')
+    q.add_argument('project'); q.add_argument('--kind', required=True, choices=('jumpbox', 'vm', 'container', 'all'))
+    q.add_argument('--name', default=''); q.add_argument('--cores', required=True, type=int)
+    q.add_argument('--memory', required=True, type=int)
+    q.add_argument('--disk', type=int, help='Linux jump-box system disk GiB; never shrink an existing disk')
+    q.set_defaults(func=lambda a: __import__('crange_jumpboxes').resize(a.project, a.kind, a.name, a.cores, a.memory, disk=a.disk))
     for verb, add in (("box-add", True), ("box-remove", False)):
         q = sub.add_parser(verb); q.add_argument("project"); q.add_argument("name")
         if add:

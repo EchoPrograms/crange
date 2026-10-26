@@ -743,8 +743,12 @@ def media_tf_overrides(path, cfg, prepared=None, api=None, *, scoped=False):
             continue
         if scoped and key not in records:
             continue
+        if (key in physical and row.get('kind') == 'vm' and physical[key].get('boot_order')
+                and applied.get(key, {}).get('image_id') == row.get('image')):
+            # A resource resize retains this guest's existing boot devices.
+            resolved[key] = {**placement, 'boot_order': list(physical[key]['boot_order'])}
         if key in physical and physical[key].get('machine'):
-            resolved[key] = {**placement, 'machine': physical[key]['machine']}
+            resolved[key] = {**resolved.get(key, placement), 'machine': physical[key]['machine']}
         if key not in physical and not record.get('existing') and row.get('kind') == 'vm':
             from crange_scheduling import template_profile
             profile = template_profile(path, row)

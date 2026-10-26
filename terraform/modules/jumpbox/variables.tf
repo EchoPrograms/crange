@@ -8,18 +8,23 @@ variable "box" {
     datastore_id  = optional(string, "local-lvm")
     image_id      = optional(string, "")
     machine       = optional(string)
+    boot_order    = optional(list(string))
     node_name     = string
     template_id   = optional(number, 112)
     template_node = optional(string, "proxmox4")
     full_clone    = optional(bool, false)
-    cores         = optional(number, 2)
-    memory_mb     = optional(number, 4096)
+    cores         = optional(number, 4)
+    memory_mb     = optional(number, 8192)
+    disk_gb       = optional(number)
     started       = optional(bool, true)
     dns_servers   = optional(list(string), ["10.60.0.1"])
   })
 
   validation {
     condition = (
+      (var.box.disk_gb == null ? true : (
+        var.box.disk_gb == floor(var.box.disk_gb) && var.box.disk_gb >= 8 && var.box.disk_gb <= 1024
+      )) &&
       var.box.project_id == floor(var.box.project_id) &&
       var.box.project_id >= 1 && var.box.project_id <= 255 &&
       !contains([60, 61], var.box.project_id) &&

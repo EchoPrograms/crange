@@ -26,18 +26,27 @@ resource "proxmox_virtual_environment_vm" "jump" {
 
   tags    = ["range-lan", "jumpbox", local.project, local.vnet, "terraform"]
   started = var.box.started
-  on_boot = false
+  on_boot = var.box.started
 
   bios          = var.template_profile.bios
   machine       = var.box.machine != null ? var.box.machine : var.template_profile.machine
   scsi_hardware = var.template_profile.scsi_hardware
-  boot_order    = ["scsi0"]
+  boot_order    = var.box.boot_order != null ? var.box.boot_order : ["scsi0"]
 
   clone {
     vm_id        = var.box.template_id
     node_name    = var.box.template_node
     full         = var.box.full_clone
     datastore_id = var.box.full_clone ? var.box.datastore_id : null
+  }
+
+  dynamic "disk" {
+    for_each = var.box.disk_gb == null ? [] : [var.box.disk_gb]
+    content {
+      datastore_id = var.box.datastore_id
+      interface    = "scsi0"
+      size         = disk.value
+    }
   }
 
   cpu {
