@@ -40,6 +40,10 @@ CRANGE remembers the expanded position, minimized-tab position and open or close
 
 **Disconnect** from **Other connections** returns to the main page showing all projects. A managed lab connection returns to its owning project. Disconnecting a remote session leaves the machine running.
 
+## Clipboard access
+
+Selecting connections or opening session controls does not request clipboard permission. Automatic clipboard sync runs only when the browser has already granted clipboard-read access. If it requires approval or does not support that permission, use **Options → Clipboard** to paste text into Guacamole's clipboard editor. Ordinary fields keep their normal paste behavior.
+
 ## Dashboard roles
 
 Administrators use **Dashboard users** to create enabled accounts and assign per-project manager/participant roles and team scope. Participants receive assigned access, not project infrastructure authority. The signed-in account cannot disable/delete itself.

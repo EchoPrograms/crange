@@ -11,6 +11,7 @@
     "auth-launch.js",
     "login.js",
     "native-inventory.js",
+    "clipboard.js",
     "ui.js",
     "workspace.js",
     "settings.js"

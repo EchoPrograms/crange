@@ -40,6 +40,8 @@ Use the Playwright CLI to open `http://127.0.0.1:8768/`, then run its `run-code 
 
 Captures go to `output/playwright/handbook-*.png`. Review them visually, then copy the selected files into the static screenshot folder without the `handbook-` prefix. Keep the screenshot descriptions honest about synthetic data and never capture credentials. The fixture may be stopped after capture; the handbook continues to work.
 
+For the Guacamole session screenshot, serve the repository with `python3 -m http.server 8786 --bind 127.0.0.1`, open `http://127.0.0.1:8786/tests/fixtures/guac_session_tabs.html`, and run `tests/fixtures/guac_session_tabs_browser.js` through the Playwright CLI. The fixture uses synthetic sessions and a pinned AngularJS script from Google's CDN; it does not connect to Guacamole or a guest. The published handbook uses only the captured PNG.
+
 ## Validate a change
 
 Run the static build, browse the getting-started path on desktop and mobile, open local search and test a distinctive query such as `cleanup` or `gateway`, and confirm no external network requests are required. Check screenshot readability and that referenced actions match current UI labels.
