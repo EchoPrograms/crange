@@ -2,6 +2,36 @@
 import copy
 
 
+_COMPUTED_VM_OUTPUT_FIELDS = frozenset({
+    'ipv4_addresses',
+    'ipv6_addresses',
+    'mac_addresses',
+    'network_interface_names',
+})
+
+
+def _scenario_vm_disk_only(item, key):
+    """Skip guest configuration only for an input-only scenario VM disk update."""
+    if not key.startswith('vm:') or not item.get('address', '').startswith('module.scenario_box['):
+        return False
+    change = item.get('change', {})
+    if change.get('actions') != ['update']:
+        return False
+    before, after = change.get('before'), change.get('after')
+    if not isinstance(before, dict) or not isinstance(after, dict):
+        return False
+    missing = object()
+    before_disk, after_disk = before.get('disk', missing), after.get('disk', missing)
+    if before_disk is missing or after_disk is missing or before_disk == after_disk:
+        return False
+    before_inputs, after_inputs = dict(before), dict(after)
+    for values in (before_inputs, after_inputs):
+        values.pop('disk', None)
+        for field in _COMPUTED_VM_OUTPUT_FIELDS:
+            values.pop(field, None)
+    return before_inputs == after_inputs
+
+
 def configuration_resources(detail, cfg):
     """Include a deleted guest's surviving custom router to revoke access."""
     from crange_apply_scope import guest_key
@@ -12,6 +42,8 @@ def configuration_resources(detail, cfg):
         change = item.get('change', {})
         key = guest_key(item.get('address', ''))
         if key is None or change.get('actions') == ['no-op']:
+            continue
+        if _scenario_vm_disk_only(item, key):
             continue
         keys.add(key)
         if 'delete' in change.get('actions', []) and key.startswith(('vm:', 'container:', 'jumpbox:')):

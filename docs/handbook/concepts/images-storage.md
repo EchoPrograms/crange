@@ -36,6 +36,8 @@ Before applying a size change to an existing guest, CRANGE checks the live disk 
 
 Custom sizing currently requires a single data disk in the image and VM. EFI, TPM, installer and cloud-init devices can remain attached. Images with additional data disks can be deployed at their captured sizes.
 
+A disk-only update runs disk and filesystem initialization without rerunning the guest's general Ansible configuration. Changes to networking or other machine settings keep their normal configuration workflow.
+
 Shrinking a captured disk from 64 GiB to 30 GiB can reduce future guest commitments, but retained 64 GiB originals, archives, local bases, snapshots and temporary copies still consume space. Review may need room for both old and new fleets before old resources can be retired.
 
 ## Storage policy
