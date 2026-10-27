@@ -1,0 +1,91 @@
+{
+  "recorded_at": "2026-10-27T13:15:02.887659+00:00",
+  "state": "deployed-and-verified",
+  "commit": "b490e6b",
+  "sizing_fix": {
+    "cause": "crange-guac-broker.service retained an imported image-readiness module from before system-disk metadata was exposed.",
+    "correction": "Restarted only the controller broker and verified the authenticated project API response.",
+    "live_project_response": {
+      "state": "authenticated-project-response-verified",
+      "custom_sizing_minimum_gib": {
+        "windows": 22.0,
+        "debian": 20.0,
+        "ubuntu": 20.0,
+        "parrot": 32.0
+      },
+      "project": 100,
+      "template_readiness_error": null
+    },
+    "metadata_guard_retained": true
+  },
+  "scenario_feedback": {
+    "completed_deployment_notice": "Dismiss removes the notice and metadata; Review changes remains accessible.",
+    "dismissal_scope": "Existing browser-session notification storage; persists across page reloads and navigation.",
+    "tab_indicators": {
+      "workspace": "Scoped staging tasks",
+      "releases": "Scoped release and release-test tasks",
+      "deployments": "Scoped team rollout tasks"
+    },
+    "colors": {
+      "pending": "blue",
+      "success": "green",
+      "error": "red"
+    },
+    "regression_checks": [
+      "Workspace shows a green completed-task indicator",
+      "Releases shows a red failed-task indicator",
+      "Team deployments shows a blue active-task indicator",
+      "Tab notification has an accessible status description",
+      "Dismiss removes the completed deployment message and metadata",
+      "Review changes remains available after dismissal",
+      "Dismissing staging completion clears the Workspace indicator",
+      "Dismissing Workspace leaves the Releases notification intact",
+      "Dismissed completion stays hidden after reload",
+      "Verified image enables custom disk sizing",
+      "Sizing field shows the verified 22 GiB minimum",
+      "Scenario tab notifications fit a narrow viewport",
+      "A new task shows a fresh indicator after dismissal",
+      "A new running task remains visible after dismissing an older completion",
+      "Scenario feedback has no JavaScript errors"
+    ]
+  },
+  "guacamole": {
+    "docked_order_left": [
+      "drag",
+      "home",
+      "disconnect",
+      "connection selector",
+      "clipboard",
+      "display scale"
+    ],
+    "docked_actions_right": [
+      "power",
+      "network map",
+      "fullscreen",
+      "options",
+      "close"
+    ],
+    "keyboard_fix": "Use native guacBeforeKeydown/guacBeforeKeyup hooks when a toolbar control has focus; local input does not reach remote clients.",
+    "floating_layout_preserved": true,
+    "served_workspace_js_sha256": "e6595bbb0568a730a9e3ca1c595bf0c16b72f3431aac9d9624acfae2ef8591a7",
+    "served_workspace_css_sha256": "c2821d3352d4f48be680fb03cafd2f2b972356db0df2069720fb6c43f0996385",
+    "regression_checks": [
+      "Floating toolbar keeps its compact controls",
+      "Home, Disconnect, selector, Clipboard, and scale appear in order",
+      "Power, map, fullscreen, Options, and Close align to the right edge",
+      "All five session actions are grouped on the right",
+      "Docked toolbar has no top or side border",
+      "Real keyboard typing stays in the clipboard field",
+      "Clipboard typing sends no remote key presses or releases",
+      "Typed clipboard content still reaches the clipboard service",
+      "Scale field also accepts local keyboard input",
+      "Scale editing does not send keys to the connection",
+      "Remote keyboard routing resumes after leaving toolbar controls",
+      "Ctrl+Alt+Shift still opens the full menu while editing the clipboard",
+      "Grouped toolbar wraps without mobile overflow",
+      "Toolbar changes have no JavaScript errors"
+    ]
+  },
+  "validation_environment": "Chromium with desktop 1440px and emulated mobile 390px viewports. Guacamole fixture uses the upstream 1.6.0 Keyboard module and its before-key event routing; no remote guest test keystrokes or infrastructure changes.",
+  "services": "Controller broker refreshed; static dashboard assets updated without restarting controller workers; Guacamole restarted to load extension assets."
+}
