@@ -625,6 +625,15 @@ def freeze(row, live, previous=None):
             raise PlacementError('Cannot preserve the existing scenario VM disk size from Terraform state.')
         system_disk = row.get('system_disk')
         interface = system_disk.get('interface') if isinstance(system_disk, dict) else None
+        if interface is None and len(disks) == 1:
+            # Scoped reviews also freeze guests outside the prepared scope.
+            # Their raw declarations have no catalog disk profile. Preserve
+            # the sole managed disk only when prior state explicitly boots it;
+            # a desired size or a new image must not resize that guest.
+            retained_interface = disks[0].get('interface')
+            if (isinstance(retained_interface, str)
+                    and retained_interface in (live.get('boot_order') or [])):
+                interface = retained_interface
         if isinstance(interface, str) and re.fullmatch(r'(?:scsi|sata|virtio|ide)[0-9]+', interface):
             values['disk_gb'] = size
             values['disk_interface'] = interface
