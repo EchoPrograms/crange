@@ -82,7 +82,7 @@ $growth=$null;if(Test-Path -LiteralPath $journal){$i=Get-Item -Force -LiteralPat
 $backup='C:\ProgramData\CRANGE\winre.wim';$backupHash='';if(Test-Path -LiteralPath $backup){$i=Get-Item -Force -LiteralPath $backup;if($i.Attributes -band [IO.FileAttributes]::ReparsePoint){throw 'WinRE backup is redirected'};$backupHash=(Get-FileHash -Algorithm SHA256 -LiteralPath $backup).Hash}
 $rvol=Get-Volume -DriveLetter R -ErrorAction SilentlyContinue;$rpart=$(if($rvol){Get-Partition -DriveLetter R -ErrorAction SilentlyContinue}else{$null})
 $rAvailable=(!$rvol) -and (!(Test-Path 'R:\'))
-[ordered]@{os='windows';disk_number=$disk.Number;disk_bytes=[int64]$disk.Size;partition_style=[string]$disk.PartitionStyle;partitions=@($p|%{$v=Get-Volume -Partition $_ -ErrorAction SilentlyContinue;[ordered]@{number=$_.PartitionNumber;type=[string]$_.GptType;offset=[int64]$_.Offset;size=[int64]$_.Size;letter=[string]$_.DriveLetter;filesystem=[string]$v.FileSystem}});c_number=$c[0].PartitionNumber;c_offset=[int64]$c[0].Offset;c_bytes=[int64]$c[0].Size;filesystem_bytes=[int64]$vol.Size;c_fs=[string]$cfs;c_health=[string]$vol.HealthStatus;encrypted=[bool]$encrypted;encryption_evidence=$encryptionEvidence;tail_number=$(if($tail.Count){$tail[0].PartitionNumber}else{$null});tail_type=$(if($tail.Count){[string]$tail[0].GptType}else{''});tail_size=$(if($tail.Count){[int64]$tail[0].Size}else{0});winre_enabled=[bool]$enabled;winre_location_partition=$locationPartition;drive_r_available=[bool]$rAvailable;r_partition=$(if($rpart){$rpart.PartitionNumber}else{$null});r_type=$(if($rpart){[string]$rpart.GptType}else{''});r_size=$(if($rpart){[int64]$rpart.Size}else{0});r_label=$(if($rvol){$rvol.FileSystemLabel}else{''});growth_journal=$growth;winre_backup_sha256=$backupHash;free_bytes=[int64]$free;windows_directory=[string]$w.WindowsDirectory}|ConvertTo-Json -Compress -Depth 6'''
+[ordered]@{os='windows';disk_number=$disk.Number;disk_bytes=[int64]$disk.Size;partition_style=[string]$disk.PartitionStyle;partitions=@($p|%{$v=Get-Volume -Partition $_ -ErrorAction SilentlyContinue;[ordered]@{number=$_.PartitionNumber;type=[string]$_.GptType;offset=[int64]$_.Offset;size=[int64]$_.Size;letter=[string]$_.DriveLetter;filesystem=[string]$v.FileSystem}});c_number=$c[0].PartitionNumber;c_offset=[int64]$c[0].Offset;c_bytes=[int64]$c[0].Size;filesystem_bytes=[int64]$vol.Size;c_fs=[string]$cfs;c_health=[string]$vol.HealthStatus;encrypted=[bool]$encrypted;encryption_evidence=$encryptionEvidence;tail_number=$(if($tail.Count){$tail[0].PartitionNumber}else{$null});tail_type=$(if($tail.Count){[string]$tail[0].GptType}else{''});tail_size=$(if($tail.Count){[int64]$tail[0].Size}else{0});tail_hidden=$(if($tail.Count){[bool]$tail[0].IsHidden}else{$null});tail_no_default_drive_letter=$(if($tail.Count){$tail[0].NoDefaultDriveLetter}else{$null});winre_enabled=[bool]$enabled;winre_location_partition=$locationPartition;drive_r_available=[bool]$rAvailable;r_partition=$(if($rpart){$rpart.PartitionNumber}else{$null});r_type=$(if($rpart){[string]$rpart.GptType}else{''});r_size=$(if($rpart){[int64]$rpart.Size}else{0});r_label=$(if($rvol){$rvol.FileSystemLabel}else{''});growth_journal=$growth;winre_backup_sha256=$backupHash;free_bytes=[int64]$free;windows_directory=[string]$w.WindowsDirectory}|ConvertTo-Json -Compress -Depth 6'''
     return ["powershell.exe", "-NoProfile", "-NonInteractive", "-EncodedCommand",
             base64.b64encode(ps.encode("utf-16le")).decode("ascii")]
 
@@ -187,10 +187,14 @@ def windows_already_grown(measurement, target_gb):
             or (journal.get('tail_bytes',0)>0 and len(measurement.get('partitions',[]))!=4)):return False
     tail_bytes=int(measurement.get('tail_size') or 0)
     expected_c=((target-int(measurement.get('c_offset',0))-tail_bytes-1024**2)//(1024**2))*(1024**2)
+    recovery_flags=(tail_bytes==0 or
+                    (measurement.get('tail_hidden') is True and
+                     measurement.get('tail_no_default_drive_letter') is not False))
     return (measurement.get('disk_bytes')==target
             and 0 <= expected_c-measurement.get('c_bytes',0) <= 2*1024**2
             and measurement.get('filesystem_bytes',0) >= measurement.get('c_bytes',0)-2*1024**2
-            and measurement.get('free_bytes',0)>=1024**3)
+            and measurement.get('free_bytes',0)>=1024**3
+            and recovery_flags)
 
 
 def system_disk_slot(native, approved_order=None, expected_interface=None):
@@ -254,7 +258,7 @@ if($tailBytes -gt 0 -and $st.phase -eq 'initial'){
  $r=Get-Partition -DiskNumber $diskNo -PartitionNumber $tailNo;if($r.GptType -ne $tailType -or $r.Size -ne $tailBytes){throw 'original WinRE partition identity changed'}
  $assigned=Get-Partition -DriveLetter R -ErrorAction SilentlyContinue
  if($assigned -and ($assigned.DiskNumber -ne $diskNo -or $assigned.PartitionNumber -ne $tailNo)){throw 'recovery drive R: became occupied'}
- if(-not $script:st){$script:st=$st};if(-not $assigned){Add-PartitionAccessPath -DiskNumber $diskNo -PartitionNumber $tailNo -DriveLetter R}
+ if(-not $script:st){$script:st=$st};if(-not $assigned){Add-PartitionAccessPath -DiskNumber $diskNo -PartitionNumber $tailNo -AccessPath 'R:'}
  $src='R:\\Recovery\\WindowsRE\\Winre.wim';if(-not(Test-Path -LiteralPath $src)){throw 'WinRE image missing'}
  $hash=(Get-FileHash -Algorithm SHA256 -LiteralPath $src).Hash;Copy-Item -LiteralPath $src -Destination $backup -Force;if((Get-FileHash -Algorithm SHA256 -LiteralPath $backup).Hash -ne $hash){throw 'WinRE backup hash mismatch'}
  Save-State 'backed-up' @{winre_sha256=$hash}
@@ -264,7 +268,7 @@ if($tailBytes -gt 0 -and $st.phase -eq 'backed-up'){
  if(-not(Test-Path -LiteralPath $backup) -or (Get-FileHash -Algorithm SHA256 -LiteralPath $backup).Hash -ne $st.winre_sha256){throw 'verified WinRE backup is unavailable'}
  $r=@(Get-Partition -DiskNumber $diskNo|Where-Object {$_.GptType -eq $tailType})
  if($r.Count -eq 1 -and $r[0].PartitionNumber -eq $tailNo -and $r[0].Size -eq $tailBytes){
-  if(Get-Volume -DriveLetter R -ErrorAction SilentlyContinue){Remove-PartitionAccessPath -DiskNumber $diskNo -PartitionNumber $tailNo -DriveLetter R}
+  if(Get-Volume -DriveLetter R -ErrorAction SilentlyContinue){Remove-PartitionAccessPath -DiskNumber $diskNo -PartitionNumber $tailNo -AccessPath 'R:'}
   if($wasEnabled){reagentc /disable|Out-Null;if($LASTEXITCODE -ne 0){throw 'WinRE disable failed'}}
   Remove-Partition -DiskNumber $diskNo -PartitionNumber $tailNo -Confirm:$false
  }elseif($r.Count -ne 0){throw 'unexpected recovery partition while resuming'}
@@ -287,25 +291,38 @@ if($tailBytes -gt 0 -and $st.phase -in @('c-grown','creating-recovery')){
 if($tailBytes -gt 0 -and $st.phase -in @('creating-recovery','recovery-created')){
  $r=Get-Partition -DiskNumber $diskNo -PartitionNumber ([int]$st.new_tail_number);if($r.GptType -ne $tailType -or $r.Size -ne $tailBytes){throw 'created recovery partition identity changed'}
  $v=Get-Volume -Partition $r -ErrorAction SilentlyContinue
- if(-not $v){Format-Volume -Partition $r -FileSystem NTFS -NewFileSystemLabel 'Windows RE tools' -Confirm:$false|Out-Null}
+ if(-not $v -or [string]$v.FileSystem -in @('','RAW','Unknown')){Format-Volume -Partition $r -FileSystem NTFS -NewFileSystemLabel 'Windows RE tools' -Confirm:$false|Out-Null}
  elseif($v.FileSystem -ne 'NTFS' -or $v.FileSystemLabel -ne 'Windows RE tools'){throw 'recovery partition has unexpected formatted data'}
  $assigned=Get-Partition -DriveLetter R -ErrorAction SilentlyContinue
  if($assigned -and ($assigned.DiskNumber -ne $diskNo -or $assigned.PartitionNumber -ne $r.PartitionNumber)){throw 'recovery drive R: resolves to an unexpected partition'}
- if(-not $assigned){if(Test-Path 'R:\'){throw 'recovery drive R: is occupied'};Add-PartitionAccessPath -DiskNumber $diskNo -PartitionNumber $r.PartitionNumber -DriveLetter R}
+ if(-not $assigned){if(Test-Path 'R:\'){throw 'recovery drive R: is occupied'};Add-PartitionAccessPath -DiskNumber $diskNo -PartitionNumber $r.PartitionNumber -AccessPath 'R:'}
  $dir='R:\\Recovery\\WindowsRE';New-Item -ItemType Directory -Force $dir|Out-Null;Copy-Item -LiteralPath $backup -Destination "$dir\\Winre.wim" -Force
  if((Get-FileHash -Algorithm SHA256 "$dir\\Winre.wim").Hash -ne $st.winre_sha256){throw 'restored WinRE hash mismatch'}
- $diskpart=@("select disk $diskNo","select partition $($r.PartitionNumber)",'gpt attributes=0x8000000000000001','exit') -join "`r`n";$diskpart|diskpart.exe|Out-Null;if($LASTEXITCODE -ne 0){throw 'WinRE GPT attributes could not be set'}
- Set-Partition -DiskNumber $diskNo -PartitionNumber $r.PartitionNumber -IsHidden $true -NoDefaultDriveLetter $true
+ # WinRE GPT attributes are restored after reagentc and drive-letter cleanup below.
  reagentc /setreimage /path $dir /target C:\\Windows|Out-Null;if($LASTEXITCODE -ne 0){throw 'WinRE registration failed'}
  if($wasEnabled){reagentc /enable|Out-Null;if($LASTEXITCODE -ne 0){throw 'WinRE enable failed'}}
- if(Get-Volume -DriveLetter R -ErrorAction SilentlyContinue){Remove-PartitionAccessPath -DiskNumber $diskNo -PartitionNumber $r.PartitionNumber -DriveLetter R}
+ if(Get-Volume -DriveLetter R -ErrorAction SilentlyContinue){Remove-PartitionAccessPath -DiskNumber $diskNo -PartitionNumber $r.PartitionNumber -AccessPath 'R:'}
  Save-State 'recovery-restored'
+}
+$nativeAttributes='';$nativeAttributesHex=''
+if($tailBytes -gt 0 -and $st.phase -in @('recovery-restored','complete')){
+ if(-not(Test-Path -LiteralPath $backup) -or (Get-FileHash -Algorithm SHA256 -LiteralPath $backup).Hash -ne $st.winre_sha256){throw 'verified WinRE backup is unavailable during final attribute check'}
+ $r=Get-Partition -DiskNumber $diskNo -PartitionNumber ([int]$st.new_tail_number);if($r.GptType -ne $tailType -or $r.Size -ne $tailBytes -or $r.Offset -lt ($cOffset+$cTarget)){throw 'WinRE partition identity differs during final attribute check'}
+ $attrs=Get-Partition -DiskNumber $diskNo -PartitionNumber $r.PartitionNumber
+ $attrFile=Join-Path $root 'winre-attributes.txt';if(Test-Path -LiteralPath $attrFile){$i=Get-Item -Force -LiteralPath $attrFile;if($i.Attributes -band [IO.FileAttributes]::ReparsePoint){throw 'WinRE attribute script is redirected'}}
+ @("select disk $diskNo","select partition $($r.PartitionNumber)",'gpt attributes=0x8000000000000001','detail partition','exit') | Set-Content -LiteralPath $attrFile -Encoding Ascii
+ try{$nativeAttributes=& "$env:windir\\System32\\diskpart.exe" /s $attrFile 2>&1|Out-String;$diskpartExit=$LASTEXITCODE}finally{if(Test-Path -LiteralPath $attrFile){Remove-Item -LiteralPath $attrFile -Force}}
+ $attributeMatches=[regex]::Matches($nativeAttributes,'(?im)^\\s*Attrib\\s*:\\s*(0[xX][A-Fa-f0-9]+)\\s*$')
+ if($diskpartExit -ne 0 -or $attributeMatches.Count -ne 1 -or $attributeMatches[0].Groups[1].Value -ne '0X8000000000000001'){throw 'WinRE native GPT attributes did not verify'}
+ $nativeAttributesHex=$attributeMatches[0].Groups[1].Value
+ $attrs=Get-Partition -DiskNumber $diskNo -PartitionNumber $r.PartitionNumber
+ if(-not $attrs.IsHidden -or $attrs.NoDefaultDriveLetter -eq $false){throw 'WinRE recovery partition did not retain its protected GPT attributes'}
 }
 $c=Get-Partition -DiskNumber $diskNo -PartitionNumber $cNo;$free=(Get-Volume -DriveLetter C).SizeRemaining
 if($c.Size -ne $cTarget -or $free -lt 1GB){throw 'C filesystem capacity verification failed'}
-if($tailBytes -gt 0){$r=Get-Partition -DiskNumber $diskNo -PartitionNumber ([int]$st.new_tail_number);$attrs=Get-Partition -DiskNumber $diskNo -PartitionNumber $r.PartitionNumber;if($r.GptType -ne $tailType -or $r.Size -ne $tailBytes -or -not $attrs.IsHidden -or -not $attrs.NoDefaultDriveLetter){throw 'WinRE partition identity or GPT attributes differ'};$info=reagentc /info|Out-String;if($LASTEXITCODE -ne 0 -or (($info -match 'Windows RE status:\\s+Enabled') -ne $wasEnabled)){throw 'WinRE enabled state differs'};$loc=([regex]::Match($info,'harddisk\\d+\\\\partition(\\d+)','IgnoreCase'));if($wasEnabled -and (-not $loc.Success -or [int]$loc.Groups[1].Value -ne $r.PartitionNumber)){throw 'WinRE location identity differs'}}
+if($tailBytes -gt 0){$r=Get-Partition -DiskNumber $diskNo -PartitionNumber ([int]$st.new_tail_number);$attrs=Get-Partition -DiskNumber $diskNo -PartitionNumber $r.PartitionNumber;if($r.GptType -ne $tailType -or $r.Size -ne $tailBytes -or -not $attrs.IsHidden -or $attrs.NoDefaultDriveLetter -eq $false){throw 'WinRE partition identity or GPT attributes differ'};$info=reagentc /info|Out-String;if($LASTEXITCODE -ne 0 -or (($info -match 'Windows RE status:\\s+Enabled') -ne $wasEnabled)){throw 'WinRE enabled state differs'};$loc=([regex]::Match($info,'harddisk\\d+\\\\partition(\\d+)','IgnoreCase'));if($wasEnabled -and (-not $loc.Success -or [int]$loc.Groups[1].Value -ne $r.PartitionNumber)){throw 'WinRE location identity differs'}}
 Save-State 'complete'
-[ordered]@{ready=$true;disk_bytes=$d.Size;c_bytes=$c.Size;free_bytes=$free;winre_enabled=$wasEnabled}|ConvertTo-Json -Compress'''
+[ordered]@{ready=$true;disk_bytes=$d.Size;c_bytes=$c.Size;free_bytes=$free;winre_enabled=$wasEnabled;native_attributes_hex=$nativeAttributesHex;native_attributes_output=$nativeAttributes}|ConvertTo-Json -Compress'''
     replacements={'__DISK__':str(int(m['disk_number'])),'__TARGET__':str(target),'__CNO__':str(int(m['c_number'])),'__COFF__':str(c_offset),'__OLDC__':str(old_c),'__CTARGET__':str(c_target),'__TAILNO__':('$null' if tail_num is None else str(int(tail_num))),'__TAILSIZE__':str(tail_size),'__TAILTYPE__':tail_type,'__ENABLED__':('$true' if was_enabled else '$false')}
     for key,value in replacements.items():state=state.replace(key,value)
     return state
@@ -476,7 +493,7 @@ def _qga(api,target,command,timeout=300,*,journal=True,resumable=False):
         while time.monotonic()<deadline:
             state=api.request('GET',root+'/exec-status',{'pid':record['pid']})
             if state.get('exited'):
-                output=str(state.get('out-data',''));record.update(state='complete' if state.get('exitcode')==0 else 'failed',exitcode=state.get('exitcode'),output=output);_journal_save(path,records)
+                output=str(state.get('out-data',''));record.update(state='complete' if state.get('exitcode')==0 else 'failed',exitcode=state.get('exitcode'),output=output,error_output=str(state.get('err-data','')));_journal_save(path,records)
                 if state.get('exitcode')!=0:raise DiskGrowError('Fixed guest disk operation failed; guest output withheld.')
                 return output
             time.sleep(1)

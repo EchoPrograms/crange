@@ -29,7 +29,8 @@ def windows():
             'partition_style': 'GPT', 'c_number': 3, 'c_offset': 290455552,
             'c_bytes': 29 * 1024**3, 'filesystem_bytes': 29 * 1024**3-4096, 'c_fs': 'NTFS', 'tail_number': 4,
             'tail_type': '{de94bba4-06d1-4d40-a16a-bfd50179d6ac}',
-            'tail_size': 786*1024**2, 'winre_enabled': True,
+            'tail_size': 786*1024**2, 'tail_hidden': True,
+            'tail_no_default_drive_letter': None, 'winre_enabled': True,
             'winre_location_partition': 4, 'drive_r_available': True,
             'c_health': 'Healthy', 'encrypted': False,
             'free_bytes': 5 * 1024**3, 'windows_directory': 'C:\\Windows',
@@ -84,6 +85,11 @@ class VmDiskGrowTests(unittest.TestCase):
         self.assertIn(token,script)
     self.assertIn('Format-Volume',script)
     self.assertIn('0x8000000000000001',script)
+    self.assertIn(' /s $attrFile',script)
+    self.assertIn('detail partition',script)
+    self.assertIn('native_attributes_output=$nativeAttributes',script)
+    self.assertNotIn('Set-Partition -DiskNumber',script)
+    self.assertIn('NoDefaultDriveLetter',base64.b64decode(grow.windows_inspector()[4]).decode('utf-16le'))
     self.assertIn('$cOffset',script)
     c_target=(64*1024**3-windows()['c_offset']-windows()['tail_size']-1024**2)//(1024**2)*(1024**2)
     self.assertIn(f'$cTarget=[int64]{c_target}',script)
@@ -134,6 +140,12 @@ class VmDiskGrowTests(unittest.TestCase):
     win['partitions'][2]['size']=win['c_bytes']
     win['partitions'][3]['offset']=win['partitions'][2]['offset']+win['c_bytes']
     self.assertTrue(grow.windows_already_grown(win,target))
+    win['tail_hidden']=False
+    self.assertFalse(grow.windows_already_grown(win,target))
+    win['tail_hidden']=True
+    win['tail_no_default_drive_letter']=False
+    self.assertFalse(grow.windows_already_grown(win,target))
+    win['tail_no_default_drive_letter']=None
 
     target_row={'target_gb':target,'resource_key':'vm:web','guest_id':1}
     for os_name,measurement in (('linux',lin),('windows',win)):
@@ -214,10 +226,13 @@ class VmDiskGrowTests(unittest.TestCase):
 
  def test_guest_checkpoint_allows_a_new_pid_after_known_failure(self):
     with tempfile.TemporaryDirectory() as directory, patch.dict(os.environ,{'CRANGE_VM_DISK_GROW_JOURNAL':directory+'/jobs.json'}):
-        api=Mock();api.request.side_effect=[{'pid':7},{'exited':True,'exitcode':1},
+        api=Mock();api.request.side_effect=[{'pid':7},{'exited':True,'exitcode':1,'err-data':'private storage failure'},
                                              {'pid':8},{'exited':True,'exitcode':0,'out-data':'resumed'}]
         target={'project_id':3,'resource_key':'vm:web','node':'proxmox2','guest_id':123}
-        with self.assertRaises(grow.DiskGrowError):grow._qga(api,target,['checkpointed-script'],resumable=True)
+        with self.assertRaises(grow.DiskGrowError) as failure:grow._qga(api,target,['checkpointed-script'],resumable=True)
+        self.assertNotIn('private storage failure',str(failure.exception))
+        records=json.loads(Path(directory+'/jobs.json').read_text())
+        self.assertEqual(next(iter(records.values()))['error_output'],'private storage failure')
         self.assertEqual(grow._qga(api,target,['checkpointed-script'],resumable=True),'resumed')
         self.assertEqual(sum(call.args[0]=='POST' for call in api.request.call_args_list),2)
 
