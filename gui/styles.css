@@ -480,3 +480,6 @@ pre, code { font-family: "IBM Plex Mono", ui-monospace, Consolas, monospace; }
 .field-changed { color: #e8a548; }
 .field-changed input, .field-changed select, .field-changed textarea { border-color: #e8a548; box-shadow: 0 0 0 1px color-mix(in srgb, #e8a548 30%, transparent); }
 @media (max-width: 640px) { .scenario-change-marker { margin-inline-start: .3rem; font-size: .64rem; } }
+
+.scenario-deployment-actions { justify-content: flex-end; margin-block-end: 22px; }
+.scenario-tab .nav-status-dot { display: inline-block; margin-inline-start: 8px; vertical-align: middle; }

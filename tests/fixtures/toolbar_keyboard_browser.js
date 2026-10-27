@@ -1,0 +1,52 @@
+async page => {
+ const checks=[],errors=[],check=(ok,label)=>{if(!ok)throw Error(label);checks.push(label)};
+ page.on('pageerror',error=>errors.push(error.message));
+ await page.setViewportSize({width:1440,height:900});
+ await page.goto('http://127.0.0.1:8786/tests/fixtures/toolbar_top.html');
+ await page.evaluate(()=>localStorage.clear());await page.reload();
+ await page.getByRole('button',{name:'Show session controls',exact:true}).click();
+ const clipboard=page.getByRole('textbox',{name:'Clipboard',exact:true});
+ check(!await clipboard.isVisible(),'Floating toolbar keeps its compact controls');
+ const drag=page.locator('.cr-session-drag'),rect=await drag.boundingBox();
+ await page.mouse.move(rect.x+rect.width/2,rect.y+rect.height/2);await page.mouse.down();await page.mouse.move(620,8,{steps:8});await page.mouse.up();
+ await clipboard.waitFor({state:'visible'});
+ await page.evaluate(()=>window.__fixture.scope.$apply(()=>{window.__fixture.scope.crSession.box={state:'running',project:100,team:1};}));
+ const layout=await page.locator('.cr-session-toolbar').evaluate(bar=>{
+  const r=node=>node.getBoundingClientRect(),home=bar.querySelector('[aria-label="Return to project"]'),disconnect=bar.querySelector('.cr-session-disconnect'),selector=bar.querySelector('.cr-session-selector'),clipboard=bar.querySelector('.cr-session-clipboard'),zoom=bar.querySelector('.cr-session-zoom'),actions=bar.querySelector('.cr-session-toolbar-actions');
+  return {leftOrder:[home,disconnect,selector,clipboard,zoom].map(node=>r(node).left),right:r(actions).right,edge:r(bar).right,borders:[getComputedStyle(bar).borderTopWidth,getComputedStyle(bar).borderLeftWidth,getComputedStyle(bar).borderRightWidth],rightButtons:[...actions.querySelectorAll('button')].map(node=>node.getAttribute('aria-label')||node.textContent.trim())};
+ });
+ check(layout.leftOrder.every((x,i,a)=>i===0||x>a[i-1]),'Home, Disconnect, selector, Clipboard, and scale appear in order');
+ check(layout.edge-layout.right>=7&&layout.edge-layout.right<=10,'Power, map, fullscreen, Options, and Close align to the right edge');
+ check(layout.rightButtons.length===5,'All five session actions are grouped on the right');
+ check(layout.borders.every(value=>value==='0px'),'Docked toolbar has no top or side border');
+ const nativeKeyboard=await page.request.get('https://raw.githubusercontent.com/apache/guacamole-client/1.6.0/guacamole-common-js/src/main/webapp/modules/Keyboard.js');
+ await page.addScriptTag({content:await nativeKeyboard.text()});
+ await page.evaluate(()=>{
+  const root=angular.element(document.documentElement).injector().get('$rootScope');
+  window.__remoteKeys=[];
+  const keyboard=new Guacamole.Keyboard(document);
+  keyboard.onkeydown=keysym=>{const event=root.$broadcast('guacBeforeKeydown',keysym,keyboard);if(event.defaultPrevented)return true;window.__remoteKeys.push(['down',keysym]);return false;};
+  keyboard.onkeyup=keysym=>{const event=root.$broadcast('guacBeforeKeyup',keysym,keyboard);if(!event.defaultPrevented)window.__remoteKeys.push(['up',keysym]);};
+ });
+ await clipboard.click();await clipboard.pressSequentially('typed clipboard text');
+ check(await clipboard.inputValue()==='typed clipboard text','Real keyboard typing stays in the clipboard field');
+ check(await page.evaluate(()=>window.__remoteKeys.length)===0,'Clipboard typing sends no remote key presses or releases');
+ check(await page.evaluate(()=>window.__clipboardUpdates.at(-1))==='typed clipboard text','Typed clipboard content still reaches the clipboard service');
+ const scale=page.getByRole('spinbutton',{name:'Display scale percent',exact:true});
+ await scale.click();await scale.press('ControlOrMeta+A');await scale.pressSequentially('125');await scale.press('Tab');
+ check(await scale.inputValue()==='125','Scale field also accepts local keyboard input');
+ check(await page.evaluate(()=>window.__remoteKeys.length)===0,'Scale editing does not send keys to the connection');
+ await page.locator('.native-pane').first().click();await page.keyboard.press('z');
+ check(await page.evaluate(()=>window.__remoteKeys.length)>0,'Remote keyboard routing resumes after leaving toolbar controls');
+ await clipboard.click();await page.keyboard.down('Control');await page.keyboard.down('Alt');await page.keyboard.down('Shift');
+ await page.locator('.cr-session-options').waitFor({state:'visible'});
+ await page.keyboard.up('Shift');await page.keyboard.up('Alt');await page.keyboard.up('Control');
+ check(await page.locator('.cr-session-options').isVisible(),'Ctrl+Alt+Shift still opens the full menu while editing the clipboard');
+ await page.getByRole('button',{name:'Close session options',exact:true}).click();
+ await page.screenshot({path:'output/playwright/guac-toolbar-grouping-desktop.png'});
+ await page.setViewportSize({width:390,height:844});
+ check(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth&&document.querySelector('.cr-session-toolbar').scrollWidth<=innerWidth),'Grouped toolbar wraps without mobile overflow');
+ await page.screenshot({path:'output/playwright/guac-toolbar-grouping-mobile.png'});
+ check(errors.length===0,'Toolbar changes have no JavaScript errors');
+ return {checks,errors};
+}

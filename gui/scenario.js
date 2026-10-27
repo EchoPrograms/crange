@@ -51,6 +51,25 @@ function scenarioLatest(p,operations) {
 function scenarioSelectTab(p,tab) {
  scenarioState(p).tab=tab;render();document.getElementById("scenario-tab-"+tab)?.focus();
 }
+function scenarioTabNoticeStates(projectId,jobList=jobs,contexts=uiJobContexts,dismissed=dismissedJobNotices,notified=notifiedJobNotices) {
+ const states={};
+ for(const scope of ["workspace","releases","deployments"]){
+  const relevant=jobList.filter(job=>Number(job.project)===Number(projectId)&&contexts.get(job.id)?.view==="scenario"&&(contexts.get(job.id)?.scope||jobScope(job.operation))===scope).sort((a,b)=>b.created-a.created||b.id.localeCompare(a.id));
+  const active=relevant.find(job=>["queued","running","waiting-for-node","reconcile-required"].includes(job.status)),recent=relevant[0];
+  const job=active||(recent&&["succeeded","failed","interrupted"].includes(recent.status)&&notified.has(recent.id)&&!dismissed.has(recent.id)?recent:null);
+  if(job)states[scope]={tone:["failed","interrupted"].includes(job.status)?"error":active?"pending":"success",label:`${jobContextTitle(job)} · ${job.status}`};
+ }
+ return states;
+}
+function updateScenarioTabNotifications(projectId=project()?.project_id) {
+ const states=scenarioTabNoticeStates(projectId);
+ for(const button of document.querySelectorAll(".scenario-tabs [data-scenario-tab]")){
+  const marker=button.querySelector(".nav-status-dot"),state=states[button.dataset.scenarioTab];
+  if(!state){marker?.remove();button.removeAttribute("data-notification");button.removeAttribute("aria-description");continue}
+  const dot=marker||el("span",undefined,"nav-status-dot");dot.className=`nav-status-dot nav-status-${state.tone}`;dot.setAttribute("aria-hidden","true");if(!marker)button.append(dot);
+  button.dataset.notification=state.tone;button.setAttribute("aria-description",state.label);
+ }
+}
 function renderScenario(content,p) {
  refreshProjectRuntime(p);
  const state=scenarioState(p),workspace=el("div",undefined,"scenario-workspace");
@@ -59,6 +78,7 @@ function renderScenario(content,p) {
  for(const [key,label] of choices){
   const button=scenarioButton(label,()=>scenarioSelectTab(p,key),"scenario-tab");
   button.id="scenario-tab-"+key;button.setAttribute("role","tab");button.setAttribute("aria-selected",String(state.tab===key));
+  button.dataset.scenarioTab=key;
   button.setAttribute("aria-controls","scenario-panel");button.tabIndex=state.tab===key?0:-1;
   button.onkeydown=event=>{const index=choices.findIndex(([id])=>id===key);let next;
    if(event.key==="ArrowRight")next=(index+1)%choices.length;
@@ -73,6 +93,7 @@ function renderScenario(content,p) {
  if(state.tab==="workspace")renderScenarioWorkspace(panel,p,state);
  if(state.tab==="releases")renderScenarioReleases(panel,p);
  if(state.tab==="deployments")renderScenarioDeployments(panel,p);
+ updateScenarioTabNotifications(p.project_id);
 }
 
 function renderScenarioWorkspace(content,p,state) {
@@ -158,6 +179,11 @@ function scenarioDeployment(p,state) {
  else if(plan?.applied){title=plan.network_foundation?.length?"Network deployed":"Staging deployed";description=plan.network_foundation?.length?"The network and router are deployed. Verify the network, then review changes again to deploy its machines.":"Run health checks, then capture a release. Review again after making changes.";tone="good"}
  else if(plan?.stale){title="Review needs refreshing";description="The plan expired or the scenario changed. Review again before deploying.";tone="warning"}
  else if(ready){title=plan.changes.length?`${plan.changes.length} planned ${plan.changes.length===1?"change":"changes"}`:"No infrastructure changes";description=plan.changes.length?"Inspect the plan, then apply it to staging.":"Accept the reviewed settings to finish this update.";tone="info"}
+ const noticeKey=plan?.applied?`scenario-deployed:${p.project_id}:${plan.id}`:null;
+ if(tone==="good"&&dismissedJobNotices.has(noticeKey)){
+  const controls=el("div",undefined,"scenario-controls scenario-deployment-actions"),review=scenarioForm("Review changes","stage-changes");
+  controls.append(review);return controls;
+ }
  const bar=el("section",undefined,`scenario-deployment scenario-deployment-${tone}`),body=el("div",undefined,"scenario-deployment-copy"),buttons=el("div",undefined,"scenario-controls");
  body.append(el("strong",title),el("p",description,"muted"));if(latest)body.append(jobMetadata(latest));bar.append(body,buttons);
  bar.dataset.deploymentJob=latest?.id||"";
@@ -169,6 +195,14 @@ function scenarioDeployment(p,state) {
   const deploy=destructive?scenarioForm("Review and deploy","stage-deploy",{},"primary"):
    fixedAction(!plan.changes.length?"Accept settings":plan.network_foundation?.length?"Deploy network":"Deploy to staging",!plan.changes.length?"apply":"stage-deploy",{plan_id:plan.id,allow_destroy:false,allow_replace:false},"primary");
   buttons.append(deploy);
+ }
+ if(tone==="good"){
+  const dismiss=scenarioButton("Dismiss",()=>{
+   dismissJobNotice(noticeKey);
+   for(const job of jobs)if(job.project===Number(p.project_id)&&["stage-changes","plan","stage-deploy","apply"].includes(job.operation)&&job.status==="succeeded"&&(job.plan_id===plan.id||(job.output||"").includes(`Plan ID: ${plan.id}`)))dismissJobNotice(job.id);
+   render();document.querySelector(".scenario-deployment-actions button")?.focus({preventScroll:true});
+  });
+  dismiss.setAttribute("aria-label",`Dismiss ${title} notification`);buttons.append(dismiss);
  }
  return bar;
 }

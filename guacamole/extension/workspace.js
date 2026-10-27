@@ -116,16 +116,18 @@
 <div class="cr-session-shell" ng-class="{'align-right': crSession.alignment === 'right', 'is-collapsed': !crSession.visible}">
   <div class="cr-session-toolbar" ng-show="crSession.visible" role="toolbar" aria-label="Remote session controls">
     <button type="button" class="cr-session-icon cr-session-drag" aria-label="Collapse session controls" aria-expanded="true" crange-help="Click to collapse; drag to move. Arrow keys move the toolbar; Home resets its position">${icon('drag')}</button>
-    <guac-client-zoom class="cr-session-zoom" ng-if="focusedClient" client="focusedClient"></guac-client-zoom>
-    <input class="cr-session-clipboard" type="text" aria-label="Clipboard" placeholder="Clipboard" autocomplete="off" spellcheck="false" ng-model="crSession.clipboardText" ng-change="crSession.updateClipboard()">
     ${button('home', 'Return to project', 'crSession.home()')}
     <button type="button" class="cr-session-disconnect" ng-click="crSession.disconnect()" crange-help="Disconnect the current remote session. The server keeps running">Disconnect</button>
     <button type="button" class="cr-session-name cr-session-selector" ng-click="crSession.toggle('connections')" aria-expanded="{{crSession.panel === 'connections'}}" aria-label="Select connections"><span>{{focusedClient.name || getName(clientGroup)}}</span><span class="cr-protocol-label" ng-if="focusedClient.protocol">{{focusedClient.protocol | uppercase}}</span><span class="cr-session-count" ng-if="clientGroup.clients.length > 1">{{clientGroup.clients.length}} selected</span><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="m5 8 5 5 5-5"/></svg></button>
+    <input class="cr-session-clipboard" type="text" aria-label="Clipboard" placeholder="Clipboard" autocomplete="off" spellcheck="false" ng-model="crSession.clipboardText" ng-change="crSession.updateClipboard()">
+    <guac-client-zoom class="cr-session-zoom" ng-if="focusedClient" client="focusedClient"></guac-client-zoom>
+    <div class="cr-session-toolbar-actions">
     <div class="cr-session-power" ng-if="crSession.box"><button type="button" ng-click="crSession.toggle('power')" aria-expanded="{{crSession.panel === 'power'}}"><span class="cr-status" ng-class="{on: crSession.box.state === 'running'}">{{crSession.box.state || 'Checking…'}}</span><span aria-hidden="true">⌄</span></button></div>
     ${button('network', 'Network map', "crSession.toggle('network')")}
     ${button('fullscreen', 'Toggle fullscreen', 'crSession.fullscreen()')}
     <button type="button" ng-click="crSession.toggle('options')" aria-expanded="{{crSession.panel === 'options'}}">${icon('options')}<span>Options</span></button>
     ${button('close', 'Hide session toolbar (Ctrl+Alt+Shift to toggle)', 'crSession.hide()')}
+    </div>
   </div>
   <button type="button" class="cr-session-reopen" ng-show="!crSession.visible" aria-label="Show session controls" aria-expanded="false" crange-help="Click to expand; drag along the screen edge. Arrow keys move the tab"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2.5" aria-hidden="true"><path d="m7 4 6 6-6 6"/></svg></button>
   <section class="cr-session-popover cr-session-connections" ng-if="crSession.panel === 'connections'" aria-label="Select connections">
@@ -195,6 +197,14 @@
             var username = typeof auth.getCurrentUsername === 'function' ? auth.getCurrentUsername() : 'anonymous';
             var userKey = 'crange-session/' + encodeURIComponent(auth.getDataSource() + '/' + username);
             var shell = element[0].querySelector('.cr-session-shell'), handle = element[0].querySelector('.cr-session-drag'), reopen=element[0].querySelector('.cr-session-reopen'), drag = null, suppressClick=false;
+            // Guacamole captures keyboard events globally, even while a
+            // toolbar field has DOM focus. Use its native before-key hooks
+            // to keep local typing and button activation out of every client.
+            function localToolbarKey(event) {
+                if (shell.contains(document.activeElement)) event.preventDefault();
+            }
+            var unlistenLocalKeydown = scope.$on('guacBeforeKeydown', localToolbarKey);
+            var unlistenLocalKeyup = scope.$on('guacBeforeKeyup', localToolbarKey);
             var clientView = element[0].parentNode.querySelector('.client-view'), clientInset = null;
             var activeToolbarKey = null, position = null, dock = {edge:'bottom',offset:0}, topDocked = false;
             function toolbarKey(client) {
@@ -434,7 +444,7 @@
             if (toolbarResize) toolbarResize.observe(shell);
             window.addEventListener('blur',blurred);window.addEventListener('resize', clampToolbar); window.requestAnimationFrame(clampToolbar);
             scope.$on('$destroy', function () {
-                destroyed = true; if (unlistenClipboard) unlistenClipboard(); window.removeEventListener('keydown', keydown, true); window.removeEventListener('keyup', keyup, true); window.removeEventListener('resize', clampToolbar);
+                destroyed = true; if (unlistenClipboard) unlistenClipboard(); unlistenLocalKeydown(); unlistenLocalKeyup(); window.removeEventListener('keydown', keydown, true); window.removeEventListener('keyup', keyup, true); window.removeEventListener('resize', clampToolbar);
                 blurred();window.removeEventListener('blur',blurred);bind(handle,'removeEventListener');bind(reopen,'removeEventListener');
                 if (toolbarResize) toolbarResize.disconnect();
                 if (clientView) { clientView.classList.remove('cr-session-docked-view'); clientView.style.removeProperty('--cr-session-toolbar-height'); }

@@ -148,6 +148,7 @@ function dismissJobNotice(id){
  while(dismissedJobNotices.size>100)dismissedJobNotices.delete(dismissedJobNotices.values().next().value);
  try{sessionStorage.setItem("crange.dismissed-job-notices",JSON.stringify([...dismissedJobNotices]))}catch(_){}
  refreshContextJobProgress();
+ if(typeof updateProjectNavigationNotifications==="function")updateProjectNavigationNotifications();
 }
 const deploymentOperations=new Set(["stage-changes","plan","stage-deploy","apply"]);
 function jobScope(operation){
@@ -233,6 +234,7 @@ function refreshContextJobProgress(){
  }
  const bar=document.querySelector(".scenario-deployment[aria-busy=true]");
  if(bar){const job=jobs.find(item=>item.id===bar.dataset.deploymentJob);if(job)bar.querySelector("p").textContent=jobPhase(job)}
+ if(typeof updateScenarioTabNotifications==="function")updateScenarioTabNotifications();
 }
 
 function projectContextView(){return ["project-overview","scenario","teams","team-detail","project-users","project-user-detail","project-settings","machines","machine-detail"].includes(view)}

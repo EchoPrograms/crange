@@ -27,6 +27,8 @@ Open `http://127.0.0.1:8000`. Do not publish the built-in HTTP server directly t
 
 ## Manage dashboard and remote access
 
+After deploying controller Python updates, restart the services that import the changed modules. Image readiness is served by `crange-guac-broker.service`, so restarting only the web service and worker can leave the image picker using old code. Restart the broker after updating image-readiness code, then verify the authenticated project response includes the expected `system_disk_gb` metadata. Restarting this controller broker does not restart Guacamole or its remote connections.
+
 Administrators use **CRANGE Users** for dashboard users, enabling/disabling accounts, project memberships, participant/manager roles and team access. New non-admin users default to participant access. Managers can edit infrastructure and access only within their managed projects. Review role assignments independently of Guacamole connection grants.
 
 Configure the protected connector with `scripts/crange guac-config`. `guac-sync PROJECT` renders desired connections; `guac-apply PROJECT` publishes them and native account grants; `guac-users PROJECT` publishes accounts only. `guac-refresh PROJECT` performs the combined refresh used by dashboard workflows. See [Guacamole integration](guacamole-integration.md).
