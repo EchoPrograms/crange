@@ -1,0 +1,25 @@
+'use strict';
+const assert=require('node:assert/strict'),fs=require('node:fs'),vm=require('node:vm');
+const source=fs.readFileSync('gui/app.js','utf8'),names=['workflowStagingMachines','workflowMachineDeployed','workflowHasChanges','workflowDisabledReason'];
+let plan=null,pending=null;const runtime={};
+const context=vm.createContext({Date,stagedPlan:()=>plan,infrastructurePendingState:()=>pending,machineRuntime:(_p,kind,name)=>runtime[kind+':'+name]||{state:'undeployed'}});
+for(const name of names){const start=source.indexOf('function '+name+'(');vm.runInContext(source.slice(start,source.indexOf('\nfunction ',start+1)),context);}
+const p={project_id:100,has_state:true,scenario_boxes:{web:{team_id:254}},scenario_containers:{},change_states:{scenario_box:{web:'unchanged'}},applied_placements:{}};
+const reason=(op,values={})=>context.workflowDisabledReason(op,values,p);
+assert.match(reason('stage-changes'),/No changes/,'an unchanged project cannot stage another plan');
+p.change_states.scenario_box.web='edited';assert.equal(reason('stage-changes'),'');
+assert.match(reason('scenario-health',{name:'web'}),/must be deployed/);assert.match(reason('release-capture'),/must be deployed/);
+p.applied_placements['vm:web']={id:123,node_name:'proxmox1'};assert.equal(reason('scenario-health',{name:'web'}),'');assert.equal(reason('release-capture'),'');
+assert.match(reason('stage-deploy'),/Stage changes first/);plan={id:'plan',stale:false,applied:false,changes:[]};assert.equal(reason('stage-deploy'),'');
+plan.stale=true;assert.match(reason('apply'),/Stage changes first/);plan.stale=false;plan.applied=true;assert.match(reason('apply'),/Stage changes first/);
+assert.match(reason('release-stage'),/Select a release/);p.release_rollouts={1:{desired:{version:'1.0'}}};assert.equal(reason('release-stage'),'');assert.match(reason('release-check'),/Deploy a release/);
+p.release_rollouts[1].applied={version:'1.0'};assert.equal(reason('release-check'),'');
+assert.match(reason('release-apply'),/Stage release changes/);p.staged_plans=[{release_teams:[1],created:Date.now()/1000}];assert.equal(reason('release-apply'),'');
+p.desired_revision='new';p.staged_plans[0].inputs_sha256='old';assert.match(reason('release-apply'),/Stage release changes/,'changed declarations invalidate rollout eligibility');
+const notifications=fs.readFileSync('gui/usability.js','utf8'),start=notifications.indexOf('function workflowNextActions(');
+Object.assign(context,{projects:[p],project:()=>p,uiJobContexts:new Map(),scenarioForm:(label,op)=>({label,op}),navigate:(label,view,id)=>({label,view,id})});
+vm.runInContext(notifications.slice(start,notifications.indexOf('\nfunction ',start+1)),context);
+assert.equal(context.workflowNextActions({project:100,operation:'scenario-health',status:'succeeded'})[0].op,'release-capture','completed health checks offer capture');
+assert.equal(context.workflowNextActions({project:100,operation:'scenario-health',status:'failed'}).length,0,'failed tasks do not advance the workflow');
+context.project=()=>({project_id:200});assert.equal(context.workflowNextActions({project:100,operation:'scenario-health',status:'succeeded'})[0].id,100,'another project’s task leads back to its own project');
+console.log('Workflow prerequisites, stale plans, and next-step actions passed');

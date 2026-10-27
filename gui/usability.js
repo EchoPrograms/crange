@@ -47,12 +47,12 @@ function renderProjectOverview(content,p) {
  if(plan&&!plan.applied&&plan.changes.some(item=>item.change!=="no-op")){
   const reviewed=el("div",undefined,"infrastructure-plan-review");
   reviewed.append(el("h4","Reviewed infrastructure plan"),table(["Resource","Change"],plan.changes.filter(item=>item.change!=="no-op").map(item=>[resourceName(item.resource),item.change])));
-  if(plan.stale)reviewed.append(el("p","This plan is stale. Review infrastructure again before applying.","muted"));
+  if(plan.stale)reviewed.append(el("p","This plan is stale. Stage changes again before deploying.","muted"));
   else if(plan.stagingBlocked)reviewed.append(el("p","This plan includes staging changes. Review it from Scenario to avoid applying unrelated infrastructure changes.","muted"));
-  else reviewed.append(action("Apply reviewed plan", "apply", "primary"));
+  else reviewed.append(workflowReviewButton(p),action("Restage changes","plan"),action("Deploy changes", "apply", "primary"));
   infrastructure.append(reviewed);
  }
- const primary=empty?[action("Review network setup","bootstrap-plan","primary")]:[action(pending?.state==="review"?"Review infrastructure changes":"Review infrastructure","plan","primary")];
+ const primary=empty?[action("Stage changes","bootstrap-plan","primary")]:[action("Stage changes","plan","primary")];
  const tools=[action("Generate inventory","inventory"),action("Reconcile applied reservations","reconcile-project-reservations"),action("Configure routers and boxes","configure"),action("Configure Windows guests","configure"),action("Verify network","network-verify")];
  if(Number(p.project_id)===100)tools.push(...stagingDomainActions());
  if(foundation&&["configuration_failed","configuration_pending","awaiting_network_acceptance"].includes(foundation.state))tools.push(action("Retry router configuration","bootstrap-configure"));
@@ -191,19 +191,49 @@ function jobPhase(job){
  return "In progress. You can keep working while this runs.";
 }
 function jobContextTitle(job){
- const labels={"stage-changes":"Review staging changes","stage-deploy":"Deploy staging","scenario-health":"Check VM services","container-health":"Check container services","release-capture":"Capture release","release-test-stage":"Review release test","release-test-deploy":"Deploy release test","release-test-prepare":"Prepare release test","release-test-check":"Check release test","release-test-cleanup":"Clean up release test","release-deploy":"Select team release","release-stage":"Review team rollout","release-apply":"Deploy team release","release-check":"Check team services","release-upgrade":"Upgrade teams","release-rollback":"Roll back teams","capture-inspect":"Inspect capture"};
+ const labels={"stage-changes":"Stage changes","plan":"Stage changes","apply":"Deploy changes","bootstrap-plan":"Stage changes","bootstrap-apply":"Deploy changes","stage-deploy":"Deploy changes","scenario-health":"Check VM services","container-health":"Check container services","release-capture":"Capture release","release-test-stage":"Stage test changes","release-test-deploy":"Deploy release test","release-test-prepare":"Prepare release test","release-test-check":"Check release test","release-test-cleanup":"Clean up release test","release-deploy":"Select team release","release-stage":"Stage release changes","release-apply":"Deploy team release","release-check":"Check team services","release-upgrade":"Upgrade teams","release-rollback":"Roll back teams","capture-inspect":"Inspect capture"};
  const context=uiJobContexts.get(job.id),version=job.release_version||context?.version,target=version?`Release ${version}`:context?.name||"";
  return `${labels[job.operation]||job.operation.replaceAll("-"," ")}${target?` · ${target}`:""}${context?.teams?.length?` · Team${context.teams.length===1?"":"s"} ${context.teams.join(", ")}`:""}`;
 }
 function contextJobHost(p,scope){
  const host=el("div",undefined,"context-jobs");host.dataset.project=p?.project_id??Number($("project").value);host.dataset.jobScope=scope;host.dataset.jobView=view;if(view==="machine-detail"&&machineFocus?.project===Number(p?.project_id))host.dataset.resourceKey=`${machineFocus.kind}:${machineFocus.name}`;return host;
 }
+function workflowNextActions(job){
+ if(job.status!=="succeeded")return [];
+ const p=projects.find(item=>Number(item.project_id)===Number(job.project));if(!p)return [];
+ if(Number(project()?.project_id)!==Number(p.project_id))return [navigate("Open project","project-overview",p.project_id)];
+ const context=uiJobContexts.get(job.id)||{},version=job.release_version||context.version;
+ const release=(p.releases||p.scenario_releases||[]).find(item=>item.version===version);
+ if(["stage-changes","plan"].includes(job.operation)){
+  const plan=stagedPlan(p.project_id);return plan&&!plan.applied?[workflowReviewButton(p,job.operation),scenarioForm("Restage changes",job.operation),workflowDeployAction(p,plan,job.operation==="plan"?"apply":"stage-deploy")]:[];
+ }
+ if(job.operation==="bootstrap-plan")return [scenarioForm("Deploy changes","bootstrap-apply")];
+ if(job.operation==="bootstrap-apply")return [action("Verify network","network-verify")];
+ if(["stage-deploy","apply"].includes(job.operation))return [scenarioValidation(p,!workflowStagingMachines(p).length),scenarioForm("Capture release","release-capture")];
+ if(["scenario-health","container-health"].includes(job.operation))return [scenarioForm("Capture release","release-capture")];
+ if(job.operation==="release-capture"&&release)return [scenarioPrepareTest(p,release)];
+ if(["release-test-stage","release-test-prepare"].includes(job.operation)&&release?.test_review)return [scenarioButton("Review changes",()=>scenarioTestPlan(p,release))];
+ if(job.operation==="release-test-deploy"&&release)return [scenarioForm("Check test","release-test-check",{version})];
+ if(job.operation==="release-test-check"&&release)return [scenarioReleaseChooser(p),scenarioForm("Clean up test","release-test-cleanup",{version})];
+ if(job.operation==="release-deploy")return [scenarioForm("Stage changes","release-stage",context.teams?{teams:context.teams}:{})];
+ if(job.operation==="release-stage")return [scenarioForm("Deploy changes","release-apply",context.teams?{teams:context.teams}:{})];
+ if(job.operation==="release-apply")return [scenarioForm("Check team services","release-check",context.teams?{teams:context.teams}:{})];
+ return [];
+}
+function renderJobNextActions(job){
+ const p=projects.find(item=>Number(item.project_id)===Number(job.project)),note=$("job-dialog").querySelector(":scope > p.muted");if(note)note.hidden=!["queued","running","waiting-for-node","reconcile-required"].includes(job.status);
+ const revision=JSON.stringify([job.id,job.status,p?.desired_revision,p?.staged_plans,(p?.releases||[]).map(item=>[item.version,item.test_ready,item.test_status,item.test_review?.review_id])]);
+ let controls=$("job-dialog-next-actions");if(!controls){controls=el("div",undefined,"scenario-controls");controls.id="job-dialog-next-actions";$("job-dialog").append(controls)}
+ if(controls.dataset.revision===revision)return;controls.dataset.revision=revision;
+ const buttons=workflowNextActions(job);for(const button of buttons){const callback=button.onclick;if(callback)button.onclick=event=>{$("close-job").click();callback(event)}}
+ controls.replaceChildren(...buttons);controls.hidden=!buttons.length;
+}
 function contextJobCard(job){
  const busy=["queued","running","waiting-for-node"].includes(job.status),card=el("section",undefined,`context-job context-job-${job.status}`),copy=el("div",undefined,"context-job-copy"),top=el("div",undefined,"context-job-heading");
  card.dataset.jobId=job.id;card.setAttribute("aria-label",jobContextTitle(job));card.setAttribute("aria-busy",String(busy));
  top.append(el("strong",jobContextTitle(job)),el("span",({queued:"Queued",running:"Running",succeeded:"Completed",failed:"Failed",interrupted:"Stopped","waiting-for-node":"Waiting for node","reconcile-required":"Cleanup pending"})[job.status]||job.status,"context-job-status"));
  const phase=el("p",jobPhase(job),"muted");phase.setAttribute("role",busy?"status":"note");
- copy.append(top,phase,jobMetadata(job));const controls=el("div",undefined,"scenario-controls"),terminal=scenarioJob(job);terminal.id="terminal-"+job.id;controls.append(terminal);
+ copy.append(top,phase,jobMetadata(job));const controls=el("div",undefined,"scenario-controls"),terminal=scenarioJob(job);terminal.id="terminal-"+job.id;controls.append(...workflowNextActions(job),terminal);
  if(job.status==="queued"||(job.status==="running"&&!["network-reconcile","network-publish"].includes(job.operation))){
   const stop=scenarioButton("Stop",async()=>{stop.disabled=true;try{await api("jobs",{action:"cancel",job_id:job.id});notice("Stop requested.")}catch(error){notice(error.message,true)}finally{stop.disabled=false}},"quiet");stop.id="stop-"+job.id;controls.append(stop);
  }
@@ -228,7 +258,7 @@ function refreshContextJobProgress(){
   // the latest result first so dismissing it cannot uncover older notices.
   const recentVisible=recent&&!dismissedJobNotices.has(recent.id)&&notifiedJobNotices.has(recent.id);
   const displayed=(active.length?active:recentVisible?[recent]:[]).slice(0,4),focusId=host.contains(document.activeElement)?document.activeElement.id:null;
-  const revision=JSON.stringify(displayed.map(job=>[job.id,job.status,jobPhase(job)]));
+  const revision=JSON.stringify([displayed.map(job=>[job.id,job.status,jobPhase(job)]),projects.find(p=>Number(p.project_id)===projectId)?.desired_revision,projects.find(p=>Number(p.project_id)===projectId)?.staged_plans]);
   if(host.dataset.revision!==revision){host.replaceChildren(...displayed.map(contextJobCard));host.dataset.revision=revision;if(focusId)document.getElementById(focusId)?.focus({preventScroll:true})}
   host.hidden=!displayed.length;
  }

@@ -33,7 +33,7 @@ function scenarioForm(label,operation,values={},className="quiet") {
    $("job-form").querySelector("button.primary").textContent=label;
   }
   if(operation==="release-test-cleanup")$("job-fields").append(el("p",`Remove the temporary test copies and networks for release ${values.version}. This job reviews and applies their removal automatically, stopping if the plan changes other resources.`,"muted"));
- };return button;
+ };return workflowAction(button,operation,values);
 }
 function scenarioDate(value) {
  const date=new Date(value);return Number.isNaN(date.getTime())?"—":date.toLocaleString(undefined,{month:"short",day:"numeric",year:"numeric",hour:"2-digit",minute:"2-digit"});
@@ -153,18 +153,30 @@ function scenarioChangeCell(value){const cell=el("span",undefined,"scenario-chan
 function markScenarioRow(row,kind){if(!row||!kind)return;row.classList.add(`scenario-change-${kind}`);const first=row.cells?.[0];if(first&&!first.querySelector(".scenario-change-marker"))first.append(scenarioChangeMarker(kind))}
 
 function scenarioValidation(p,empty) {
+ const machines=workflowStagingMachines(p),deployed=!empty&&machines.length>0&&machines.every(item=>workflowMachineDeployed(p,item.kind,item.name));
  const button=scenarioButton("Run health checks",async()=>{
   button.disabled=true;
-  try{
-   for(const [field,operation] of [["scenario_boxes","scenario-health"],["scenario_containers","container-health"]])
-    for(const [name,box] of Object.entries(p[field]||{}))
-     if(Number(box.team_id)===254)await queueJob(operation,{name},p.project_id);
-  }
-  catch(_){/* The job dialog and notification retain the error. */}
-  finally{button.disabled=false}
+  try{for(const item of machines)await queueJob(item.kind==="vm"?"scenario-health":"container-health",{name:item.name},p.project_id)}
+  catch(_){/* The job notification retains the error. */}
+  finally{button.disabled=!deployed}
  });
- button.disabled=empty||jobs.some(j=>j.project===Number(p.project_id)&&["scenario-health","container-health"].includes(j.operation)&&["queued","running"].includes(j.status));
- button.dataset.help="Run the declared service checks for Team 0 VMs and containers. Deploy the machines first.";return button;
+ button.disabled=!deployed||jobs.some(j=>j.project===Number(p.project_id)&&["scenario-health","container-health"].includes(j.operation)&&["queued","running"].includes(j.status));
+ button.dataset.help=button.title=deployed?"Run the declared health checks for staging machines.":"Machines must be deployed.";return button;
+}
+function workflowDeployAction(p,plan=stagedPlan(p.project_id),operation=view==="scenario"?"stage-deploy":"apply"){
+ const destructive=plan?.changes.some(item=>item.change.includes("delete")&&!(plan.network_foundation?.length&&item.resource==="proxmox_sdn_applier.apply"));
+ return destructive?scenarioForm("Deploy changes",operation,{plan_id:plan.id},"primary"):
+  fixedAction("Deploy changes",plan?.changes.length?operation:"apply",{plan_id:plan?.id,allow_destroy:false,allow_replace:false},"primary",p.project_id);
+}
+function workflowReviewButton(p,operation=view==="scenario"?"stage-changes":"plan"){return scenarioButton("Review changes",()=>openWorkflowReview(p,operation))}
+function openWorkflowReview(p,operation="stage-changes"){
+ const previous=document.activeElement,d=resourceDialog("Review changes"),plan=stagedPlan(p.project_id),review=scenarioPlanReview(p);
+ d.form.classList.add("scenario-test-plan-form");review.open=true;review.id="workflow-review-plan";d.dialog.setAttribute("aria-label","Review changes");d.form.append(review);d.form.onsubmit=event=>event.preventDefault();d.dialog.tabIndex=-1;
+ const controls=el("div",undefined,"scenario-controls"),restage=scenarioForm("Restage changes",operation),deploy=workflowDeployAction(p,plan,operation==="plan"?"apply":"stage-deploy");
+ for(const button of [restage,deploy]){const callback=button.onclick;button.onclick=event=>{d.overlay.remove();callback(event)}}
+ controls.style.justifyContent="flex-end";controls.append(restage,deploy);d.form.append(controls);
+ const close=()=>{d.overlay.remove();previous?.focus({preventScroll:true})};d.dialog.querySelector(".panel-heading button").onclick=close;
+ d.dialog.addEventListener("keydown",event=>{if(event.key==="Escape"){event.preventDefault();close()}if(event.key==="Tab"){const buttons=[...d.dialog.querySelectorAll('button:not(:disabled),[href],input:not(:disabled),summary')];const first=buttons[0],last=buttons.at(-1);if(event.shiftKey&&document.activeElement===first){event.preventDefault();last?.focus()}else if(!event.shiftKey&&document.activeElement===last){event.preventDefault();first?.focus()}}});d.dialog.focus();
 }
 
 function scenarioDeployment(p,state) {
@@ -172,16 +184,16 @@ function scenarioDeployment(p,state) {
  const busy=latest&&["queued","running","waiting-for-node","reconcile-required"].includes(latest.status);
  const failed=latest&&["failed","interrupted"].includes(latest.status);
  const ready=plan&&!plan.stale&&!plan.applied&&!plan.stagingBlocked;
- let title="Review your changes",description="Review the planned changes before deploying to staging.",tone="neutral";
- if(busy){title=["stage-changes","plan"].includes(latest.operation)?"Reviewing changes…":"Deploying staging…";description=jobPhase(latest);tone="info"}
- else if(failed){title=["stage-changes","plan"].includes(latest.operation)?"Review failed":"Deployment needs attention";description=String(latest.output||"").split("\n").filter(line=>line.startsWith("crange:")).pop()?.replace(/^crange:\s*/,"")||"Open the job to see what failed, then review your changes again.";tone="bad"}
+ let title=workflowHasChanges(p)?"Changes ready to stage":"No pending changes",description=workflowHasChanges(p)?"Stage your changes, then review the infrastructure plan before deploying.":"Edit a machine or network to prepare an update.",tone="neutral";
+ if(busy){title=["stage-changes","plan"].includes(latest.operation)?"Staging changes…":"Deploying staging…";description=jobPhase(latest);tone="info"}
+ else if(failed){title=["stage-changes","plan"].includes(latest.operation)?"Staging failed":"Deployment needs attention";description=String(latest.output||"").split("\n").filter(line=>line.startsWith("crange:")).pop()?.replace(/^crange:\s*/,"")||"Open the job to see what failed, then review your changes again.";tone="bad"}
  else if(plan?.stagingBlocked){title="Changes outside staging";description="This plan includes team or shared resources. Review it in Project Overview.";tone="warning"}
  else if(plan?.applied){title=plan.network_foundation?.length?"Network deployed":"Staging deployed";description=plan.network_foundation?.length?"The network and router are deployed. Verify the network, then review changes again to deploy its machines.":"Run health checks, then capture a release. Review again after making changes.";tone="good"}
- else if(plan?.stale){title="Review needs refreshing";description="The plan expired or the scenario changed. Review again before deploying.";tone="warning"}
+ else if(plan?.stale){title="Changes need restaging";description="The plan expired or the scenario changed. Review again before deploying.";tone="warning"}
  else if(ready){title=plan.changes.length?`${plan.changes.length} planned ${plan.changes.length===1?"change":"changes"}`:"No infrastructure changes";description=plan.changes.length?"Inspect the plan, then apply it to staging.":"Accept the reviewed settings to finish this update.";tone="info"}
  const noticeKey=plan?.applied?`scenario-deployed:${p.project_id}:${plan.id}`:null;
  if(tone==="good"&&dismissedJobNotices.has(noticeKey)){
-  const controls=el("div",undefined,"scenario-controls scenario-deployment-actions"),review=scenarioForm("Review changes","stage-changes");
+  const controls=el("div",undefined,"scenario-controls scenario-deployment-actions"),review=scenarioForm("Stage changes","stage-changes");
   controls.append(review);return controls;
  }
  const bar=el("section",undefined,`scenario-deployment scenario-deployment-${tone}`),body=el("div",undefined,"scenario-deployment-copy"),buttons=el("div",undefined,"scenario-controls");
@@ -189,13 +201,10 @@ function scenarioDeployment(p,state) {
  bar.dataset.deploymentJob=latest?.id||"";
  if(busy){bar.setAttribute("aria-busy","true");buttons.append(scenarioJob(latest));return bar}
  if(failed)buttons.append(scenarioJob(latest));
- const review=scenarioForm(failed?"Retry review":"Review changes","stage-changes",{},ready?"quiet":"primary");buttons.append(review);
- if(ready&&!failed){
-  const destructive=plan.changes.some(item=>item.change.includes("delete")&&!(plan.network_foundation?.length&&item.resource==="proxmox_sdn_applier.apply"));
-  const deploy=destructive?scenarioForm("Review and deploy","stage-deploy",{},"primary"):
-   fixedAction(!plan.changes.length?"Accept settings":plan.network_foundation?.length?"Deploy network":"Deploy to staging",!plan.changes.length?"apply":"stage-deploy",{plan_id:plan.id,allow_destroy:false,allow_replace:false},"primary");
-  buttons.append(deploy);
- }
+ const review=scenarioForm(ready||plan?.stale?"Restage changes":failed?"Retry staging":"Stage changes","stage-changes",{},ready?"quiet":"primary");buttons.append(review);
+ if(ready&&!failed)buttons.prepend(workflowReviewButton(p));
+ const deploy=workflowDeployAction(p,plan);if(failed){deploy.disabled=true;deploy.title=deploy.dataset.help="Restage changes before retrying deployment."}buttons.append(deploy);
+ if(tone==="good")buttons.append(scenarioValidation(p,!workflowStagingMachines(p).length),scenarioForm("Capture release","release-capture"));
  if(tone==="good"){
   const dismiss=scenarioButton("Dismiss",()=>{
    dismissJobNotice(noticeKey);
@@ -208,9 +217,9 @@ function scenarioDeployment(p,state) {
 }
 
 function scenarioPlanReview(p) {
- const plan=stagedPlan(p.project_id),section=rememberedDetails(`scenario-plan-${p.project_id}`,"Deployment plan");section.classList.add("scenario-plan");section.id="scenario-plan";
+ const plan=stagedPlan(p.project_id),section=rememberedDetails(`scenario-plan-${p.project_id}`,"Infrastructure changes");section.classList.add("scenario-plan");section.id="scenario-plan";
  const body=el("div",undefined,"scenario-plan-body");section.append(body);
- if(!plan){body.append(el("p","Review changes to generate a current plan.","muted"));return section}
+ if(!plan){body.append(el("p","Stage changes to generate an infrastructure plan.","muted"));return section}
  body.append(el("p",`Reviewed ${scenarioDate(plan.created*1000)}. ${plan.stale?"This plan needs refreshing.":plan.applied?"This plan was applied.":"Valid for one hour, while the scenario remains unchanged."}`,"muted"));
  if(plan.changes.length){const changes=table(["Resource","Change"],plan.changes.map(item=>[resourceName(item.resource),scenarioChangeCell(item.change)]));
   for(const [index,item] of plan.changes.entries()){const kind=scenarioPlanChangeKind(item.change);if(kind)markScenarioRow(changes.querySelector("tbody").rows[index],kind)}body.append(changes)}
@@ -302,16 +311,16 @@ function scenarioReleaseChooser(p) {
   return button;
  });
  if(!choices.length){const empty=scenarioButton("No saved releases",()=>{});empty.disabled=true;choices.push(empty)}
- return actionMenu("Choose a release",choices,{iconOnly:false});
+ return actionMenu("Deploy release",choices,{iconOnly:false});
 }
 
 function renderScenarioDeployments(content,p) {
  const heading=el("div",undefined,"scenario-heading"),intro=el("div"),controls=el("div",undefined,"scenario-controls");
  intro.append(el("h3","Team deployments"),el("p","Choose a tested release and the teams to update. Review the rollout before applying it.","muted"));
  controls.append(scenarioReleaseChooser(p),actionMenu("Deployment tools",[
-  scenarioForm("Review rollout","release-stage"),scenarioForm("Apply reviewed rollout","release-apply"),scenarioForm("Upgrade teams","release-upgrade"),scenarioForm("Roll back teams","release-rollback"),scenarioForm("Check team services","release-check")]));heading.append(intro,controls);content.append(heading,contextJobHost(p,"deployments"));
+  scenarioForm("Stage changes","release-stage"),scenarioForm("Deploy changes","release-apply"),scenarioForm("Upgrade teams","release-upgrade"),scenarioForm("Roll back teams","release-rollback"),scenarioForm("Check team services","release-check")]));heading.append(intro,controls);content.append(heading,contextJobHost(p,"deployments"));
  const entries=Object.entries(p.release_rollouts||{}),pending=entries.filter(([,r])=>r.desired?.release_id!==r.applied?.release_id);
- if(pending.length){const notice=el("div",undefined,"scenario-release-notice"),teams=pending.map(([id])=>Number(id));notice.append(el("p",`${teams.length} ${teams.length===1?"team has":"teams have"} a release selected for deployment.`),scenarioForm("Review rollout","release-stage",{teams},"primary"),scenarioForm("Apply reviewed rollout","release-apply",{teams}));content.append(notice)}
+ if(pending.length){const notice=el("div",undefined,"scenario-release-notice"),teams=pending.map(([id])=>Number(id));notice.append(el("p",`${teams.length} ${teams.length===1?"team has":"teams have"} a release selected for deployment.`),scenarioForm("Stage changes","release-stage",{teams},"primary"),scenarioForm("Deploy changes","release-apply",{teams}));content.append(notice)}
  const teams=(p.team_ids||[]).map(String).sort((a,b)=>Number(a)-Number(b));
  if(!teams.length){content.append(el("p","Create teams from the Teams page before deploying a release.","scenario-empty"));return}
  content.append(actionTable(["Team","Selected release","Deployed release","Service checks"],teams.map(team=>{const record=p.release_rollouts?.[team]||{};return {team,record,cells:[teamLink(p,team),record.desired?.version?scenarioLink(p,record.desired.version,"releases"):"—",record.applied?.version?scenarioLink(p,record.applied.version,"releases"):"Not deployed",record.health?.status==="passed"?"Passed":record.health?.status||"Not checked"]}}),({team,record})=>{

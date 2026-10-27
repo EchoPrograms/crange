@@ -1,0 +1,33 @@
+{
+  "recorded_at": "2026-10-27T16:15:54.692301+00:00",
+  "state": "live-http-verified",
+  "behavior": [
+    "Stage changes is unavailable without desired-state edits.",
+    "Deploy changes requires a current, unapplied infrastructure plan.",
+    "Health checks and capture require deployed staging machines.",
+    "Successful task notices and finished task popups expose the next workflow actions.",
+    "Review changes opens an infrastructure plan with Restage changes and Deploy changes.",
+    "A task from another project returns to its own project before offering further actions.",
+    "Release selection is labeled Deploy release."
+  ],
+  "browser_validation": {
+    "prerequisitesDisableActions": true,
+    "noChangesDisableStaging": true,
+    "reviewShowsInfrastructure": true,
+    "reviewOffersRestageAndDeploy": true,
+    "finishedTasksOfferNextStep": true,
+    "responsive": true
+  },
+  "unit_checks": [
+    "tests/test_workflow_prerequisites.cjs",
+    "tests/test_scenario_notifications.cjs",
+    "tests/test_scenario_change_markers.cjs"
+  ],
+  "served_assets": {
+    "app.js": "e60fd547af3294b23e4344812d2e346ebf4f6d2bdae0d97c80dacf898e5547b9",
+    "usability.js": "a93035f3576c579caa0ad486e038f2c3f2226ae344ffe8548f98a1f737ba2dd8",
+    "scenario.js": "0511b7e7bfe62845b5be3f682032ccdf3a8c660c403f8635d1476d0df90e5d4a",
+    "users.js": "31de803eac4b1692413522a3e97e6b969137367f16bc7c068a0983e15935f42c"
+  },
+  "deployment_scope": "Static web UI only; no lab resources were redeployed."
+}
