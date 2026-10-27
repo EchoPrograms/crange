@@ -367,6 +367,7 @@ def approve_catalog_image(image_id, projects, api=None):
     identity = image.get('identity_capture') or {}
     sealed_windows = identity.get('provenance_type') == 'sealed-windows-source-v1'
     source_identity = identity.get('source_identity') or {}
+    normal_windows = not sealed_windows and image.get('os_family') == 'windows'
     if sealed_windows:
         from crange_catalog import validate_sealed_windows_capture
         validate_sealed_windows_capture(identity)
@@ -374,6 +375,17 @@ def approve_catalog_image(image_id, projects, api=None):
                 image.get('windows_profile') != 'mhl-server2025-desktop-experience' or
                 image.get('display_name') != 'Windows Server 2025 Desktop Experience'):
             raise ValueError('Sealed Windows image is missing its approved Server 2025 Desktop Experience profile.')
+    elif normal_windows:
+        if (image.get('kind') != 'vm' or identity.get('state') != 'identity-captured' or
+                identity.get('kind') != 'vm' or identity.get('os_family') != 'windows' or
+                identity.get('readiness') != 'windows-ready' or 'init_system' in identity or
+                'init_system' in image or source_identity.get('os_family') != 'windows'):
+            raise ValueError('Ordinary Windows image provenance or readiness evidence is incomplete.')
+        from crange_catalog import validate_source_identity
+        try:
+            validate_source_identity(source_identity)
+        except (TypeError, ValueError) as exc:
+            raise ValueError('Captured Windows source identity is invalid.') from exc
     elif (identity.get('state') != 'identity-captured' or not source_identity.get('machine_id') or
           not source_identity.get('ssh_host_key')):
         raise ValueError('Image provenance or captured guest identity is incomplete.')
@@ -393,6 +405,16 @@ def approve_catalog_image(image_id, projects, api=None):
                 validate_source_identity(replica_identity)
                 unique = all(replica_identity.get(field) not in
                     {probe['identity'][field] for probe in identity['probes']}
+                    for field in ('machine_guid', 'machine_sid', 'local_administrator_sid'))
+            except (TypeError, ValueError):
+                unique = False
+            unique = unique and verification.get('identity_unique') is True
+        elif normal_windows:
+            from crange_catalog import validate_source_identity
+            replica_identity = evidence.get('identity') or {}
+            try:
+                validate_source_identity(replica_identity)
+                unique = all(replica_identity.get(field) != source_identity.get(field)
                     for field in ('machine_guid', 'machine_sid', 'local_administrator_sid'))
             except (TypeError, ValueError):
                 unique = False

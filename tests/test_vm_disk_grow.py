@@ -4,6 +4,8 @@ import unittest
 import os
 import tempfile
 import base64
+import io
+import urllib.error
 from unittest.mock import Mock, patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'scripts'))
@@ -181,6 +183,24 @@ class VmDiskGrowTests(unittest.TestCase):
         self.assertEqual(grow._qga(api,target,['fixed-command']),'done')
         self.assertEqual(sum(call.args[0]=='POST' for call in api.request.call_args_list),1)
         self.assertEqual(os.stat(directory+'/jobs.json').st_mode&0o777,0o600)
+
+ def test_only_read_only_measurement_retries_a_confirmed_lost_qga_handle(self):
+    def lost_pid():
+        cause=urllib.error.HTTPError('https://private/agent',500,'QGA',{},
+            io.BytesIO(b'{"message":"Agent error: PID lld does not exist"}'))
+        exc=RuntimeError('Proxmox API failed with HTTP 500.');exc.__cause__=cause
+        return exc
+    target={'project_id':3,'resource_key':'vm:web','node':'proxmox2','guest_id':123}
+    api=Mock();api.request.side_effect=[{'pid':7},lost_pid(),{'pid':8},
+        {'exited':True,'exitcode':0,'out-data':'measured'}]
+    with patch.object(grow.time,'sleep'):
+        self.assertEqual(grow._qga(api,target,['fixed-collector'],journal=False),'measured')
+    self.assertEqual(sum(c.args[0]=='POST' for c in api.request.call_args_list),2)
+    with tempfile.TemporaryDirectory() as directory,patch.dict(os.environ,{'CRANGE_VM_DISK_GROW_JOURNAL':directory+'/jobs.json'}):
+        api=Mock();api.request.side_effect=[{'pid':7},lost_pid(),lost_pid()]
+        for _ in range(2):
+            with self.assertRaises(RuntimeError):grow._qga(api,target,['fixed-mutation'])
+        self.assertEqual(sum(c.args[0]=='POST' for c in api.request.call_args_list),1)
 
  def test_uncertain_submission_is_journaled_without_retry(self):
     with tempfile.TemporaryDirectory() as directory, patch.dict(os.environ,{'CRANGE_VM_DISK_GROW_JOURNAL':directory+'/jobs.json'}):

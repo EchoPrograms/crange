@@ -393,17 +393,31 @@ def _journal_save(path, records):
 def _qga(api,target,command,timeout=300,*,journal=True,resumable=False):
     root=f"/nodes/{target['node']}/qemu/{target['guest_id']}/agent"
     if not journal:
-        try:response=api.request('POST',root+'/exec',{'command':command})
-        except Exception:raise DiskGrowError('Read-only guest measurement submission failed.') from None
-        pid=response.get('pid') if isinstance(response,dict) else None
-        if type(pid)is not int or pid<=0:raise DiskGrowError('Guest measurement returned no valid handle.')
         deadline=time.monotonic()+timeout
-        while time.monotonic()<deadline:
-            state=api.request('GET',root+'/exec-status',{'pid':pid})
-            if state.get('exited'):
-                if state.get('exitcode')!=0:raise DiskGrowError('Fixed guest measurement failed; guest output withheld.')
-                return str(state.get('out-data',''))
-            time.sleep(1)
+        for attempt in range(3):
+            try:response=api.request('POST',root+'/exec',{'command':command})
+            except Exception:raise DiskGrowError('Read-only guest measurement submission failed.') from None
+            pid=response.get('pid') if isinstance(response,dict) else None
+            if type(pid)is not int or pid<=0:raise DiskGrowError('Guest measurement returned no valid handle.')
+            while time.monotonic()<deadline:
+                try:state=api.request('GET',root+'/exec-status',{'pid':pid})
+                except Exception as exc:
+                    # Windows OOBE can restart QGA after it accepted a collector.
+                    # Only a confirmed lost read-only handle permits a new exec.
+                    cause=exc.__cause__;lost=False
+                    if getattr(cause,'code',None)==500:
+                        try:detail=cause.read(8192).decode('utf-8',errors='replace')
+                        except (AttributeError,OSError):detail=''
+                        lost=bool(re.search(r'PID\s+(?:[0-9]+|lld)\s+does not exist',detail,re.I))
+                    if not lost or attempt==2:raise
+                    time.sleep(min(5,max(0,deadline-time.monotonic())))
+                    break
+                if state.get('exited'):
+                    if state.get('exitcode')!=0:raise DiskGrowError('Fixed guest measurement failed; guest output withheld.')
+                    return str(state.get('out-data',''))
+                time.sleep(1)
+            else:break
+            if time.monotonic()>=deadline:break
         raise DiskGrowError('Guest measurement timed out.')
     digest=hashlib.sha256(json.dumps(command,separators=(',',':')).encode()).hexdigest()
     key=f"{target['project_id']}:{target['resource_key']}:{target['guest_id']}:{digest}"

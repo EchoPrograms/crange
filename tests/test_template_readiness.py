@@ -1,3 +1,4 @@
+import copy
 import json
 from pathlib import Path
 import sys
@@ -8,6 +9,28 @@ from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'scripts'))
 import crange_templates
+
+
+WINDOWS_SOURCE_IDENTITY = {
+    'os_family': 'windows', 'machine_guid': 'c3b4bc1a-56bd-4f7b-8a31-0d6c5d9a1121',
+    'machine_sid': 'S-1-5-21-121212121-232323232-343434343',
+    'local_administrator_sid': 'S-1-5-21-121212121-232323232-343434343-500',
+    'computer_name': 'WINBASE', 'os_caption': 'Microsoft Windows Server 2025 Standard',
+    'installation_type': 'Server', 'os_version': '10.0.26100', 'os_build': '26100',
+    'qemu_guest_agent': True, 'qemu_guest_agent_automatic': True,
+    'term_service_running': True, 'term_service_automatic': True,
+    'winrm_service_running': True, 'winrm_service_automatic': True,
+    'image_state': 'IMAGE_STATE_COMPLETE', 'oobe_in_progress': 0,
+    'system_setup_in_progress': 0, 'setup_type': 0, 'part_of_domain': False,
+    'rdp_allowed_sources': ['10.60.0.20'],
+}
+WINDOWS_REPLICA_IDENTITY = {
+    **WINDOWS_SOURCE_IDENTITY,
+    'machine_guid': 'da58d312-482b-47ba-9a34-ded4a8f1db45',
+    'machine_sid': 'S-1-5-21-454545454-565656565-676767676',
+    'local_administrator_sid': 'S-1-5-21-454545454-565656565-676767676-500',
+    'computer_name': 'WINCACHE',
+}
 
 
 class TemplateReadinessTests(unittest.TestCase):
@@ -106,6 +129,92 @@ class TemplateReadinessTests(unittest.TestCase):
         with patch('crange_scheduling.read_settings', return_value=({}, {'images': {'alpine-v1': base}})):
             with self.assertRaisesRegex(ValueError, 'verified VM or container image'):
                 crange_templates.approve_catalog_image('alpine-v1', [1], Mock())
+
+    def test_admin_links_identity_captured_windows_with_independent_replica_identity(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp) / 'project-100'
+            root.mkdir()
+            (root / 'approved-scenario-templates.json').write_text(json.dumps({
+                'existing': {'template_id': 88, 'display_name': 'Existing'}}))
+            source = copy.deepcopy(WINDOWS_SOURCE_IDENTITY)
+            replica_identity = copy.deepcopy(WINDOWS_REPLICA_IDENTITY)
+            digest = 'c' * 64
+            image = {'kind': 'vm', 'os_family': 'windows', 'verified': True,
+                     'approved_projects': ['*'], 'artifact_sha256': digest,
+                     'display_name': 'Windows Server 2025 Base 30 GiB',
+                     'identity_capture': {'state': 'identity-captured', 'kind': 'vm',
+                         'os_family': 'windows', 'readiness': 'windows-ready',
+                         'source_config_sha256': 'd' * 64, 'source_identity': source},
+                     'replicas': [{'state': 'ready', 'artifact_sha256': digest,
+                         'cache_local': True, 'clone_modes_verified': ['linked'],
+                         'template_id': 812, 'node': 'proxmox6', 'datastore_id': 'local-lvm',
+                         'verification': {'passed': True, 'identity_unique': True,
+                             'evidence': {'identity': replica_identity}}}]}
+            api = Mock()
+            api.request.return_value = {'template': 1, 'name': 'windows-cache',
+                                        'tags': 'crange-cache-812;crange-image'}
+            with (
+                patch('crange.project_dir', return_value=root),
+                patch('crange_scheduling.read_settings', return_value=({}, {'images': {'windows-base-v1': image}})),
+            ):
+                result = crange_templates.approve_catalog_image('windows-base-v1', [100], api)
+            linked = json.loads((root / 'approved-scenario-templates.json').read_text())
+            self.assertEqual(result['template_id'], 812)
+            self.assertEqual(result['template_node'], 'proxmox6')
+            self.assertEqual(linked['windows-base-v1']['image_id'], 'windows-base-v1')
+            self.assertEqual(linked['windows-base-v1']['replica_clone_modes'], ['linked'])
+            api.request.assert_called_once_with('GET', '/nodes/proxmox6/qemu/812/config')
+
+    def test_admin_windows_approval_rejects_reused_or_malformed_replica_identity(self):
+        cases = {
+            'reused machine GUID': lambda identity, source: identity.update(machine_guid=source['machine_guid']),
+            'reused machine SID': lambda identity, source: identity.update(
+                machine_sid=source['machine_sid'], local_administrator_sid=source['local_administrator_sid']),
+            'malformed GUID': lambda identity, _source: identity.update(machine_guid='not-a-guid'),
+            'identity_unique false': lambda identity, _source: None,
+        }
+        for label, mutate in cases.items():
+            with self.subTest(label=label), tempfile.TemporaryDirectory() as tmp:
+                root = Path(tmp) / 'project-100'
+                root.mkdir()
+                (root / 'approved-scenario-templates.json').write_text('{}')
+                source = copy.deepcopy(WINDOWS_SOURCE_IDENTITY)
+                replica_identity = copy.deepcopy(WINDOWS_REPLICA_IDENTITY)
+                mutate(replica_identity, source)
+                digest = 'e' * 64
+                image = {'kind': 'vm', 'os_family': 'windows', 'verified': True,
+                         'approved_projects': [100], 'artifact_sha256': digest,
+                         'identity_capture': {'state': 'identity-captured', 'kind': 'vm',
+                             'os_family': 'windows', 'readiness': 'windows-ready',
+                             'source_config_sha256': 'f' * 64, 'source_identity': source},
+                         'replicas': [{'state': 'ready', 'artifact_sha256': digest,
+                             'cache_local': True, 'clone_modes_verified': ['linked'],
+                             'template_id': 813, 'node': 'proxmox6', 'datastore_id': 'local-lvm',
+                             'verification': {'passed': True,
+                                 'identity_unique': label != 'identity_unique false',
+                                 'evidence': {'identity': replica_identity}}}]}
+                with (
+                    patch('crange_scheduling.read_settings', return_value=({}, {'images': {'windows-base-v1': image}})),
+                    patch('crange.project_dir', return_value=root),
+                ):
+                    with self.assertRaisesRegex(ValueError, 'no verified local linked-clone replica'):
+                        crange_templates.approve_catalog_image('windows-base-v1', [100], Mock())
+
+    def test_admin_windows_approval_rejects_malformed_captured_source_identity(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp) / 'project-100'
+            root.mkdir()
+            source = copy.deepcopy(WINDOWS_SOURCE_IDENTITY)
+            source['local_administrator_sid'] = 'S-1-5-21-1-2-3-501'
+            image = {'kind': 'vm', 'os_family': 'windows', 'verified': True,
+                     'approved_projects': [100], 'artifact_sha256': 'a' * 64,
+                     'identity_capture': {'state': 'identity-captured', 'kind': 'vm',
+                         'os_family': 'windows', 'readiness': 'windows-ready',
+                         'source_config_sha256': 'b' * 64, 'source_identity': source},
+                     'replicas': []}
+            with patch('crange_scheduling.read_settings', return_value=({}, {'images': {'windows-base-v1': image}})):
+                with self.assertRaisesRegex(ValueError, 'Captured Windows source identity is invalid'):
+                    crange_templates.approve_catalog_image('windows-base-v1', [100], Mock())
 
     def test_container_approval_uses_lxc_and_preserves_vm_approvals(self):
         with tempfile.TemporaryDirectory() as directory:
