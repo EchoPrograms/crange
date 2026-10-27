@@ -1,0 +1,134 @@
+{
+  "recorded_at": "2026-10-27T11:55:58.024672+00:00",
+  "scope": "Staging Windows disk reduction, custom VM disk initialization, and reviewed UI acceptance",
+  "native_acceptance": {
+    "state": "verified",
+    "project_id": 100,
+    "plan_id": "8e528251678931841737d79af1a4ed0f",
+    "plan_sha256": "fa143bb2d74e284f6cc8118113b45edb4c729b3179d60a95525dc50846494cc9",
+    "terraform_apply": {
+      "added": 0,
+      "changed": 0,
+      "destroyed": 0
+    },
+    "configuration_resources": [],
+    "applied_baseline": {
+      "path": "/home/crange/crange/terraform/environments/project-100/.crange-applied-definitions.json",
+      "sha256": "aed8e1f460c999308fdd5503b50084558006c60aae843b356bd80fe1a075b336",
+      "scenario_vms": {
+        "t254-mhl-dc01": {
+          "disk_gb": 31
+        },
+        "t254-mhl-file01": {
+          "disk_gb": 30
+        }
+      },
+      "scenario_containers": [
+        "t254-mhl-app01",
+        "t254-mhl-bkp01",
+        "t254-mhl-ci01",
+        "t254-mhl-db01"
+      ],
+      "unknown_staging_definitions": {
+        "scenario_box": [],
+        "scenario_container": [],
+        "custom_network": []
+      }
+    },
+    "guests": {
+      "t254-mhl-dc01": {
+        "vmid": 128,
+        "node": "proxmox1",
+        "system_disk": "sata0",
+        "adopted_volume": "local-lvm:vm-128-disk-2",
+        "adopted_lv_uuid": "iEsLXr-qD58-yuWY-ug9F-Cbo7-lY1x-HXJKgP",
+        "host_and_guest_disk_bytes": 33285996544,
+        "c_partition_bytes": 32170311680,
+        "filesystem_bytes": 32170307584,
+        "free_bytes": 11202609152,
+        "filesystem_at_target": true,
+        "c_health": "Healthy",
+        "encrypted": false,
+        "winre_enabled": true,
+        "winre_location_partition": 4,
+        "recovery_drive_available": true,
+        "computer_name": "MHL-DC01",
+        "domain_name": "mhl.local",
+        "part_of_domain": true,
+        "active_mac": "BC-24-11-94-14-AB",
+        "active_ipv4": "10.100.254.10/24",
+        "original_volume_unused0": "local-lvm:vm-128-disk-1",
+        "original_lv_uuid": "Q3GReW-I17B-UUGb-0GH6-TB3r-Yzx2-0yIW2M",
+        "original_lv_bytes": 68719476736
+      },
+      "t254-mhl-file01": {
+        "vmid": 129,
+        "node": "proxmox1",
+        "system_disk": "sata0",
+        "adopted_volume": "local-lvm:vm-129-disk-2",
+        "adopted_lv_uuid": "H7JyLP-pUcc-jCoo-noLY-jae4-XiZI-8wuRLP",
+        "host_and_guest_disk_bytes": 32212254720,
+        "c_partition_bytes": 31096569856,
+        "filesystem_bytes": 31096565760,
+        "free_bytes": 11263180800,
+        "filesystem_at_target": true,
+        "c_health": "Healthy",
+        "encrypted": false,
+        "winre_enabled": true,
+        "winre_location_partition": 4,
+        "recovery_drive_available": true,
+        "computer_name": "MHL-FS01",
+        "domain_name": "mhl.local",
+        "part_of_domain": true,
+        "active_mac": "BC-24-11-55-AF-AB",
+        "active_ipv4": "10.100.254.20/24",
+        "original_volume_unused0": "local-lvm:vm-129-disk-1",
+        "original_lv_uuid": "MM0xUw-Y0uq-6Mcf-CRdc-f4oq-gysL-6lHbOI",
+        "original_lv_bytes": 68719476736
+      }
+    },
+    "native_uuid_evidence": "Protected P1 journals 128.json and 129.json; root confirmed original and adopted LV UUID bindings after VM128 recovery. This combined read-only QGA check verified current unused0 volume names."
+  },
+  "base_image": {
+    "image_id": "mhl-windows-server-2025-base-p100-v2",
+    "system_disk_gib": 22,
+    "canonical_template": 435,
+    "verified_cache_template": 436,
+    "node": "proxmox6",
+    "approved_projects": [
+      100
+    ],
+    "prior_v1_retained": true,
+    "disposable_40_gib_growth_probe": {
+      "vmid": 990010,
+      "filesystem_growth_verified": true,
+      "winre_enabled": true,
+      "cleanup": "completed"
+    }
+  },
+  "software_validation": {
+    "focused_scoped_disk_checks": 18,
+    "custom_disk_and_growth_checks": "Focused helper, placement, configuration-scope and guest-growth checks completed before deployment; see commits.",
+    "final_apply_ran_ansible": false,
+    "application_service_health_checks": "Not rerun; left to user-defined or manual checks."
+  },
+  "recovery": {
+    "guest_id": 128,
+    "reason": "QEMU Guest Agent unresponsive during provider shutdown; initial apply exited after task-status HTTP 596.",
+    "actions": "Retained the completed VM129 update; preserved native volumes; attempted graceful shutdown; overruled the stuck shutdown and restarted VM128; started QEMU-GA once after its automatic startup timeout; generated and accepted a fresh no-op plan.",
+    "replayed_failed_plan": false
+  },
+  "release_images_and_team_deployments": "Existing immutable releases and team deployments were retained.",
+  "code_commits": [
+    "41f7039",
+    "aa6109c",
+    "4aae544",
+    "b18713b",
+    "290ca14",
+    "1945eff",
+    "339300c",
+    "f03d75a",
+    "2dcec11",
+    "d4d9d9b"
+  ]
+}
