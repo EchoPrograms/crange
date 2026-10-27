@@ -1,0 +1,33 @@
+{
+  "recorded_at": "2026-10-27T20:34:32.471791+00:00",
+  "state": "live-http-verified",
+  "served_assets": {
+    "workspace.js": "7b768cad26c20bbd795e29ac775f3c4b32e5201fdf4b5a8e6ad9bd2e09116078"
+  },
+  "backup": "/opt/guacamole/backups/crange-theme-before-initial-size-1793133202.jar",
+  "behavior": [
+    "Unset display preferences use 100% scale.",
+    "Native pane dimensions are resent when the tunnel becomes ready and when its viewport changes.",
+    "Saved initial preferences and later manual zoom are preserved.",
+    "Ctrl+Shift+Alt toggles the toolbar without opening Options.",
+    "Toolbar fades last 110 ms and respect reduced-motion preferences."
+  ],
+  "browser_validation": {
+    "initialScale100": true,
+    "readyViewportCorrect": true,
+    "paneResizeCorrect": true,
+    "manualZoomPreserved": true,
+    "shortcutTogglesToolbar": true,
+    "fadeDurationMs": 110,
+    "rapidToggleWorks": true,
+    "reducedMotionRespected": true,
+    "desktopAndMobile": true
+  },
+  "browser_scope": "DOM ResizeObserver and native viewport callback integration on desktop and mobile.",
+  "unit_checks": [
+    "tests/test_guac_initial_size.cjs",
+    "tests/test_guac_workspace.cjs",
+    "tests/test_guac_settings.cjs",
+    "tests/test_guac_clipboard.cjs"
+  ]
+}

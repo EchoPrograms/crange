@@ -26,6 +26,7 @@ async function flush(){await new Promise(resolve=>setImmediate(resolve));}
  let decorator;
  configs[0]({decorator(_key,definition){decorator=definition.at(-1);}});
  const templates={};const cache=decorator({put(key,value){templates[key]=value;return value;}});cache.put('app/client/templates/client.html','<guac-viewport><div class="client-body" guac-touch-drag="menuDrag"><guac-tiled-clients></guac-tiled-clients></div><div ng-class="{open: menu.shown}" id="guac-menu"><div ng-if="menu.shown" guac-touch-drag="menuDrag"><div class="header"><h2 ng-hide="rootConnectionGroups">name</h2><h2 class="connection-select-menu" ng-show="rootConnectionGroups"><guac-menu>connections</guac-menu></h2><guac-user-menu local-actions="clientMenuActions"></guac-user-menu></div></div></div></guac-viewport>');
+ cache.put('app/client/templates/guacClient.html','<div guac-resize="mainElementResized"></div>');assert.match(templates['app/client/templates/guacClient.html'],/crange-client-size/,'native client panes observe settled viewport sizes');
  cache.put('app/client/templates/guacClientZoom.html','<div class="client-zoom"><div class="client-zoom-editor"><div ng-click="zoomOut()" class="client-zoom-out"><img src="images/settings/zoom-out.svg" alt="-"></div><div class="client-zoom-state"><input type="number" guac-zoom-ctrl ng-model="client.clientProperties.scale" ng-model-options="{ updateOn: \'blur submit\' }" ng-change="zoomSet()">%</div><div ng-click="zoomIn()" class="client-zoom-in"><img src="images/settings/zoom-in.svg" alt="+"></div></div><div class="client-zoom-autofit"></div></div>');
  assert.match(templates['app/client/templates/guacClientZoom.html'],/<button type="button" ng-click="zoomOut\(\)" class="client-zoom-out" aria-label="Zoom out">/,'native zoom-out action becomes keyboard-accessible');
  assert.match(templates['app/client/templates/guacClientZoom.html'],/<button type="button" ng-click="zoomIn\(\)" class="client-zoom-in" aria-label="Zoom in">/,'native zoom-in action becomes keyboard-accessible');
@@ -47,7 +48,7 @@ async function flush(){await new Promise(resolve=>setImmediate(resolve));}
  const interval=fn=>{timers.push(fn);return fn;};interval.cancel=()=>{};
  const first={id:'native-ci',name:'CI SSH',title:'CI SSH',protocol:null,clientProperties:{scale:1,focused:true}},second={id:'native-other',name:'Other connection',title:'Other connection',protocol:'ssh',clientProperties:{scale:1,focused:true}};
  class ClipboardData {constructor(value){Object.assign(this,value);}}
- const clipboardService={getClipboard(){return Promise.resolve(new ClipboardData({type:'text/plain',data:'cached clipboard'}));},setClipboard(value){clipboardUpdates.push(value);}};
+ const clipboardService={setActiveConnection(){},getConnectionClipboard(){return new ClipboardData({type:'text/plain',data:'cached clipboard'});},setConnectionClipboard(_client,text){clipboardUpdates.push(new ClipboardData({type:'text/plain',data:text}));}};
  const injector={get(name){return name==='clipboardService'?clipboardService:ClipboardData;}};
  const scope={menu:{shown:false},focusedClient:first,clientGroup:{clients:[first,second]},closeClientTile(client){this.closed=client;},$watch(name,fn){watchers[name]=fn;},$on(name,fn){scopeEvents[name]=fn;return()=>{delete scopeEvents[name];};},$evalAsync(fn){fn();},disconnect(){this.disconnected=true;}};
  let destination=null;const toolbar=directives.crangeSessionToolbar(http,interval,{url(value){destination=value;}},{getCurrentToken(){return 'test-token';},getDataSource(){return 'postgresql';}},preferenceService,{toggleFullscreenMode(){}},injector);
@@ -55,7 +56,7 @@ async function flush(){await new Promise(resolve=>setImmediate(resolve));}
  toolbar.link(scope,{0:{parentNode:{querySelector(){return clientView;},querySelectorAll(){return tabButtons;}},querySelector(s){return s.includes('shell')?shell:s.includes('reopen')?reopen:handle;}}});await flush();assert.equal(scope.crSession.box.resource_key,'container:ci');
  await flush();assert.equal(scope.crSession.clipboardText,'cached clipboard','compact clipboard field loads from Guacamole clipboard service');
  scope.crSession.clipboardText='synthetic paste';scope.crSession.updateClipboard();assert.equal(clipboardUpdates.at(-1).data,'synthetic paste');assert.equal(clipboardUpdates.at(-1).type,'text/plain');
- scopeEvents.guacClipboard({},new ClipboardData({type:'text/plain',data:'remote copy'}));assert.equal(scope.crSession.clipboardText,'remote copy','remote clipboard updates the compact field');
+ clipboardService.getConnectionClipboard=()=>new ClipboardData({type:'text/plain',data:'remote copy'});scopeEvents.crangeClipboard({},first.id);assert.equal(scope.crSession.clipboardText,'remote copy','remote clipboard updates the compact field');
  assert.equal(scope.crSession.visible,false,'a fresh connection starts with controls closed');
  assert.equal(first.clientProperties.focused,true);assert.equal(second.clientProperties.focused,true,'native multi-client focus is left unchanged');
  scope.crSession.power('shutdown');await flush();scope.crSession.power('stop');await flush();
@@ -63,7 +64,7 @@ async function flush(){await new Promise(resolve=>setImmediate(resolve));}
  scope.crSession.displayScale=1000;scope.crSession.setScale();assert.equal(scope.focusedClient.clientProperties.scale,1.5);
  const session=scope.crSession;session.home();assert.equal(destination,'/');assert.equal(sessionLocal.get('crange-return-project'),'100');
  const keyEvent=(key,extra={})=>({key,ctrlKey:true,altKey:true,shiftKey:true,repeat:false,preventDefault(){},stopImmediatePropagation(){},...extra});
- windowEvents.keydown(keyEvent('Control'));assert.equal(session.visible,true,'Ctrl+Alt+Shift opens controls');assert.equal(session.panel,'options');
+ windowEvents.keydown(keyEvent('Control'));assert.equal(session.visible,true,'Ctrl+Alt+Shift opens controls');assert.equal(session.panel,null,'the shortcut does not open Options');
  windowEvents.keydown(keyEvent('Control',{repeat:true}));windowEvents.keydown(keyEvent('Alt'));assert.equal(session.visible,true,'held chord and repeat events toggle once');
  windowEvents.keyup(keyEvent('Shift',{ctrlKey:false}));now=1050;windowEvents.keydown(keyEvent('Control'));assert.equal(session.visible,true,'a complete chord re-pressed inside the 75 ms debounce is ignored');
  windowEvents.keyup(keyEvent('Shift',{ctrlKey:false}));now=1080;windowEvents.keydown(keyEvent('Control'));assert.equal(session.visible,false,'a complete chord after the debounce toggles closed');
@@ -104,7 +105,7 @@ async function flush(){await new Promise(resolve=>setImmediate(resolve));}
  assert.equal(local.has('crange-session/'+encodeURIComponent('postgresql/undefined')+'/position'),false,'legacy account-wide positions are not applied to new sessions');
  const otherToolbarKey='crange-session/'+encodeURIComponent('postgresql/anonymous')+'/connection/'+encodeURIComponent('postgresql/native-other')+'/toolbar';
  local.set(otherToolbarKey,JSON.stringify({position:{x:77,y:88},dock:{edge:'top',offset:.4},hidden:true}));
- scope.focusedClient=second;watchers['focusedClient.id']();await flush();assert.equal(session.box,null);assert.equal(session.visible,false,'connection-specific minimized state loads on focus change');assert.equal(shell.style.top,'0px');
+ delete preferenceService.preferences.crangeDisplayScale;scope.focusedClient=second;watchers['focusedClient.id']();await flush();assert.equal(second.clientProperties.scale,1,'an unset preference defaults to original display size');assert.equal(second.clientProperties.autoFit,false);assert.equal(session.box,null);assert.equal(session.visible,false,'connection-specific minimized state loads on focus change');assert.equal(shell.style.top,'0px');
  session.show();assert.equal(shell.style.left,'77px');assert.equal(shell.style.top,'88px','connection-specific expanded position restores independently of the dock');
  session.hide();assert.deepEqual(JSON.parse(local.get(otherToolbarKey)).position,{x:77,y:88},'minimizing a toolbar preserves its expanded position');
  scope.focusedClient=first;watchers['focusedClient.id']();assert.equal(shell.style.left,'388px');assert.equal(shell.style.top,'90px','switching back restores the first connection position');

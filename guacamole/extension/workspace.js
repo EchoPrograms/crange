@@ -15,6 +15,7 @@
     };
     function icon(name) { return '<svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' + icons[name] + '</svg>'; }
     function button(name, label, click) { return '<button type="button" class="cr-session-icon" aria-label="' + label + '" crange-help="' + label + '" ng-click="' + click + '">' + icon(name) + '</button>'; }
+    function preferredDisplayScale(prefs) { var scale = Number(prefs.crangeDisplayScale); return Number.isFinite(scale) && scale >= 0.1 && scale <= 3 ? scale : 1; }
 
     var preferences = `
 <div class="cr-preferences" crange-preference-fields>
@@ -51,6 +52,7 @@
     // Transform the native templates instead of replacing their controllers.
     // Keeping the original client markup also retains optional extensions.
     function transform(key, value) {
+        if (key === 'app/client/templates/guacClient.html') return value.replace('guac-resize="mainElementResized"', 'guac-resize="mainElementResized" crange-client-size');
         if (key === 'app/settings/templates/settingsPreferences.html') return preferences;
         if (key === 'app/client/templates/guacClientZoom.html') {
             return value.replace('<input type="number" guac-zoom-ctrl', '<input type="number" aria-label="Display scale percent" guac-zoom-ctrl')
@@ -184,6 +186,48 @@
   <p class="cr-session-feedback" ng-if="crSession.message" ng-class="{'failed': crSession.failed}" role="status">{{crSession.message}}</p>
 </div>`;
 
+    // A docked toolbar can settle after the native object-based resize sensor
+    // loads, or while the tunnel cannot yet accept size instructions.
+    angular.module('client').directive('crangeClientSize', ['preferenceService', function (preferenceService) {
+        return {restrict: 'A', link: function (scope, element) {
+            var frame = null, destroyed = false, size = '';
+            function resize() {
+                if (destroyed || frame !== null) return;
+                frame = window.requestAnimationFrame(function () {
+                    frame = null;
+                    scope.$evalAsync(function () {
+                        var client = scope.client, state = client && client.clientState.connectionState;
+                        if (destroyed || ['WAITING', 'CONNECTED'].indexOf(state) < 0 || !element[0].offsetWidth || !element[0].offsetHeight) return;
+                        scope.mainElementResized();
+                        scope.$evalAsync(function () {
+                            var display = client.managedDisplay.size;
+                            if (!client.crangeDisplayScaleInitialized && display.width > 0 && display.height > 0) {
+                                client.crangeDisplayScaleInitialized = true;
+                                client.clientProperties.autoFit = false;
+                                client.clientProperties.scale = preferredDisplayScale(preferenceService.preferences);
+                            }
+                        });
+                    });
+                });
+            }
+            var observer = window.ResizeObserver ? new window.ResizeObserver(function () {
+                var next = element[0].offsetWidth + 'x' + element[0].offsetHeight;
+                if (next !== size) { size = next; resize(); }
+            }) : null;
+            if (observer) observer.observe(element[0]);
+            else window.addEventListener('resize', resize);
+            scope.$watch('client', resize);
+            scope.$watch('client.clientState.connectionState', resize);
+            scope.$watch('client.managedDisplay.size', function () { if (scope.client && !scope.client.crangeDisplayScaleInitialized) resize(); });
+            scope.$on('$destroy', function () {
+                destroyed = true;
+                if (observer) observer.disconnect();
+                else window.removeEventListener('resize', resize);
+                if (frame !== null) window.cancelAnimationFrame(frame);
+            });
+        }};
+    }]);
+
     angular.module('client').directive('crangeSessionToolbar', ['$http', '$interval', '$location', 'authenticationService', 'preferenceService', 'guacFullscreen', '$injector', function ($http, $interval, $location, auth, preferenceService, fullscreen, $injector) {
         return {restrict: 'E', scope: false, template: toolbar, link: function (scope, element) {
             var prefs = preferenceService.preferences, destroyed = false, boxes = [], poll = null, appliedScale = Object.create(null);
@@ -240,6 +284,7 @@
             function loadToolbarState(client) {
                 var key = toolbarKey(client);
                 if (!key || key === activeToolbarKey) return;
+                cancelToolbarFade(); hidingToolbar = false;
                 if (s.close) s.close();
                 activeToolbarKey = key;
                 var saved = stored(key, null);
@@ -307,8 +352,8 @@
                 if(s.box){try{window.sessionStorage.setItem('crange-return-project',String(s.box.project));}catch(ignored){}}
                 if (client && !appliedScale[client.id]) {
                     appliedScale[client.id] = true;
-                    var scale = Number(prefs.crangeDisplayScale);
-                    if (scale >= 0.1 && scale <= 3) { client.clientProperties.autoFit = false; client.clientProperties.scale = scale; }
+                    client.clientProperties.autoFit = false;
+                    client.clientProperties.scale = preferredDisplayScale(prefs);
                 }
             }
             function status() {
@@ -319,8 +364,23 @@
             s.setScale = function () { var client = scope.focusedClient, scale = Number(s.displayScale); if (client && scale >= 0.1 && scale <= 3) { client.clientProperties.autoFit = false; client.clientProperties.scale = scale; } };
             s.close = function () { s.panel = null; s.advanced = false; scope.menu.shown = false; };
             s.toggle = function (panel) { if (s.panel === panel) s.close(); else { s.panel = panel; s.advanced = false; scope.menu.shown = true; } };
-            s.show = function () { shortcutOpenedToolbar = false; s.visible = true; saveToolbarState(); window.requestAnimationFrame(function () { if(!position)position={x:10,y:Math.max(10,window.innerHeight-shell.offsetHeight-10)};clampToolbar(); handle.focus(); }); };
-            s.hide = function () { shortcutOpenedToolbar = false; s.close(); document.dispatchEvent(new CustomEvent('crange-session-controls-hidden')); s.visible = false;saveToolbarState(); window.requestAnimationFrame(function () { clampToolbar(); reopen.focus(); }); };
+            var toolbarFade = null, hidingToolbar = false;
+            function cancelToolbarFade() { if (toolbarFade) { toolbarFade.cancel(); toolbarFade = null; } }
+            function fadeToolbar(opacity, finish, from) {
+                if (from === undefined) from = toolbarFade ? window.getComputedStyle(shell).opacity : opacity ? 0 : 1;
+                cancelToolbarFade();
+                if (!shell.animate || window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches) { if(finish)finish(); return; }
+                var animation = toolbarFade = shell.animate([{opacity:from}, {opacity:opacity}], {duration:110, easing:'ease-out', fill:'forwards'});
+                animation.onfinish = function () {
+                    scope.$evalAsync(function () {
+                        if (animation !== toolbarFade || destroyed) return;
+                        if (finish) finish();
+                        window.requestAnimationFrame(function () { if (animation === toolbarFade) cancelToolbarFade(); });
+                    });
+                };
+            }
+            s.show = function () { var from=toolbarFade?window.getComputedStyle(shell).opacity:0;cancelToolbarFade();hidingToolbar = false; s.visible = true; saveToolbarState(); window.requestAnimationFrame(function () { if(destroyed||!s.visible||hidingToolbar)return;if(!position)position={x:10,y:Math.max(10,window.innerHeight-shell.offsetHeight-10)};clampToolbar();handle.focus();fadeToolbar(1,null,from); }); };
+            s.hide = function () { s.close(); document.dispatchEvent(new CustomEvent('crange-session-controls-hidden')); hidingToolbar = true; var finish=function(){hidingToolbar=false;s.visible=false;saveToolbarState();window.requestAnimationFrame(function(){if(destroyed)return;clampToolbar();reopen.focus();});};if(s.visible)fadeToolbar(0,finish);else finish(); };
             function returnToProject(){try{if(s.box){window.sessionStorage.removeItem('crange-return-view');window.sessionStorage.setItem('crange-return-project',String(s.box.project));window.localStorage.setItem('crange-selected-project',String(s.box.project));}else{window.sessionStorage.removeItem('crange-return-project');window.sessionStorage.setItem('crange-return-view','projects');window.localStorage.setItem('crange-selected-project','all');}}catch(ignored){}$location.url('/');}
             s.home = function () { if (prefs.crangeExitBehavior === 'disconnect') scope.disconnect(); s.close(); returnToProject(); };
             s.disconnect = function () { scope.disconnect(); s.close(); returnToProject(); };
@@ -357,7 +417,7 @@
             scope.$watch('focusedClient.name', function () { matchClient(); status(); });
             scope.$watch('focusedClient.protocol', function () { matchClient(); status(); });
             scope.$watch('menu.shown', function (shown) { if (shown && !s.panel) { if(!s.visible)s.show();s.panel = 'options'; } else if (!shown) { s.panel = null; s.advanced = false; } });
-            var shortcutHeld = false, shortcutChangedAt = 0, shortcutOpenedToolbar = false;
+            var shortcutHeld = false, shortcutChangedAt = 0;
             function keydown(event) {
                 if (event.ctrlKey && event.altKey && event.shiftKey && ['Control','Alt','Shift'].indexOf(event.key) !== -1) {
                     // Own the session shortcut before Guacamole's native menu
@@ -368,10 +428,7 @@
                         if (Date.now() - shortcutChangedAt >= 75) {
                             shortcutChangedAt = Date.now();
                             scope.$evalAsync(function () {
-                                if (!s.visible) {
-                                    s.show(); s.toggle('options'); shortcutOpenedToolbar = true;
-                                } else if (shortcutOpenedToolbar && s.panel === 'options') s.hide();
-                                else { shortcutOpenedToolbar = false; s.toggle('options'); }
+                                if (hidingToolbar || !s.visible) s.show(); else s.hide();
                             });
                         }
                     }
@@ -468,6 +525,7 @@
             if (toolbarResize) toolbarResize.observe(shell);
             window.addEventListener('blur',blurred);window.addEventListener('resize', clampToolbar); window.requestAnimationFrame(clampToolbar);
             scope.$on('$destroy', function () {
+                cancelToolbarFade();
                 destroyed = true; if (unlistenClipboard) unlistenClipboard(); unlistenLocalKeydown(); unlistenLocalKeyup(); document.removeEventListener('pointerdown', releaseToolbarFocus, true); window.removeEventListener('keydown', keydown, true); window.removeEventListener('keyup', keyup, true); window.removeEventListener('resize', clampToolbar);
                 blurred();window.removeEventListener('blur',blurred);bind(handle,'removeEventListener');bind(reopen,'removeEventListener');
                 if (toolbarResize) toolbarResize.disconnect();

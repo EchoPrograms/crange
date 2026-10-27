@@ -45,9 +45,12 @@ async page => {
  check(await clipboard.evaluate(node=>document.activeElement!==node),'Clicking the remote display releases clipboard focus even when native mousedown prevents its default');
  check(await page.evaluate(()=>window.__remoteKeys.length)>0,'Remote keyboard routing resumes after leaving toolbar controls');
  await clipboard.click();await page.keyboard.down('Control');await page.keyboard.down('Alt');await page.keyboard.down('Shift');
- await page.locator('.cr-session-options').waitFor({state:'visible'});
+ await page.locator('.cr-session-toolbar').waitFor({state:'hidden'});
  await page.keyboard.up('Shift');await page.keyboard.up('Alt');await page.keyboard.up('Control');
- check(await page.locator('.cr-session-options').isVisible(),'Ctrl+Alt+Shift still opens the full menu while editing the clipboard');
+ check(!await page.locator('.cr-session-options').count(),'Ctrl+Alt+Shift hides the whole toolbar without opening Options');
+ await page.getByRole('button',{name:'Show session controls',exact:true}).click();
+ await page.getByRole('button',{name:'Options',exact:true}).click();
+ check(await page.locator('.cr-session-options').isVisible(),'Options remains available from its toolbar button');
  await page.getByRole('button',{name:'Close session options',exact:true}).click();
  await page.screenshot({path:'output/playwright/guac-toolbar-grouping-desktop.png'});
  await page.setViewportSize({width:390,height:844});

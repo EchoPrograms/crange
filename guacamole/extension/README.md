@@ -160,3 +160,14 @@ clipboard edits. Automatic browser clipboard access is off by default. Advanced 
 clipboard sharing for that connection and hides the manual fields. This setting
 is remembered per account and connection in the browser. Browser permissions and
 remote clipboard policy still apply; text fields do not represent binary data.
+
+
+The default session display scale is 100% when no preference has been saved.
+Each native pane observes its own dimensions and resends its settled viewport
+when the tunnel becomes ready, including space reserved by a docked toolbar.
+Later pane, browser, and toolbar resizes retain manual zoom. Initial saved scale
+preferences apply once the remote display exists.
+
+Ctrl+Shift+Alt toggles the toolbar itself. Options and Advanced controls remain
+available from the Options button. Showing and hiding controls uses a 110 ms
+fade, supports reversing the fade, and respects reduced-motion preferences.
