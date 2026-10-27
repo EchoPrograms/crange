@@ -34,6 +34,8 @@ When you add or edit a Scenario VM, you can request a system disk from 8 to 1024
 
 Before applying a size change to an existing guest, CRANGE checks the live disk layout and blocks unsupported or ambiguous layouts. A general size reduction is not performed by lowering the number in the VM form. Specific captured-image workflows may make a smaller isolated copy while preserving the original; this does not mean the original guest disk or its physical allocation has already shrunk.
 
+Custom sizing currently requires a single data disk in the image and VM. EFI, TPM, installer and cloud-init devices can remain attached. Images with additional data disks can be deployed at their captured sizes.
+
 Shrinking a captured disk from 64 GiB to 30 GiB can reduce future guest commitments, but retained 64 GiB originals, archives, local bases, snapshots and temporary copies still consume space. Review may need room for both old and new fleets before old resources can be retired.
 
 ## Storage policy

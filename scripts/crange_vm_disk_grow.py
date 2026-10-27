@@ -13,6 +13,7 @@ import json
 import os
 import re
 import secrets
+import socket
 import stat
 import tempfile
 import time
@@ -224,6 +225,61 @@ def native_boot_order(native):
     return result
 
 
+def _is_auxiliary_disk_device(slot, value):
+    """Ignore only non-data devices that share Proxmox's disk-slot syntax."""
+    text=str(value).strip().lower()
+    if not text or text == 'none':
+        return True
+    if 'media=cdrom' in text or 'media=cloudinit' in text:
+        return True
+    volume=text.split(',',1)[0]
+    if re.search(r'(?:^|:)cloud-?init(?:$|[,/])',volume):
+        return True
+    return False
+
+
+def require_single_data_disk(native, system_slot):
+    """Fail closed if Terraform's one-disk module would detach a data volume."""
+    attached={key for key,value in native.items()
+              if re.fullmatch(r'(?:scsi|sata|virtio|ide)[0-9]+',key)
+              and not _is_auxiliary_disk_device(key,value)}
+    if system_slot not in attached:
+        raise DiskGrowError('Approved system disk is not an attached data volume.')
+    extras=sorted(attached-{system_slot})
+    if extras:
+        raise DiskGrowError('Custom system-disk sizing is unsupported when the VM has additional attached data disks.')
+
+
+def _authorized_cached_replica(approved_template, placement, project, declared_template):
+    """Allow placement on a verified local replica of the same approved image."""
+    image_id=approved_template.get('image_id')
+    artifact=approved_template.get('image_artifact_sha256')
+    template_id=placement.get('template_id');node=placement.get('template_node')
+    if (not isinstance(image_id,str) or not image_id or
+            not isinstance(artifact,str) or not re.fullmatch(r'[a-f0-9]{64}',artifact) or
+            type(template_id)is not int or not re.fullmatch(r'proxmox[1-6]',str(node))):
+        return None
+    # Placement outputs normally retain the approved alias; some generated
+    # outputs carry the canonical image ID instead.
+    if placement.get('image_id') not in (image_id, declared_template):
+        return None
+    from crange_scheduling import read_settings
+    _policy,catalog=read_settings()
+    image=catalog.get('images',{}).get(image_id,{})
+    scope=image.get('approved_projects',[]) if isinstance(image,dict) else []
+    if (not isinstance(image,dict) or image.get('kind')!='vm' or image.get('verified') is not True or
+            image.get('artifact_sha256')!=artifact or
+            (project not in scope and '*' not in scope)):
+        return None
+    replica=next((row for row in image.get('replicas',[])
+                  if row.get('node')==node and row.get('template_id')==template_id),None)
+    if (not isinstance(replica,dict) or replica.get('state')!='ready' or
+            replica.get('artifact_sha256')!=artifact or replica.get('cache_local') is not True or
+            'linked' not in replica.get('clone_modes_verified',[])):
+        return None
+    return replica
+
+
 def windows_grow_script(measurement, target_gb):
     """Build resumable PowerShell for the one measured Windows system disk."""
     m=validate_windows_layout(measurement)
@@ -336,6 +392,45 @@ def _selected_targets(path,cfg,resource_keys=None,team=None,api=None):
     try:applied=json.loads((path/'crange-applied-placements.json').read_text())
     except FileNotFoundError:applied={}
     approved=templates_for(path)
+    template_configs={}
+    def inspect_approved_source(ref_name, reference, placement=None):
+        if not isinstance(reference,dict):
+            raise DiskGrowError('Selected VM has no approved immutable source template.')
+        reference_id=reference.get('template_id');reference_node=reference.get('template_node')
+        if type(reference_id)is not int or not re.fullmatch(r'proxmox[1-6]',str(reference_node)):
+            raise DiskGrowError('Selected VM has an invalid approved immutable source reference.')
+        source_id=reference_id;source_node=reference_node
+        cached_replica=None
+        if placement is not None:
+            placed_id=placement.get('template_id');placed_node=placement.get('template_node')
+            if type(placed_id)is not int or not re.fullmatch(r'proxmox[1-6]',str(placed_node)):
+                raise DiskGrowError('Applied VM has an invalid source-template placement.')
+            if placed_id!=reference_id or placed_node!=reference_node:
+                cached_replica=_authorized_cached_replica(reference,placement,project,ref_name)
+                if not cached_replica:
+                    raise DiskGrowError('Applied VM source is not the approved template or a verified replica of its approved image.')
+                source_id=placed_id;source_node=placed_node
+        cache_key=(source_node,source_id)
+        if cache_key not in template_configs:
+            source=api.request('GET',f'/nodes/{source_node}/qemu/{source_id}/config')
+            if not isinstance(source,dict) or not int(source.get('template',0)):
+                raise DiskGrowError('Approved scenario source is not a live immutable Proxmox template.')
+            template_configs[cache_key]=source
+        source=template_configs[cache_key]
+        if cached_replica:
+            from crange_cache_ownership import cache_owned
+            if not cache_owned(source,source_id,cached_replica.get('job_id')):
+                raise DiskGrowError('Applied catalog replica cache generation/job ownership does not match its approved record.')
+        profile=reference.get('profile',{})
+        boot_order=profile.get('boot_order') if isinstance(profile,dict) else None
+        if not isinstance(boot_order,list):boot_order=native_boot_order(source)
+        if not isinstance(boot_order,list) or not boot_order:
+            raise DiskGrowError('Selected VM has no approved immutable boot-disk profile.')
+        image_disk=profile.get('system_disk') if isinstance(profile,dict) else None
+        expected_interface=image_disk.get('interface') if isinstance(image_disk,dict) else (profile.get('system_disk_interface') if isinstance(profile,dict) else None)
+        slot=system_disk_slot(source,boot_order,expected_interface)
+        require_single_data_disk(source,slot)
+        return source,boot_order,expected_interface
     from crange_change_state import load_applied_definitions
     applied_definitions=load_applied_definitions(path)
     selected=set(resource_keys) if resource_keys is not None else {'vm:'+k for k,v in cfg.get('scenario_boxes',{}).items() if v.get('disk_gb') is not None}
@@ -354,6 +449,9 @@ def _selected_targets(path,cfg,resource_keys=None,team=None,api=None):
         if live is None and receipt is None:
             # A newly declared VM has no pre-apply guest to inspect. Its first
             # inspection happens after Terraform creates the applied clone.
+            # Still inspect its exact approved immutable source now: the VM
+            # module declares one OS disk and omits any extra source volumes.
+            inspect_approved_source(box.get('template'),approved.get(box.get('template')))
             continue
         if (type(vmid)is not int or not isinstance(receipt,dict) or receipt.get('guest_id')!=vmid or receipt.get('node_name')!=node or receipt.get('declared_template')!=box.get('template') or receipt.get('image_id')!=placement.get('image_id') or receipt.get('template_id')!=placement.get('template_id') or receipt.get('template_node')!=placement.get('template_node')):
             raise DiskGrowError('Selected VM does not have a matching applied placement receipt.')
@@ -376,21 +474,10 @@ def _selected_targets(path,cfg,resource_keys=None,team=None,api=None):
         if native.get('name')!=name or f'p{project:03d}' not in tags or vnet not in tags or native.get('template',0):raise DiskGrowError('Selected VM live Proxmox tags or configuration are not owned by this project.')
         if type(box.get('disk_gb')) is not int or not 8<=box['disk_gb']<=1024:raise DiskGrowError('Selected VM disk_gb is invalid.')
         approved_template=approved.get(box.get('template'),{})
-        profile=approved_template.get('profile',{}) if isinstance(approved_template,dict) else {}
-        boot_order=profile.get('boot_order') if isinstance(profile,dict) else None
-        template_id=placement.get('template_id');template_node=placement.get('template_node')
-        if (not isinstance(approved_template,dict) or approved_template.get('template_id')!=template_id
-                or approved_template.get('template_node')!=template_node or type(template_id)is not int
-                or not re.fullmatch(r'proxmox[1-6]',str(template_node))):
-            raise DiskGrowError('Selected VM template differs from its approved immutable image reference.')
-        template_native=api.request('GET',f'/nodes/{template_node}/qemu/{template_id}/config')
-        if not template_native.get('template'):
-            raise DiskGrowError('Approved scenario source is not a live immutable Proxmox template.')
-        if not isinstance(boot_order,list):boot_order=native_boot_order(template_native)
-        if not isinstance(boot_order,list) or not boot_order:raise DiskGrowError('Selected VM has no approved immutable boot-disk profile.')
-        image_disk=profile.get('system_disk')
-        expected_interface=image_disk.get('interface') if isinstance(image_disk,dict) else profile.get('system_disk_interface')
+        template_native,boot_order,expected_interface=inspect_approved_source(box.get('template'),approved_template,placement)
         target={'key':key,'resource_key':rk,'project_id':project,'guest_id':vmid,'node':node,'name':name,'target_gb':box['disk_gb'],'native':native,'box':box,'image_id':placement.get('image_id'),'approved_boot_order':boot_order,'expected_system_disk':expected_interface}
+        system_slot=system_disk_slot(native,boot_order,expected_interface)
+        require_single_data_disk(native,system_slot)
         if live_status=='stopped':
             definitions=(applied_definitions or {}).get('scenario_box',{})
             previous=definitions.get(key) if isinstance(definitions,dict) else None
@@ -429,13 +516,29 @@ def _journal_save(path, records):
         except FileNotFoundError:pass
 
 
+def _transient_readonly_qga_error(error):
+    """Only retry transport/server failures for fixed, read-only collectors."""
+    cause=error.__cause__ or error
+    status=getattr(cause,'code',None)
+    if status is not None:
+        return status in (500,502,503,504,595,596)
+    if isinstance(cause,(TimeoutError,ConnectionError,socket.timeout,socket.gaierror,socket.herror)):
+        return True
+    reason=getattr(cause,'reason',None)
+    return isinstance(reason,(TimeoutError,ConnectionError,socket.timeout,socket.gaierror,socket.herror))
+
+
 def _qga(api,target,command,timeout=300,*,journal=True,resumable=False):
     root=f"/nodes/{target['node']}/qemu/{target['guest_id']}/agent"
     if not journal:
         deadline=time.monotonic()+timeout
         for attempt in range(3):
             try:response=api.request('POST',root+'/exec',{'command':command})
-            except Exception:raise DiskGrowError('Read-only guest measurement submission failed.') from None
+            except Exception as exc:
+                if not _transient_readonly_qga_error(exc) or attempt==2 or time.monotonic()>=deadline:
+                    raise DiskGrowError('Read-only guest measurement submission failed.') from None
+                time.sleep(min(1,max(0,deadline-time.monotonic())))
+                continue
             pid=response.get('pid') if isinstance(response,dict) else None
             if type(pid)is not int or pid<=0:raise DiskGrowError('Guest measurement returned no valid handle.')
             while time.monotonic()<deadline:
@@ -447,10 +550,18 @@ def _qga(api,target,command,timeout=300,*,journal=True,resumable=False):
                     if getattr(cause,'code',None)==500:
                         try:detail=cause.read(8192).decode('utf-8',errors='replace')
                         except (AttributeError,OSError):detail=''
+                        finally:
+                            try:cause.close()
+                            except AttributeError:pass
                         lost=bool(re.search(r'PID\s+(?:[0-9]+|lld)\s+does not exist',detail,re.I))
-                    if not lost or attempt==2:raise
-                    time.sleep(min(5,max(0,deadline-time.monotonic())))
-                    break
+                    if lost:
+                        if attempt==2:raise
+                        time.sleep(min(5,max(0,deadline-time.monotonic())))
+                        break
+                    if _transient_readonly_qga_error(exc) and time.monotonic()<deadline:
+                        time.sleep(min(1,max(0,deadline-time.monotonic())))
+                        continue
+                    raise
                 if state.get('exited'):
                     if state.get('exitcode')!=0:raise DiskGrowError('Fixed guest measurement failed; guest output withheld.')
                     return str(state.get('out-data',''))
@@ -483,7 +594,8 @@ def _qga(api,target,command,timeout=300,*,journal=True,resumable=False):
             record['attempts']=int(record.get('attempts',1))+1
             record['state']='submitting';record.pop('pid',None);_journal_save(path,records);retry_failed=True
         if not record or retry_failed:
-            record={'digest':digest,'state':'submitting','attempts':1};records[key]=record;_journal_save(path,records)
+            attempts=int(record.get('attempts',1)) if retry_failed else 1
+            record={'digest':digest,'state':'submitting','attempts':attempts};records[key]=record;_journal_save(path,records)
             try:response=api.request('POST',root+'/exec',{'command':command})
             except Exception:raise DiskGrowError('Guest command submission is uncertain; it will not be resent.') from None
             pid=response.get('pid') if isinstance(response,dict) else None

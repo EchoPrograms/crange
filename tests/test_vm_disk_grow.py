@@ -209,11 +209,58 @@ class VmDiskGrowTests(unittest.TestCase):
     with patch.object(grow.time,'sleep'):
         self.assertEqual(grow._qga(api,target,['fixed-collector'],journal=False),'measured')
     self.assertEqual(sum(c.args[0]=='POST' for c in api.request.call_args_list),2)
+
+ def test_read_only_lost_pid_on_final_attempt_fails_without_extra_poll(self):
+    def lost_pid():
+        cause=urllib.error.HTTPError('https://private/agent',500,'QGA',{},
+            io.BytesIO(b'{"message":"Agent error: PID lld does not exist"}'))
+        exc=RuntimeError('Proxmox API failed with HTTP 500.');exc.__cause__=cause
+        return exc
+    target={'project_id':3,'resource_key':'vm:web','node':'proxmox2','guest_id':123}
+    api=Mock();api.request.side_effect=[{'pid':7},lost_pid(),{'pid':8},lost_pid(),{'pid':9},lost_pid()]
+    with patch.object(grow.time,'sleep'):
+        with self.assertRaises(RuntimeError):grow._qga(api,target,['fixed-collector'],journal=False)
+    self.assertEqual(sum(c.args[0]=='POST' for c in api.request.call_args_list),3)
+    self.assertEqual(sum(call.args[0]=='GET' for call in api.request.call_args_list),3)
     with tempfile.TemporaryDirectory() as directory,patch.dict(os.environ,{'CRANGE_VM_DISK_GROW_JOURNAL':directory+'/jobs.json'}):
         api=Mock();api.request.side_effect=[{'pid':7},lost_pid(),lost_pid()]
         for _ in range(2):
             with self.assertRaises(RuntimeError):grow._qga(api,target,['fixed-mutation'])
         self.assertEqual(sum(c.args[0]=='POST' for c in api.request.call_args_list),1)
+
+ def test_read_only_measurement_retries_transient_exec_submission(self):
+    target={'project_id':3,'resource_key':'vm:web','node':'proxmox2','guest_id':123}
+    api=Mock();api.request.side_effect=[TimeoutError('request timeout'),{'pid':7},
+        {'exited':True,'exitcode':0,'out-data':'measured'}]
+    with patch.object(grow.time,'sleep'):
+        self.assertEqual(grow._qga(api,target,['fixed-collector'],journal=False),'measured')
+    self.assertEqual(sum(c.args[0]=='POST' for c in api.request.call_args_list),2)
+
+ def test_read_only_measurement_retries_urllib_wrapped_timeout(self):
+    target={'project_id':3,'resource_key':'vm:web','node':'proxmox2','guest_id':123}
+    api=Mock();api.request.side_effect=[urllib.error.URLError(TimeoutError('socket timed out')),
+        {'pid':7},{'exited':True,'exitcode':0,'out-data':'measured'}]
+    with patch.object(grow.time,'sleep'):
+        self.assertEqual(grow._qga(api,target,['fixed-collector'],journal=False),'measured')
+    self.assertEqual(sum(c.args[0]=='POST' for c in api.request.call_args_list),2)
+
+ def test_read_only_measurement_polls_known_pid_after_transient_status_error(self):
+    target={'project_id':3,'resource_key':'vm:web','node':'proxmox2','guest_id':123}
+    api=Mock();api.request.side_effect=[{'pid':7},TimeoutError('status timeout'),
+        {'exited':True,'exitcode':0,'out-data':'measured'}]
+    with patch.object(grow.time,'sleep'):
+        self.assertEqual(grow._qga(api,target,['fixed-collector'],journal=False),'measured')
+    self.assertEqual(sum(c.args[0]=='POST' for c in api.request.call_args_list),1)
+
+ def test_permanent_read_only_exec_rejection_is_not_retried(self):
+    cause=urllib.error.HTTPError('https://private/agent',400,'Bad Request',{},io.BytesIO(b'{}'))
+    error=RuntimeError('private request failure');error.__cause__=cause
+    target={'project_id':3,'resource_key':'vm:web','node':'proxmox2','guest_id':123}
+    api=Mock();api.request.side_effect=error
+    with self.assertRaisesRegex(grow.DiskGrowError,'measurement submission failed'):
+        grow._qga(api,target,['fixed-collector'],journal=False)
+    self.assertEqual(api.request.call_count,1)
+    cause.close()
 
  def test_uncertain_submission_is_journaled_without_retry(self):
     with tempfile.TemporaryDirectory() as directory, patch.dict(os.environ,{'CRANGE_VM_DISK_GROW_JOURNAL':directory+'/jobs.json'}):
@@ -235,6 +282,23 @@ class VmDiskGrowTests(unittest.TestCase):
         self.assertEqual(next(iter(records.values()))['error_output'],'private storage failure')
         self.assertEqual(grow._qga(api,target,['checkpointed-script'],resumable=True),'resumed')
         self.assertEqual(sum(call.args[0]=='POST' for call in api.request.call_args_list),2)
+
+ def test_resumable_terminal_failures_preserve_the_three_attempt_limit(self):
+    with tempfile.TemporaryDirectory() as directory, patch.dict(os.environ,{'CRANGE_VM_DISK_GROW_JOURNAL':directory+'/jobs.json'}):
+        api=Mock();api.request.side_effect=[
+            {'pid':1},{'exited':True,'exitcode':1,'err-data':'failed'},
+            {'pid':2},{'exited':True,'exitcode':1,'err-data':'failed'},
+            {'pid':3},{'exited':True,'exitcode':1,'err-data':'failed'}]
+        target={'project_id':3,'resource_key':'vm:web','node':'proxmox2','guest_id':123}
+        for _ in range(3):
+            with self.assertRaisesRegex(grow.DiskGrowError,'operation failed'):
+                grow._qga(api,target,['checkpointed-script'],resumable=True)
+        record=next(iter(json.loads(Path(directory+'/jobs.json').read_text()).values()))
+        self.assertEqual(record['attempts'],3)
+        self.assertEqual(record['state'],'failed')
+        with self.assertRaisesRegex(grow.DiskGrowError,'operation failed'):
+            grow._qga(api,target,['checkpointed-script'],resumable=True)
+        self.assertEqual(sum(call.args[0]=='POST' for call in api.request.call_args_list),3)
 
 
  def _stopped_unchanged_scope(self, directory, *, checkpoint_disk=31, native_disk=31):
@@ -291,6 +355,126 @@ class VmDiskGrowTests(unittest.TestCase):
                     grow.preflight_selected(project,cfg,{'vm:web'},team='254',api=api)
                 with self.assertRaisesRegex(grow.DiskGrowError,'Stopped VM has an unapplied or mismatched disk size'):
                     grow.initialize_selected(project,cfg,{'vm:web'},team='254',api=api)
+
+ def test_extra_native_data_disk_is_blocked_before_guest_or_apply(self):
+    with tempfile.TemporaryDirectory() as directory:
+        project,cfg,outputs,approved,api=self._stopped_unchanged_scope(directory)
+        api.request.side_effect=lambda method,path,*args,**kwargs: (
+            [{'vmid':991,'type':'qemu','pool':'crange-iac','node':'proxmox6',
+              'name':'p100t254-web','status':'stopped'}] if path=='/cluster/resources?type=vm' else
+            {'name':'p100t254-web','tags':'p100;p100t254','template':0,'boot':'order=sata0',
+             'sata0':'local-lvm:vm-991-disk-0,size=31G','scsi1':'local-lvm:vm-991-disk-1,size=10G'} if path.endswith('/qemu/991/config') else
+            {'template':1,'boot':'order=sata0','sata0':'local-lvm:base-435-disk-0,size=22G'} if path.endswith('/qemu/435/config') else
+            (_ for _ in ()).throw(AssertionError(f'unexpected API read {method} {path}')))
+        with patch('crange.output_json',return_value=outputs), \
+             patch('crange.templates_for',return_value=approved):
+            with self.assertRaisesRegex(grow.DiskGrowError,'additional attached data disks'):
+                grow.preflight_selected(project,cfg,{'vm:web'},team='254',api=api)
+            with self.assertRaisesRegex(grow.DiskGrowError,'additional attached data disks'):
+                grow.initialize_selected(project,cfg,{'vm:web'},team='254',api=api)
+
+ def test_efi_cdrom_cloudinit_and_unused_slots_are_not_data_disks(self):
+    native={'sata0':'local-lvm:vm-991-disk-0,size=31G',
+            'efidisk0':'local-lvm:vm-991-disk-1,size=4M',
+            'tpmstate0':'local-lvm:vm-991-disk-2,size=4M',
+            'ide0':'local-lvm:cloudinit','ide2':'none,media=cdrom',
+            'ide3':'local:iso/installer.iso,media=cdrom','unused0':'local-lvm:vm-991-disk-3'}
+    grow.require_single_data_disk(native,'sata0')
+
+ def test_fresh_vm_rejects_multidisk_approved_source_before_apply(self):
+    with tempfile.TemporaryDirectory() as directory:
+        project=Path(directory)/'project-100';project.mkdir()
+        cfg={'project_id':100,'scenario_boxes':{'web':{'team_id':'254','template':'win-base',
+            'node_name':'proxmox6','name':'web','disk_gb':40}}}
+        api=Mock();api.request.side_effect=[[],
+            {'template':1,'boot':'order=sata0','sata0':'local-lvm:base-435-disk-0,size=22G',
+             'scsi1':'local-lvm:base-435-disk-1,size=8G'}]
+        approved={'win-base':{'template_id':435,'template_node':'proxmox6',
+            'profile':{'boot_order':['sata0'],'system_disk':{'interface':'sata0'}}}}
+        with patch('crange.output_json',return_value={'scenario_boxes':{'value':{}}}), \
+             patch('crange.templates_for',return_value=approved):
+            with self.assertRaisesRegex(grow.DiskGrowError,'additional attached data disks'):
+                grow.preflight_selected(project,cfg,{'vm:web'},team='254',api=api)
+        self.assertEqual(api.request.call_count,2)
+
+ def test_verified_ready_replica_of_approved_image_may_be_the_applied_source(self):
+    with tempfile.TemporaryDirectory() as directory:
+        project,cfg,outputs,approved,api=self._stopped_unchanged_scope(directory)
+        outputs['scenario_boxes']['value']['web']['placement'].update(
+            template_id=436,template_node='proxmox6')
+        receipt=json.loads((project/'crange-applied-placements.json').read_text())
+        receipt['vm:web'].update(template_id=436,template_node='proxmox6')
+        (project/'crange-applied-placements.json').write_text(json.dumps(receipt))
+        approved['win-base'].update(image_id='win-v2',image_artifact_sha256='a'*64)
+        native_template={'template':1,'tags':'crange-image;crange-cache-436',
+            'description':'CRANGE distribution cache-job-436 image win-v2',
+            'boot':'order=sata0','sata0':'local-lvm:base-436-disk-0,size=22G'}
+        original_request=api.request.side_effect
+        def request(method,path,*args,**kwargs):
+            if path.endswith('/qemu/436/config'):return native_template
+            return original_request(method,path,*args,**kwargs)
+        api.request.side_effect=request
+        catalog={'images':{'win-v2':{'kind':'vm','verified':True,'artifact_sha256':'a'*64,
+            'approved_projects':[100],'replicas':[{'node':'proxmox6','template_id':436,'job_id':'cache-job-436',
+                'state':'ready','artifact_sha256':'a'*64,'cache_local':True,
+                'clone_modes_verified':['linked']}]}}}
+        with patch('crange.output_json',return_value=outputs), \
+             patch('crange.templates_for',return_value=approved), \
+             patch('crange_scheduling.read_settings',return_value=({},catalog)):
+            result=grow.preflight_selected(project,cfg,{'vm:web'},team='254',api=api)
+        self.assertEqual(result[0]['guest_id'],991)
+
+ def test_cached_source_replica_requires_matching_image_scope_and_artifact(self):
+    with tempfile.TemporaryDirectory() as directory:
+        project,cfg,outputs,approved,api=self._stopped_unchanged_scope(directory)
+        outputs['scenario_boxes']['value']['web']['placement'].update(
+            template_id=436,template_node='proxmox6')
+        receipt=json.loads((project/'crange-applied-placements.json').read_text())
+        receipt['vm:web'].update(template_id=436,template_node='proxmox6')
+        (project/'crange-applied-placements.json').write_text(json.dumps(receipt))
+        approved['win-base'].update(image_id='win-v2',image_artifact_sha256='a'*64)
+        native_template={'template':1,'tags':'crange-image;crange-cache-436',
+            'description':'CRANGE distribution cache-job-436 image win-v2',
+            'boot':'order=sata0','sata0':'local-lvm:base-436-disk-0,size=22G'}
+        original_request=api.request.side_effect
+        api.request.side_effect=lambda method,path,*args,**kwargs: (
+            native_template if path.endswith('/qemu/436/config') else original_request(method,path,*args,**kwargs))
+        for scope,artifact in (([3],'a'*64),([100],'b'*64)):
+            catalog={'images':{'win-v2':{'kind':'vm','verified':True,'artifact_sha256':'a'*64,
+                'approved_projects':scope,'replicas':[{'node':'proxmox6','template_id':436,'job_id':'cache-job-436',
+                    'state':'ready','artifact_sha256':artifact,'cache_local':True,
+                    'clone_modes_verified':['linked']}]}}}
+            with self.subTest(scope=scope,artifact=artifact), \
+                 patch('crange.output_json',return_value=outputs), \
+                 patch('crange.templates_for',return_value=approved), \
+                 patch('crange_scheduling.read_settings',return_value=({},catalog)):
+                with self.assertRaisesRegex(grow.DiskGrowError,'not the approved template'):
+                    grow.preflight_selected(project,cfg,{'vm:web'},team='254',api=api)
+
+ def test_recycled_cache_vmid_tag_without_job_description_is_rejected(self):
+    with tempfile.TemporaryDirectory() as directory:
+        project,cfg,outputs,approved,api=self._stopped_unchanged_scope(directory)
+        outputs['scenario_boxes']['value']['web']['placement'].update(
+            template_id=436,template_node='proxmox6')
+        receipt=json.loads((project/'crange-applied-placements.json').read_text())
+        receipt['vm:web'].update(template_id=436,template_node='proxmox6')
+        (project/'crange-applied-placements.json').write_text(json.dumps(receipt))
+        approved['win-base'].update(image_id='win-v2',image_artifact_sha256='a'*64)
+        native_template={'template':1,'tags':'crange-image;crange-cache-436',
+            'description':'unrelated recycled VM description',
+            'boot':'order=sata0','sata0':'local-lvm:base-436-disk-0,size=22G'}
+        original_request=api.request.side_effect
+        api.request.side_effect=lambda method,path,*args,**kwargs: (
+            native_template if path.endswith('/qemu/436/config') else original_request(method,path,*args,**kwargs))
+        catalog={'images':{'win-v2':{'kind':'vm','verified':True,'artifact_sha256':'a'*64,
+            'approved_projects':[100],'replicas':[{'node':'proxmox6','template_id':436,
+                'job_id':'cache-job-436','state':'ready','artifact_sha256':'a'*64,
+                'cache_local':True,'clone_modes_verified':['linked']}]}}}
+        with patch('crange.output_json',return_value=outputs), \
+             patch('crange.templates_for',return_value=approved), \
+             patch('crange_scheduling.read_settings',return_value=({},catalog)):
+            with self.assertRaisesRegex(grow.DiskGrowError,'generation/job ownership'):
+                grow.preflight_selected(project,cfg,{'vm:web'},team='254',api=api)
 
 
 if __name__=='__main__':unittest.main()
