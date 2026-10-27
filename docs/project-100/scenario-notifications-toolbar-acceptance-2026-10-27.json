@@ -67,25 +67,36 @@
     ],
     "keyboard_fix": "Use native guacBeforeKeydown/guacBeforeKeyup hooks when a toolbar control has focus; local input does not reach remote clients.",
     "floating_layout_preserved": true,
-    "served_workspace_js_sha256": "e6595bbb0568a730a9e3ca1c595bf0c16b72f3431aac9d9624acfae2ef8591a7",
-    "served_workspace_css_sha256": "c2821d3352d4f48be680fb03cafd2f2b972356db0df2069720fb6c43f0996385",
+    "served_workspace_js_sha256": "41211cd2fd9ac179a6318b6624e5162eab30aaeb8b4d4e74f28a0160d9319702",
+    "served_workspace_css_sha256": "32ac4f337ccf89fd897c20293dac90bcbed0a89612a13cd161b6a50b46565836",
     "regression_checks": [
-      "Floating toolbar keeps its compact controls",
       "Home, Disconnect, selector, Clipboard, and scale appear in order",
       "Power, map, fullscreen, Options, and Close align to the right edge",
       "All five session actions are grouped on the right",
+      "Primary controls are centered across the full toolbar while session actions stay right aligned",
+      "Every docked button, clipboard, and scale control shares one 32px row",
       "Docked toolbar has no top or side border",
       "Real keyboard typing stays in the clipboard field",
       "Clipboard typing sends no remote key presses or releases",
       "Typed clipboard content still reaches the clipboard service",
       "Scale field also accepts local keyboard input",
       "Scale editing does not send keys to the connection",
+      "Clicking the remote display releases clipboard focus even when native mousedown prevents its default",
       "Remote keyboard routing resumes after leaving toolbar controls",
       "Ctrl+Alt+Shift still opens the full menu while editing the clipboard",
       "Grouped toolbar wraps without mobile overflow",
       "Toolbar changes have no JavaScript errors"
-    ]
+    ],
+    "primary_controls_alignment": "Centered across the full desktop toolbar; action controls remain right aligned. Narrow viewports wrap within the available width.",
+    "all_docked_controls_height_px": 32,
+    "focus_return": "A capture-phase pointerdown outside the toolbar explicitly blurs its focused control, including when the remote display prevents the normal mousedown default."
   },
   "validation_environment": "Chromium with desktop 1440px and emulated mobile 390px viewports. Guacamole fixture uses the upstream 1.6.0 Keyboard module and its before-key event routing; no remote guest test keystrokes or infrastructure changes.",
-  "services": "Controller broker refreshed; static dashboard assets updated without restarting controller workers; Guacamole restarted to load extension assets."
+  "services": "Controller broker refreshed; static dashboard assets updated without restarting controller workers; Guacamole restarted to load extension assets.",
+  "followup": {
+    "recorded_at": "2026-10-27T13:23:49.965763+00:00",
+    "commit": "9aa0e68",
+    "state": "live-http-verified",
+    "alignment_validation": "Desktop and emulated mobile browser checks with the actual served Guacamole stylesheet; upstream native Keyboard module and a display mousedown handler that prevents its default."
+  }
 }
