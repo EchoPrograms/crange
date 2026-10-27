@@ -619,6 +619,17 @@ def freeze(row, live, previous=None):
                       clone_mode='full' if clone[0].get('full') else 'linked')
     disks = live.get('disk') or live.get('disk_device') or []
     if disks: values['datastore_id'] = disks[0]['datastore_id']
+    if disks and row.get('kind') == 'vm':
+        size = disks[0].get('size')
+        if isinstance(size, bool) or not isinstance(size, (int, float)) or not math.isfinite(size) or size <= 0:
+            raise PlacementError('Cannot preserve the existing scenario VM disk size from Terraform state.')
+        system_disk = row.get('system_disk')
+        interface = system_disk.get('interface') if isinstance(system_disk, dict) else None
+        if isinstance(interface, str) and re.fullmatch(r'(?:scsi|sata|virtio|ide)[0-9]+', interface):
+            values['disk_gb'] = size
+            values['disk_interface'] = interface
+        elif row.get('box', {}).get('disk_gb') is not None:
+            raise PlacementError('Cannot preserve an explicit existing VM disk without its verified system-disk interface.')
     if row['resource_key'].startswith('router:'):
         size = disks[0].get('size') if disks else None
         if isinstance(size,bool) or not isinstance(size,(int,float)) or not math.isfinite(size) or size <= 0:
@@ -662,12 +673,53 @@ def requested_disk_gb(row, image):
         if type(requested) is not int or not 8 <= requested <= 1024 or requested < size:
             raise PlacementError(f'Container root disk must be 8–1024 GiB and at least its image size ({size:g} GiB).')
         return requested
+    if row['kind'] == 'vm':
+        profile = image.get('system_disk')
+        # Retained unchanged guests use their authoritative current OS disk as
+        # the minimum. A fresh clone or image/template replacement uses the
+        # immutable source image's verified OS disk profile.
+        minimum = row.get('minimum_system_disk_gb')
+        if minimum is None:
+            minimum = profile.get('disk_gb') if isinstance(profile, dict) else None
+        requested = row['box'].get('disk_gb')
+        if requested is None:
+            return minimum if isinstance(minimum, (int, float)) else size
+        if not isinstance(profile, dict):
+            raise PlacementError('This VM image has no verified boot-selected system-disk profile; publish a new verified image before setting a custom disk size.')
+        if (isinstance(minimum, bool) or not isinstance(minimum, (int, float)) or
+                not math.isfinite(minimum) or type(requested) is not int or
+                not 8 <= requested <= 1024 or requested < minimum):
+            raise PlacementError(f'Scenario VM disk must be 8–1024 GiB and at least its verified OS disk size ({minimum:g} GiB).')
+        return requested
     return size
 
 
-def disk_growth_requested(row, live):
+def _measured_vm_system_disk(api, live, profile=None):
+    """Measure the image-verified boot device, excluding EFI/TPM devices."""
+    node, vmid = live.get('node_name'), live.get('vm_id')
+    if not isinstance(node, str) or type(vmid) is not int:
+        raise PlacementError('Cannot identify the existing VM system disk before growth.')
+    config = api.request('GET', f'/nodes/{node}/qemu/{vmid}/config')
+    interface = profile.get('interface') if isinstance(profile, dict) else None
+    if not isinstance(interface, str) or not re.fullmatch(r'(?:scsi|sata|virtio|ide)[0-9]+', interface):
+        raise PlacementError('The existing VM image has no verified system-disk interface.')
+    value = config.get(interface) if isinstance(config, dict) else None
+    if not isinstance(value, str):
+        raise PlacementError(f'Cannot verify the existing VM {interface} system disk before growth.')
+    from crange_proxmox_disk import managed_volume, size_bytes
+    try:
+        storage = managed_volume(value).split(':', 1)[0]
+        size = size_bytes(value) / 2**30
+    except ValueError as exc:
+        raise PlacementError(f'Cannot verify the existing VM {interface} system disk size.') from exc
+    if not math.isfinite(size) or size <= 0:
+        raise PlacementError(f'Cannot verify the existing VM {interface} system disk size.')
+    return {'size': size, 'datastore_id': storage}
+
+
+def disk_growth_requested(row, live, api=None):
     """Only an explicit, measured guest disk growth can leave retention."""
-    if not row['resource_key'].startswith(('jumpbox:', 'container:')):
+    if not row['resource_key'].startswith(('jumpbox:', 'container:', 'vm:')):
         return False
     requested = row['box'].get('disk_gb')
     if requested is None:
@@ -675,7 +727,11 @@ def disk_growth_requested(row, live):
     if type(requested) is not int or not 8 <= requested <= 1024:
         raise PlacementError('Guest disk must be an integer from 8 to 1024 GiB.')
     disks = live.get('disk') or []
-    actual = disks[0].get('size') if len(disks) == 1 else None
+    if row['resource_key'].startswith('vm:'):
+        actual = (_measured_vm_system_disk(api, live, row.get('system_disk'))['size'] if api is not None
+                  else disks[0].get('size') if len(disks) == 1 else None)
+    else:
+        actual = disks[0].get('size') if len(disks) == 1 else None
     if isinstance(actual, bool) or not isinstance(actual, (int, float)) or not math.isfinite(actual) or actual <= 0:
         raise PlacementError('Cannot verify the existing guest system disk size before growth.')
     if requested < actual:
@@ -907,9 +963,19 @@ def prepare(path, cfg, plan_id, owner, api=None, *, bootstrap_node=None, bootstr
                 # immutable version; retain it without inventing that identity.
                 row = copy.deepcopy(row)
                 row['image'] = None
+            if row['kind'] == 'vm':
+                pinned_image = catalog['images'].get(row.get('image'), {})
+                row = copy.deepcopy(row)
+                row['system_disk'] = pinned_image.get('system_disk')
             # Growth follows ordinary pinned admission. Reserving the complete
             # final footprint is conservative and grants no replacement credit.
-            if not replacement and not disk_growth_requested(row, live) and int(desired.get('cores', current_cpu)) <= current_cpu and int(desired.get('memory_mb', current_memory)) <= current_memory:
+            if row['kind'] == 'vm' and desired.get('disk_gb') is not None and not replacement:
+                measured = _measured_vm_system_disk(api or ProxmoxAPI(), live, row.get('system_disk'))
+                row = copy.deepcopy(row)
+                row['minimum_system_disk_gb'] = measured['size']
+                row['retained'] = {**row.get('retained', {}), 'disk_gb': measured['size']}
+                live = {**live, 'disk': [measured]}
+            if not replacement and not disk_growth_requested(row, live, api or ProxmoxAPI()) and int(desired.get('cores', current_cpu)) <= current_cpu and int(desired.get('memory_mb', current_memory)) <= current_memory:
                 frozen = freeze(row,live,previous)
                 frozen['declared_template'] = desired.get('template')
                 placements.append(frozen);continue
@@ -928,7 +994,9 @@ def prepare(path, cfg, plan_id, owner, api=None, *, bootstrap_node=None, bootstr
             'cpu_cores':int(box.get('cores',1 if row['kind']=='container' else 2)),
             'cpu_type':requested_cpu_type(row['kind'], profile),
             'required_features':list(profile.get('required_features',[])),
-            'disk_gb':requested_disk_gb(row,image)})
+            'disk_gb':requested_disk_gb(row,image),
+            **({'disk_interface': image['system_disk']['interface']}
+               if row['kind'] == 'vm' and isinstance(image.get('system_disk'), dict) else {})})
         if row.get('retained'):
             for field in ('datastore_id','template_id','template_file_id','clone_mode'):
                 if row['retained'].get(field) is not None:requests[-1]['resolved_'+field]=row['retained'][field]
@@ -971,7 +1039,22 @@ def prepare(path, cfg, plan_id, owner, api=None, *, bootstrap_node=None, bootstr
 
 
 def tf_overrides(prepared):
-    return {'resolved_placements': {p['resource_key']:{**p['resolved'], 'image_id': p.get('image', ''), **({'disk_gb': next(r['disk_gb'] for r in prepared['requests'] if r['resource_key'] == p['resource_key'])} if p.get('resources') else {})} for p in prepared['placements']}}
+    requests = {request['resource_key']: request for request in prepared.get('requests', [])}
+    resolved = {}
+    for placement in prepared['placements']:
+        key = placement['resource_key']
+        values = {**placement['resolved'], 'image_id': placement.get('image', '')}
+        request = requests.get(key)
+        if placement.get('resources') and request:
+            # Legacy catalog images without a verified system-disk profile
+            # retain the cloned allocation by omitting the Terraform disk
+            # block entirely. Explicit custom sizing already fails closed.
+            if request.get('kind') != 'vm' or request.get('disk_interface'):
+                values['disk_gb'] = request['disk_gb']
+            if request.get('disk_interface'):
+                values['disk_interface'] = request['disk_interface']
+        resolved[key] = values
+    return {'resolved_placements': resolved}
 
 
 def begin_apply(path, prepared, api=None):

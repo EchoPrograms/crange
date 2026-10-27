@@ -23,7 +23,8 @@ class TemplateReadinessTests(unittest.TestCase):
             }))
             (root / 'approved-container-templates.json').write_text('{}')
             catalog = {'images': {
-                'alpine-v1': {'kind': 'vm', 'approved_projects': ['*'], 'replicas': [
+                'alpine-v1': {'kind': 'vm', 'approved_projects': ['*'],
+                    'system_disk': {'interface': 'sata0', 'disk_gb': 31.0, 'source_config_sha256': 'a' * 64}, 'replicas': [
                     {'node': 'proxmox2', 'state': 'ready'}]},
                 'private-v1': {'kind': 'vm', 'approved_projects': [3], 'replicas': [
                     {'node': 'proxmox4', 'state': 'ready'}]},
@@ -38,6 +39,8 @@ class TemplateReadinessTests(unittest.TestCase):
             self.assertEqual(result['legacy']['status'], 'missing-image-id')
             self.assertEqual(result['ready']['status'], 'ready')
             self.assertEqual(result['ready']['ready_nodes'], ['proxmox2'])
+            self.assertEqual(result['ready']['system_disk_gb'], 31.0)
+            self.assertNotIn('system_disk_gb', result['legacy'])
             self.assertEqual(result['wrong-scope']['status'], 'not-approved')
             self.assertEqual(result['wrong-kind']['status'], 'kind-mismatch')
             self.assertEqual(result['no-replica']['status'], 'no-ready-replica')

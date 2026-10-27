@@ -275,7 +275,13 @@ def schedule_batch(requests, inventory, catalog, policy, reservations=(), now=No
         elif preferred:
             reason = f"Preferred {preferred}: {rejected.get(preferred, 'higher projected resource pressure')}; placed on {name}"
         reason += '; archive creation' if clone_mode == 'archive' else '; verified local linked clone' if clone_mode == 'linked' else '; explicit full-clone policy fallback'
-        result.append({'resource_key': r['resource_key'], 'project_id': r.get('project_id'), 'image': r['image'], 'artifact_sha256': image['artifact_sha256'], 'resolved': {'node_name': name, 'datastore_id': storage, 'template_id': replica.get('template_id'), 'template_file_id': replica.get('template_file_id'), 'template_node': name, 'clone_mode': clone_mode, 'verified_local_cache': clone_mode == 'linked'}, 'resources': {k: r[k] for k in ('memory_mb', 'cpu_cores', 'disk_gb')}, 'headroom': headroom, 'reason': reason, 'policy_revision': policy['revision']})
+        resolved = {'node_name': name, 'datastore_id': storage, 'template_id': replica.get('template_id'), 'template_file_id': replica.get('template_file_id'), 'template_node': name, 'clone_mode': clone_mode, 'verified_local_cache': clone_mode == 'linked'}
+        disk_interface = r.get('disk_interface')
+        if disk_interface is not None:
+            if r.get('kind') != 'vm' or not re.fullmatch(r'(?:scsi|sata|virtio|ide)[0-9]+', str(disk_interface)):
+                raise PlacementError(f"{r['resource_key']}: verified system-disk interface is invalid.")
+            resolved['disk_interface'] = disk_interface
+        result.append({'resource_key': r['resource_key'], 'project_id': r.get('project_id'), 'image': r['image'], 'artifact_sha256': image['artifact_sha256'], 'resolved': resolved, 'resources': {k: r[k] for k in ('memory_mb', 'cpu_cores', 'disk_gb')}, 'headroom': headroom, 'reason': reason, 'policy_revision': policy['revision']})
     return sorted(result, key=lambda r: r['resource_key'])
 
 

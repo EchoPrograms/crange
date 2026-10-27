@@ -371,6 +371,8 @@ def command(operation, project, options):
         fields['preferred_node'] = lambda v: '' if v == '' else node(v)
     if operation == 'jumpbox-resources' and 'disk' in options:
         fields = {**fields, 'disk': lambda v: integer(v, 8, 1024)}
+    if operation in ('scenario-add', 'scenario-edit') and 'disk' in options:
+        fields = {**fields, 'disk': lambda v: integer(v, 8, 1024)}
     if set(options) != set(fields):
         raise ValueError("Unexpected or missing operation fields.")
     validated = {key: validate(options[key]) for key, validate in fields.items()}
@@ -385,6 +387,8 @@ def command(operation, project, options):
                                                     required=options['action'] != 'list')
     result = build(validated)
     if operation == 'jumpbox-resources' and 'disk' in validated:
+        result.extend(['--disk', str(validated['disk'])])
+    if operation in ('scenario-add', 'scenario-edit') and 'disk' in validated:
         result.extend(['--disk', str(validated['disk'])])
     if placement_add or (placement_edit and 'preferred_node' in validated):
         from crange_scheduling import placement_intent

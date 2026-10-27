@@ -1353,6 +1353,15 @@ def cmd_apply_saved(args: argparse.Namespace, path: Path) -> None:
     if getattr(args, 'staging_only', False):
         from crange_configure_scope import configuration_resources
         args.applied_guest_keys = configuration_resources(detail, json_config(path))
+    cfg = json_config(path)
+    owner_teams = ({'254'} if getattr(args, 'staging_only', False) else
+                   set(map(str, getattr(args, 'release_teams', []) or [])))
+    from crange_apply_scope import guest_key
+    changed_guest_keys = {guest_key(change.get('address', '')) for change in record.get('changes', [])
+                          if 'no-op' not in change.get('actions', [])}
+    disk_keys = ['vm:' + key for key, box in cfg.get('scenario_boxes', {}).items()
+                 if box.get('disk_gb') is not None and 'vm:' + key in changed_guest_keys
+                 and (not owner_teams or str(box.get('team_id')) in owner_teams)]
     nodes = {p['resolved']['node_name'] for p in (placement or {}).get('placements', [])}
     nodes.update(identity['node_name'] for identity in (placement or {}).get('apply_scope', {}).get('removed_guests', {}).values())
     retiring = []
@@ -1361,6 +1370,10 @@ def cmd_apply_saved(args: argparse.Namespace, path: Path) -> None:
         retiring = retirements(json_config(path), args.release_teams, detail)
         nodes.update(guest['node'] for guest in retiring)
     with node_locks(nodes):
+        if disk_keys:
+            from crange_vm_disk_grow import preflight_selected
+            preflight_selected(path, cfg, resource_keys=disk_keys,
+                               team='254' if getattr(args, 'staging_only', False) else None)
         begin_apply(path, placement)
         if retiring:
             from crange_release_retire import quiesce
@@ -1368,12 +1381,32 @@ def cmd_apply_saved(args: argparse.Namespace, path: Path) -> None:
                     path / '.crange-rollout-quiesce' / f'{args.plan_id}.json', args.plan_id)
         tf_run(path, ['apply', '-parallelism=1', '-input=false', str(plan)])
         finish_apply(path, placement, succeeded=True)
-    record_release_apply(path)
     plan.unlink()
     record['applied_at'] = datetime.now(timezone.utc).isoformat()
     manifest.write_text(json.dumps(record, indent=2) + '\n')
     from crange_scheduling import atomic_json
     atomic_json(path / '.crange-plans' / f'{args.plan_id}.json', {k:record[k] for k in ('plan_id','created','changes','placements','reservation_ids','policy_revision','apply_scope','applied_at','bootstrap','bootstrap_node','bootstrap_nodes','bootstrap_router_nodes','bootstrap_networks','network_foundation') if k in record},0o640)
+    if disk_keys:
+        from crange_vm_disk_grow import initialize_selected
+        try:
+            initialize_selected(path, cfg, resource_keys=disk_keys,
+                                team='254' if getattr(args, 'staging_only', False) else None)
+        except Exception as exc:
+            raise CrangeError(f'Terraform applied, but guest system disk growth did not complete: {exc}') from exc
+    if getattr(args, 'staging_only', False):
+        from crange_change_state import record_applied_definitions
+        applied_keys = set()
+        for change in record.get('changes', []):
+            if 'no-op' in change.get('actions', []):
+                continue
+            key = guest_key(change.get('address', ''))
+            if key and (not key.startswith('router:custom:') or
+                        str(cfg.get('custom_networks', {}).get(key.rsplit(':', 1)[-1], {}).get('owner_team_id', '254')) == '254'):
+                applied_keys.add(key)
+        record_applied_definitions(path, cfg,
+                                   resource_keys=sorted(applied_keys) if record.get('network_foundation') else None,
+                                   scope='254')
+    record_release_apply(path)
     from crange_router_ha import enroll_created
     try:
         enrolled = enroll_created(path, args.plan_id, record['changes'])
@@ -1501,6 +1534,12 @@ def cmd_apply(args: argparse.Namespace) -> None:
             raise CrangeError("Plan removes/replaces " + ", ".join(destructive) + ". Re-run only after review with --allow-destroy.")
         if replacements and not args.allow_replace:
             raise CrangeError("Plan replaces " + ", ".join(replacements) + ". Re-run only after review with --allow-replace.")
+        cfg = json_config(path)
+        disk_keys = ['vm:' + key for key, box in cfg.get('scenario_boxes', {}).items()
+                     if box.get('disk_gb') is not None and
+                     (not getattr(args, 'staging_only', False) or str(box.get('team_id')) == '254')]
+        if disk_keys:
+            raise CrangeError('Custom scenario VM system disks require the reviewed placement scheduler; enable scheduling and create a fresh reviewed plan.')
         tf_run(path, ["apply", "-input=false", str(plan)])
         record_release_apply(path)
 
@@ -2505,6 +2544,8 @@ def validate_scenario_config(path: Path, cfg: dict) -> None:
             raise CrangeError(f"Scenario box {key} uses unapproved template {box.get('template')!r}.")
         if box.get("node_name") not in NODES | {"auto"}:
             raise CrangeError(f"Scenario box {key} uses an invalid Proxmox node.")
+        if 'disk_gb' in box and (type(box['disk_gb']) is not int or not 8 <= box['disk_gb'] <= 1024):
+            raise CrangeError(f'Scenario VM {key} disk must be an integer from 8 to 1024 GiB.')
         validate_health_checks(box.get("health_checks", []))
     validate_container_config(path, cfg)
 
@@ -2584,7 +2625,7 @@ def release_scenario_boxes(path: Path, release: dict, team_id: str, prefix: str,
         key = f"{prefix}-{source['name']}-t{int(team_id):03d}"
         if len(key) > 63:
             key = f"{prefix[:16]}-{hashlib.sha1(key.encode()).hexdigest()[:10]}-t{int(team_id):03d}"
-        item = {k: source[k] for k in ("name", "ip_last_octet", "template", "node_name", "cores", "memory_mb", "full_clone", "started", "health_checks")}
+        item = {k: source[k] for k in ("name", "ip_last_octet", "template", "node_name", "cores", "memory_mb", "disk_gb", "full_clone", "started", "health_checks") if k in source}
         # A staging guest's base image is not the captured release image.
         # Legacy captures also have a stable alias suitable for publication.
         item['image'] = pinned.get('image_id', template_key)
@@ -2788,6 +2829,10 @@ def cmd_scenario_add(args: argparse.Namespace) -> None:
         "full_clone": args.full_clone if args.full_clone is not None else args.node != "auto",
         "started": True, "health_checks": checks, "guac_protocol": remote_services[0], "guac_services": remote_services,
     }
+    if getattr(args, 'disk', None) is not None:
+        if type(args.disk) is not int or not 8 <= args.disk <= 1024:
+            raise CrangeError('Scenario VM disk must be an integer from 8 to 1024 GiB.')
+        scenario_boxes(cfg)[key]['disk_gb'] = args.disk
     if templates[args.template].get("image_id"):
         scenario_boxes(cfg)[key]["image"] = templates[args.template]["image_id"]
         if args.full_clone is None:scenario_boxes(cfg)[key]["full_clone"] = False
@@ -2830,6 +2875,11 @@ def cmd_scenario_edit(args: argparse.Namespace) -> None:
     box.update({"template": args.template, "node_name": args.node,
                 "cores": args.cores, "memory_mb": args.memory,
                 "health_checks": checks, "guac_protocol": remote_services[0], "guac_services": remote_services})
+    disk = getattr(args, 'disk', None)
+    if disk is not None:
+        if type(disk) is not int or not 8 <= disk <= 1024:
+            raise CrangeError('Scenario VM disk must be an integer from 8 to 1024 GiB.')
+        box['disk_gb'] = disk
     validate_custom_networks(cfg)
     validate_scenario_config(path, cfg)
     save_config(path, cfg)
@@ -4495,6 +4545,7 @@ def make_parser() -> argparse.ArgumentParser:
     q.add_argument("--ip", type=int, required=True, help="Static host octet .2-.100")
     q.add_argument("--template", required=True); q.add_argument("--node", default="auto", choices=sorted(NODES | {"auto"}), help="Legacy explicit node pin; defaults to Automatic"); q.add_argument("--preferred-node", default="", choices=["",*sorted(NODES)], help="Soft suggestion with Automatic")
     q.add_argument("--cores", type=int, default=2); q.add_argument("--memory", type=int, default=4096)
+    q.add_argument("--disk", type=int, help="System disk GiB, at least the verified image size")
     q.add_argument("--full-clone", action="store_true", default=None)
     q.add_argument("--network", default="", help="Custom network owned by this team or staging")
     q.add_argument("--health", default="[]", help="JSON ping/TCP/HTTP health checks; empty uses ping")
@@ -4506,6 +4557,7 @@ def make_parser() -> argparse.ArgumentParser:
     q.add_argument("--ip", type=int); q.add_argument("--network", default=None, help="Custom network; empty restores standard team subnet")
     q.add_argument("--template", required=True); q.add_argument("--node", default="auto", choices=sorted(NODES | {"auto"}), help="Legacy explicit node pin; defaults to Automatic"); q.add_argument("--preferred-node", default=None, choices=["",*sorted(NODES)], help="Soft suggestion with Automatic")
     q.add_argument("--cores", type=int, required=True); q.add_argument("--memory", type=int, required=True)
+    q.add_argument("--disk", type=int, help="System disk GiB; live disks can grow")
     q.add_argument("--health", required=True, help="JSON ping/TCP/HTTP health checks; empty uses ping")
     q.add_argument("--guac-protocol", choices=("ssh", "rdp", "vnc"), default=None)
     q.add_argument("--guac-protocols", default=None, help="JSON list of selected SSH/RDP/VNC services")

@@ -1,23 +1,31 @@
 variable "box" {
   type = object({
-    project_id    = number
-    team_id       = number
-    network_id    = optional(number)
-    network_vnet  = optional(string)
-    name          = string
-    ip_last_octet = number
-    datastore_id  = optional(string, "local-lvm")
-    image_id      = optional(string, "")
-    machine       = optional(string)
-    boot_order    = optional(list(string))
-    node_name     = string
-    template_id   = number
-    template_node = string
-    full_clone    = bool
-    cores         = number
-    memory_mb     = number
-    started       = bool
+    project_id     = number
+    team_id        = number
+    network_id     = optional(number)
+    network_vnet   = optional(string)
+    name           = string
+    ip_last_octet  = number
+    datastore_id   = optional(string, "local-lvm")
+    image_id       = optional(string, "")
+    machine        = optional(string)
+    boot_order     = optional(list(string))
+    node_name      = string
+    template_id    = number
+    template_node  = string
+    full_clone     = bool
+    disk_gb        = optional(number)
+    disk_interface = optional(string)
+    cores          = number
+    memory_mb      = number
+    started        = bool
   })
+
+  validation {
+    condition = (var.box.disk_gb == null ||
+    (var.box.disk_interface != null && can(regex("^(scsi|sata|virtio|ide)[0-9]+$", var.box.disk_interface))))
+    error_message = "A declared system disk must name its verified Proxmox disk interface."
+  }
 }
 
 variable "template_profile" {

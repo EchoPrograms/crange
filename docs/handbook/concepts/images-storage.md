@@ -30,6 +30,8 @@ Placement counts configured guest resources, including stopped guests, reservati
 | Archive size | Compressed/sparse exported bytes |
 | Admission commitment | Capacity reserved under policy for safe placement/growth |
 
+Scenario VMs can request a system disk from 8 to 1024 GiB. The minimum comes from the approved image's `scsi0` operating-system disk; EFI and TPM state devices do not count toward it. Existing disks can grow and cannot shrink in place. Before applying a size change, CRANGE checks the live guest layout and blocks unsupported or ambiguous layouts. After Proxmox applies the virtual disk size, CRANGE grows the supported Linux root filesystems or Windows C: partition and verifies the result. The selected size is retained in release manifests and used by fresh release clones.
+
 Shrinking a captured disk from 64 GiB to 30 GiB can reduce future guest commitments, but retained 64 GiB originals, archives, local bases, snapshots and temporary copies still consume space. Review may need room for both old and new fleets before old resources can be retired.
 
 ## Storage policy

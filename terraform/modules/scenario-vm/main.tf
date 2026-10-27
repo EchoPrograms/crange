@@ -39,6 +39,15 @@ resource "proxmox_virtual_environment_vm" "scenario" {
     datastore_id = var.box.full_clone ? var.box.datastore_id : null
   }
 
+  dynamic "disk" {
+    for_each = var.box.disk_gb == null ? [] : [var.box.disk_gb]
+    content {
+      interface    = var.box.disk_interface
+      datastore_id = var.box.datastore_id
+      size         = disk.value
+    }
+  }
+
   cpu {
     cores   = var.box.cores
     sockets = 1

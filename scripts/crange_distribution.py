@@ -746,6 +746,30 @@ def _qemu_capacity(config):
             'disk_gb': disk_bytes / (1024**3) * 1.1}
 
 
+def _verified_system_disk(config, source_id):
+    """Bind the boot-selected OS disk and its exact size to the source config."""
+    match = re.search(r'(?:^|,)order=([^,]+)', str(config.get('boot') or ''))
+    if not match:
+        raise DistributionError('VM image has no authoritative Proxmox boot-disk order.')
+    from crange_proxmox_disk import managed_volume, size_bytes
+    for candidate in match.group(1).split(';'):
+        if not re.fullmatch(r'(?:scsi|sata|virtio|ide)[0-9]+', candidate):
+            continue
+        value = config.get(candidate)
+        if not isinstance(value, str) or 'media=cdrom' in value or ':cloudinit' in value:
+            continue
+        try:
+            managed_volume(value)
+            size = size_bytes(value) / 1024**3
+        except ValueError as exc:
+            raise DistributionError('Boot-selected VM system disk is not a verified managed volume.') from exc
+        if not math.isfinite(size) or size <= 0:
+            raise DistributionError('Boot-selected VM system disk size is invalid.')
+        return {'interface': candidate, 'disk_gb': size,
+                'source_config_sha256': _source_config_identity(config, int(source_id))}
+    raise DistributionError('VM image boot order does not identify a managed operating-system disk.')
+
+
 def _free_probe_vmid(api):
     """Choose and assert an unused ID outside the legacy/low VMID range."""
     resources = api.request('GET', '/cluster/resources', {'type': 'vm'})
@@ -1326,6 +1350,8 @@ def export_image(api, *, node, kind, vmid, storage, job_id, journal,
             expected['init_system'] = identity_record['init_system']
         else:
             expected['os_family'] = 'windows'
+        if kind == 'vm':
+            expected['system_disk'] = _verified_system_disk(config, vmid)
         if any(prior.get(key) != value for key, value in expected.items()):
             raise DistributionError('Existing export journal does not match this exact captured template.')
         if prior.get('state') == 'exported':
@@ -1442,6 +1468,8 @@ def export_image(api, *, node, kind, vmid, storage, job_id, journal,
                   content_before=sorted(before),
                   identity_capture=dict(identity_record),
                   memory_mb=int(config.get('memory', 0)), cpu_cores=int(config.get('cores', 0)))
+    if kind == 'vm':
+        record['system_disk'] = _verified_system_disk(config, vmid)
     if not sealed_capture:
         record['source_identity'] = dict(identity_record['source_identity'])
     if windows_capture:
@@ -1590,6 +1618,15 @@ def publish_exported_image(catalog, image_id, export, *, architecture,
                       'artifact_sha256': export['artifact_sha256'],
                       'verified_at': datetime.now(timezone.utc).isoformat(),
                       'verification': verification}]}
+    if export.get('kind') == 'vm':
+        system_disk = export.get('system_disk')
+        if (not isinstance(system_disk, dict) or system_disk.get('source_config_sha256') != capture.get('source_config_sha256')
+                or not re.fullmatch(r'(?:scsi|sata|virtio|ide)[0-9]+', str(system_disk.get('interface', '')))
+                or not isinstance(system_disk.get('disk_gb'), (int, float)) or isinstance(system_disk.get('disk_gb'), bool)
+                or not math.isfinite(system_disk['disk_gb']) or system_disk['disk_gb'] <= 0
+                or system_disk['disk_gb'] > disk_gb):
+            raise DistributionError('VM publication requires a boot-selected system disk bound to the captured source config.')
+        definition['system_disk'] = dict(system_disk)
     if windows_capture:
         definition['os_family'] = 'windows'
         if sealed_capture:

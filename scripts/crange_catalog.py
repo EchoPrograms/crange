@@ -255,6 +255,17 @@ def validate_catalog(catalog):
         if 'windows_profile' in image and image['windows_profile'] not in (
                 'mhl-server2025-desktop-experience', 'windows-client'):
             raise CatalogError(f'{image_id}: unsupported approved Windows profile')
+        if 'system_disk' in image:
+            profile = image['system_disk']
+            capture = image.get('identity_capture', {})
+            if (image.get('kind') != 'vm' or not isinstance(profile, dict) or
+                    set(profile) != {'interface', 'disk_gb', 'source_config_sha256'} or
+                    not re.fullmatch(r'(?:scsi|sata|virtio|ide)[0-9]+', str(profile.get('interface', ''))) or
+                    not isinstance(profile.get('disk_gb'), (int, float)) or isinstance(profile.get('disk_gb'), bool) or
+                    not math.isfinite(profile['disk_gb']) or profile['disk_gb'] <= 0 or
+                    profile['disk_gb'] > image.get('disk_gb', 0) or
+                    profile.get('source_config_sha256') != capture.get('source_config_sha256')):
+                raise CatalogError(f'{image_id}: system disk must be tied to a valid captured VM config identity')
         if 'source_identity' in image:
             from crange_windows_snapshot import validate_captured_identity
             validate_captured_identity(image['source_identity'])

@@ -129,6 +129,7 @@ variable "scenario_boxes" {
     node_name     = string
     cores         = optional(number, 2)
     memory_mb     = optional(number, 4096)
+    disk_gb       = optional(number)
     full_clone    = optional(bool, false)
     started       = optional(bool, true)
     guac_protocol = optional(string, "ssh")
@@ -150,7 +151,8 @@ variable "scenario_boxes" {
       box.ip_last_octet >= 2 && box.ip_last_octet <= 100 &&
       can(regex("^[a-z][a-z0-9-]{0,23}$", box.name)) &&
       box.cores >= 1 && box.cores <= 16 &&
-      box.memory_mb >= 512 && box.memory_mb <= 65536 && contains(["ssh", "rdp"], box.guac_protocol)
+      box.memory_mb >= 512 && box.memory_mb <= 65536 && contains(["ssh", "rdp"], box.guac_protocol) &&
+      (box.disk_gb == null ? true : (box.disk_gb == floor(box.disk_gb) && box.disk_gb >= 8 && box.disk_gb <= 1024))
     ])
     error_message = "Scenario boxes must target a project team or Team 0 (254), use .2-.100, safe names, 1-16 cores, and 512-65536 MB RAM."
   }
@@ -473,6 +475,7 @@ module "scenario_box" {
     full_clone    = each.value.full_clone
     cores         = each.value.cores
     memory_mb     = each.value.memory_mb
+    disk_gb       = each.value.disk_gb
     started       = each.value.started
     }, { for field, value in try(var.resolved_placements["vm:${each.key}"], {}) : field => value if value != null && field != "clone_mode" }, try(var.resolved_placements["vm:${each.key}"].clone_mode, null) == null ? {} : {
     full_clone = var.resolved_placements["vm:${each.key}"].clone_mode == "full"

@@ -689,7 +689,9 @@ class ReplicaTests(unittest.TestCase):
                 'source_id': 100, 'artifact_sha256': 'a' * 64,
                 'volume_id': 'crange-library:backup/vzdump-qemu-100.vma.zst', 'disk_gb': 8,
                 'memory_mb': 512, 'cpu_cores': 1, 'source_identity': identity,
-                'identity_capture': capture, 'init_system': 'openrc'}
+                'identity_capture': capture, 'init_system': 'openrc',
+                'system_disk': {'interface': 'sata0', 'disk_gb': 8.0,
+                                'source_config_sha256': capture['source_config_sha256']}}
             catalog = publish_exported_image({'schema_version': 1, 'images': {}}, 'base-v1', export,
                 architecture='amd64', source_revision='revision', approved_projects=[3],
                 datastore_id='local-lvm', verification={'passed': True, 'evidence': 'unit fixture'})
@@ -964,6 +966,7 @@ class PublicationTests(unittest.TestCase):
         record['identity_capture']={'state':'identity-captured','job_id':'capture-1','node':'proxmox1',
             'kind':'vm','source_id':100,'source_config_sha256':'c'*64,'source_identity':record['source_identity'],
             'init_system':'openrc','readiness':'default'}
+        record['system_disk']={'interface':'sata0','disk_gb':31.0,'source_config_sha256':'c'*64}
 
         catalog = publish_exported_image({'schema_version': 1, 'images': {}}, 'vm-v1', record, **arguments)
         self.assertEqual(catalog['images']['vm-v1']['disk_gb'], 32)

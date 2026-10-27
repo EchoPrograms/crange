@@ -77,6 +77,19 @@ p { margin: 7px 0; }
 .sidebar nav button.active { background: var(--selection); border-color: #555; box-shadow: inset 2px 0 #eee; color: #fff; }
 .nav-icon { width: 15px; height: 15px; flex: none; color: #aaa; }
 .active .nav-icon { color: #eee; }
+.nav-status-dot { width: 7px; height: 7px; flex: none; margin-inline-start: auto; border-radius: 50%; background: var(--nav-status); box-shadow: 0 0 0 2px #101010; }
+.nav-status-pending { --nav-status: var(--blue); }
+.nav-status-success { --nav-status: var(--green); }
+.nav-status-error { --nav-status: var(--red); }
+.sidebar nav button[data-notification="pending"] .nav-status-dot { animation: nav-pending-pulse 2.4s ease-in-out infinite; }
+@keyframes nav-pending-pulse { 50% { opacity: .55; } }
+@media (prefers-reduced-motion: reduce) { .sidebar nav button[data-notification="pending"] .nav-status-dot { animation: none; } }
+.infrastructure-pending { position: relative; display: grid; gap: 2px; margin: 10px 0; padding: 8px 10px; border: 1px solid var(--line-strong); color: #ededed; }
+.infrastructure-pending p { margin: 0; color: var(--muted); }
+.infrastructure-pending-apply, .infrastructure-pending-progress { --pending-color: var(--blue); }
+.infrastructure-pending-review { --pending-color: var(--amber); }
+.infrastructure-pending::before { content: ""; position: absolute; top: 13px; left: 10px; width: 7px; height: 7px; border-radius: 50%; background: var(--pending-color); }
+.infrastructure-pending strong, .infrastructure-pending p { padding-inline-start: 14px; }
 .project-name { margin: 0 8px 7px; padding: 7px 8px; border-bottom: 1px solid var(--line); color: #f0f0f0; font-size: 12px; font-weight: 600; overflow-wrap: anywhere; }
 .project-id { font-size: .9em; font-weight: 400; }
 .sidebar-bottom { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-top: auto; padding: 12px 14px; border-top: 1px solid var(--line); }
@@ -456,3 +469,14 @@ pre, code { font-family: "IBM Plex Mono", ui-monospace, Consolas, monospace; }
 
 #docs-link { gap: 6px; }
 #docs-link .action-icon { color: var(--blue); }
+
+/* Scenario change states describe saved infrastructure edits, never live status. */
+.scenario-change-marker { display: inline-flex; align-items: center; margin-inline-start: .55rem; padding: .12rem .42rem; border: 1px solid currentColor; border-radius: 999px; font-size: .7rem; font-weight: 650; line-height: 1.3; white-space: nowrap; }
+.scenario-change-create .scenario-change-marker { color: var(--green); }
+.scenario-change-update .scenario-change-marker { color: #e8a548; }
+.scenario-change-delete .scenario-change-marker { color: var(--red); }
+.scenario-change-delete td { color: var(--red); }
+.scenario-change-update td:first-child, .scenario-change-create td:first-child { font-weight: 600; }
+.field-changed { color: #e8a548; }
+.field-changed input, .field-changed select, .field-changed textarea { border-color: #e8a548; box-shadow: 0 0 0 1px color-mix(in srgb, #e8a548 30%, transparent); }
+@media (max-width: 640px) { .scenario-change-marker { margin-inline-start: .3rem; font-size: .64rem; } }

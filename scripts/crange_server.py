@@ -131,6 +131,9 @@ def serve(host='127.0.0.1', port=8000):
                                     record['bootstrap_status'] = {'state': 'record_invalid'}
                             placement_file = directory / 'crange-applied-placements.json'
                             record['applied_placements'] = json.loads(placement_file.read_text()) if placement_file.is_file() else {}
+                            from crange_change_state import load_applied_definitions, compare_staging_definitions
+                            record['applied_definitions'] = load_applied_definitions(directory)
+                            record['change_states'] = compare_staging_definitions(cfg, record['applied_definitions'])
                             record['staged_plans'] = []
                             for summary in sorted((directory / '.crange-plans').glob('*.json')):
                                 try:

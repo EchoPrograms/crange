@@ -13,7 +13,7 @@ def resume(c, args, path, manifest, record):
     if any(record.get(key) for key in ('bootstrap', 'network_foundation', 'team_foundation', 'release_teams')):
         raise c.CrangeError('Use this deployment type’s configuration workflow to finish setup.')
     changes = record.get('changes', [])
-    if any(row.get('actions') not in (['create'], ['update'], ['read']) for row in changes):
+    if any(row.get('actions') not in (['create'], ['update'], ['read'], ['no-op']) for row in changes):
         raise c.CrangeError('Configuration recovery requires a guest creation/update receipt without deletions.')
     config = path / 'crange.auto.tfvars.json'
     if not config.exists():
@@ -26,7 +26,20 @@ def resume(c, args, path, manifest, record):
     detail = {'resource_changes': [
         {'address': row['address'], 'change': {'actions': row['actions']}}
         for row in changes]}
-    print('Infrastructure already applied; finishing remote access only for the reviewed guests.', flush=True)
+    print('Infrastructure already applied; finishing configuration for the reviewed guests.', flush=True)
+    cfg = c.json_config(path)
+    from crange_apply_scope import guest_key
+    keys = {guest_key(change.get('address', '')) for change in changes
+            if change.get('actions') != ['no-op']}
+    disk_keys = ['vm:' + key for key, box in cfg.get('scenario_boxes', {}).items()
+                 if box.get('disk_gb') is not None and 'vm:' + key in keys]
+    if disk_keys:
+        from crange_vm_disk_grow import initialize_selected
+        initialize_selected(path, cfg, resource_keys=disk_keys,
+                            team='254' if getattr(args, 'staging_only', False) else None)
+    if getattr(args, 'staging_only', False):
+        from crange_change_state import record_applied_definitions
+        record_applied_definitions(path, cfg, resource_keys=None, scope='254')
     c._configure_applied_access(args, detail)
     record['configuration_completed_at'] = datetime.now(timezone.utc).isoformat()
     from crange_scheduling import atomic_json

@@ -316,7 +316,10 @@ def project_image_readiness(project_id):
                                   'display_name': reference.get('display_name') or alias,
                                   'template_id': reference.get('template_id'),
                                   'template_node': reference.get('template_node'),
-                                  'ready_nodes': ready_nodes}
+                                  'ready_nodes': ready_nodes,
+                                  **({'system_disk_gb': image['system_disk']['disk_gb']}
+                                     if key == 'vm_templates' and isinstance(image, dict) and
+                                     isinstance(image.get('system_disk'), dict) else {})}
     catalog_images = []
     for image_id, image in sorted(catalog['images'].items()):
         scope = image.get('approved_projects', [])
