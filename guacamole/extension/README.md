@@ -153,8 +153,10 @@ The native provider still authorizes initial connections and records their use.
 
 Text clipboard fields are connection-specific. Edits send text only to the
 focused connection, and its remote clipboard events update both fields. The
-compact field also preserves multiline text. Automatic browser clipboard access
-is off by default. Advanced controls → Clipboard passthrough enables native
+compact field also preserves multiline text and surrounding whitespace. Text is
+retained in server memory with the live session and restored on resume, including
+remote copies made while logged out. Late restoration cannot overwrite newer
+clipboard edits. Automatic browser clipboard access is off by default. Advanced controls → Clipboard passthrough enables native
 clipboard sharing for that connection and hides the manual fields. This setting
 is remembered per account and connection in the browser. Browser permissions and
 remote clipboard policy still apply; text fields do not represent binary data.

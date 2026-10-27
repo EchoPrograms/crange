@@ -1,5 +1,5 @@
 {
-  "recorded_at": "2026-10-27T15:19:46.121896+00:00",
+  "recorded_at": "2026-10-27T16:15:01.199687+00:00",
   "state": "live-http-verified",
   "implementation": "Server-held guacd owner tunnels with authenticated per-user resume and explicit session end.",
   "canary_validation": {
@@ -10,7 +10,10 @@
     "clipboard_stream_works": true,
     "end_closes_remote_session": true,
     "resume_remote_connection_count": 1,
-    "read_only_policy_preserved": true
+    "read_only_policy_preserved": true,
+    "typed_clipboard_retained": true,
+    "remote_clipboard_updates_while_logged_out": true,
+    "other_user_cannot_read_clipboard": true
   },
   "browser_validation": {
     "recent_connections": [
@@ -26,7 +29,8 @@
       "remote updates reach both fields",
       "multiline text preserved",
       "passthrough hides fields",
-      "per-connection passthrough survives reload"
+      "per-connection passthrough survives reload",
+      "leading and trailing whitespace preserved"
     ]
   },
   "unit_checks": [
@@ -38,12 +42,18 @@
     "Manual fields represent text; browser permissions and remote clipboard policy still apply."
   ],
   "served_assets": {
-    "clipboard.js": "21bdd1e048c0efc15cdef806889fd29c8962ab658441a1fcacd39ebca45a305f",
-    "workspace.js": "b764a77ad964d71a07e451803f1b3aa02a83e58216c7a2c37ae8a41410045b4b",
+    "clipboard.js": "3841c36ca09195f4fae73c42c078836c67f0482e8a1ec772d873554eb780f776",
+    "workspace.js": "df4234d5320d4d05fb772173c83fe7e73e783fb5833932de5626cbb16af3bbd6",
     "ui.js": "06f2d761285a6c68c5db51138363f93443a26debe9836770f2f3b323c0fba6b3",
     "workspace.css": "7f1cd5d1ed498f1d351336a21064c1e9e469ba28520683424a8dc182cf2fb1fc",
     "guac-manifest.json": "60c997e44ffac333f503147cd18e35dddc8058395e2cf3b427561ef388218852",
     "sessions.js": "b46a4314f9d7920ca86ae7271c44c97011298bdba17d79dc17200f9705c96cc6"
   },
-  "temporary_test_instance": "Removed after successful live verification."
+  "temporary_test_instance": "Removed after successful live verification.",
+  "clipboard_restore_checks": [
+    "server-held text restores on reconnect",
+    "remote copies while logged out restore on reconnect",
+    "late restoration cannot overwrite newer remote events",
+    "read-only policy prevents field edits"
+  ]
 }

@@ -2,14 +2,14 @@
 const assert=require('assert'),fs=require('fs'),vm=require('vm');
 const decorators={};
 const modules={};
-const angular={module(name){return modules[name]||(modules[name]={config(def){def.at(-1)({decorator(name,def){decorators[name]=def.at(-1);}});return this;}});}};
+const angular={noop(){},module(name){return modules[name]||(modules[name]={config(def){def.at(-1)({decorator(name,def){decorators[name]=def.at(-1);}});return this;}});}};
 vm.runInNewContext(fs.readFileSync('guacamole/extension/clipboard.js','utf8'),{angular});
-const calls={get:0,set:[],resync:0,sent:[]};
+const calls={get:0,set:[],resync:0,sent:[],restore:[]};
 const clients=[{id:'alice/ssh',clientProperties:{focused:true}},{id:'alice/rdp',clientProperties:{focused:false}}];
 let managed;
 const root={$broadcast(name,...args){if(name==='guacClipboard')clients.forEach(client=>managed.setClipboard(client,args[0]));}};
 const native={getClipboard(){calls.get++;return Promise.resolve({data:'local system'});},setClipboard(data){calls.set.push(data);root.$broadcast('guacClipboard',data);return Promise.resolve();},resyncClipboard(){calls.resync++;return Promise.resolve();}};
-const clipboard=decorators.clipboardService(native,{get(name){return name==='$rootScope'?root:function ClipboardData(data){Object.assign(this,data);};}},{when:Promise.resolve.bind(Promise)});
+const clipboard=decorators.clipboardService(native,{get(name){if(name==='$rootScope')return root;if(name==='ClientIdentifier')return {Types:{CONNECTION:'c'},fromString:id=>({dataSource:id.split('/')[0],id:id.split('/')[1],type:'c'})};if(name==='authenticationService')return {getCurrentToken:()=> 'test-token'};if(name==='$http')return {get(url,options){return new Promise(resolve=>calls.restore.push({url,options,resolve}));}};return function ClipboardData(data){Object.assign(this,data);};}},{when:Promise.resolve.bind(Promise)});
 managed=decorators.ManagedClient({setClipboard(client,data){if(data.source!==client.id)calls.sent.push([client.id,data.data]);}},clipboard);
 (async()=>{
  clipboard.setActiveConnection(clients[0],false);
@@ -29,5 +29,14 @@ managed=decorators.ManagedClient({setClipboard(client,data){if(data.source!==cli
  managed.setClipboard(clients[0],{data:'passthrough local'});assert.deepEqual(calls.sent.at(-1),[clients[0].id,'passthrough local']);
  managed.setClipboard(clients[1],{data:'passthrough local'});assert.equal(calls.sent.at(-1)[0],clients[0].id,'passthrough cannot leak into a connection with fields enabled');
  clipboard.setActiveConnection(clients[0],false);await clipboard.getClipboard();await clipboard.resyncClipboard();assert.equal(calls.get,1);assert.equal(calls.resync,1,'disabling passthrough immediately stops automatic access');
+ const restored=clipboard.restoreConnectionClipboard(clients[0]);
+ assert.equal(calls.restore.at(-1).options.params.connection,'ssh');assert.equal(calls.restore.at(-1).options.headers['X-Guacamole-Data-Source'],'alice');
+ calls.restore.at(-1).resolve({data:{known:true,data:'retained session text\nsecond line',writable:true}});await restored;
+ assert.equal(clipboard.getConnectionClipboard(clients[0]).data,'retained session text\nsecond line','server-held clipboard restores on resume');
+ const pending=clipboard.restoreConnectionClipboard(clients[0]);await clipboard.setClipboard({source:clients[0].id,type:'text/plain',data:'newer remote copy'});
+ calls.restore.at(-1).resolve({data:{known:true,data:'stale saved text',writable:true}});await pending;
+ assert.equal(clipboard.getConnectionClipboard(clients[0]).data,'newer remote copy','late restore cannot overwrite a newer clipboard event');
+ const locked=clipboard.restoreConnectionClipboard(clients[0]);calls.restore.at(-1).resolve({data:{known:true,data:'read only',writable:false}});await locked;
+ const sent=calls.sent.length;clipboard.setConnectionClipboard(clients[0],'edit');assert.equal(calls.sent.length,sent,'read-only remote policy prevents field edits');
  console.log('Connection clipboard isolation and opt-in passthrough checks passed');
 })().catch(e=>{console.error(e);process.exitCode=1;});

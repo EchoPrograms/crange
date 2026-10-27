@@ -60,7 +60,7 @@
         }
         if (key === 'app/client/templates/client.html' && value.indexOf('<crange-session-toolbar') === -1) {
             return value.replace('<guac-viewport>', '<guac-viewport><crange-session-toolbar></crange-session-toolbar>')
-                .replace('<guac-clipboard></guac-clipboard>', '<label class="cr-check"><input type="checkbox" ng-model="crSession.clipboardPassthrough" ng-change="crSession.setClipboardPassthrough()">Clipboard passthrough</label><textarea ng-if="!crSession.clipboardPassthrough" class="clipboard" aria-label="Connection clipboard" ng-model="crSession.clipboardText" ng-change="crSession.updateClipboard()" spellcheck="false"></textarea>')
+                .replace('<guac-clipboard></guac-clipboard>', '<label class="cr-check"><input type="checkbox" ng-model="crSession.clipboardPassthrough" ng-change="crSession.setClipboardPassthrough()">Clipboard passthrough</label><textarea ng-if="!crSession.clipboardPassthrough" class="clipboard" aria-label="Connection clipboard" ng-model="crSession.clipboardText" ng-trim="false" ng-readonly="crSession.clipboardReadOnly" ng-change="crSession.updateClipboard()" spellcheck="false"></textarea>')
                 .replace('ng-class="{open: menu.shown}" id="guac-menu"', 'ng-class="{open: menu.shown && crSession.advanced}" id="guac-menu"')
                 .replace('ng-if="menu.shown" guac-touch-drag="menuDrag"', 'ng-if="menu.shown && crSession.advanced" guac-touch-drag="menuDrag"')
                 .replace(/<h2 ng-hide="rootConnectionGroups">[\s\S]*?<\/h2>\s*<h2 class="connection-select-menu" ng-show="rootConnectionGroups">[\s\S]*?<\/h2>/, '<h2>Advanced controls</h2>')
@@ -121,7 +121,7 @@
     ${button('home', 'Return to project', 'crSession.home()')}
     <button type="button" class="cr-session-disconnect" ng-click="crSession.disconnect()" crange-help="Disconnect the current remote session. The server keeps running">Disconnect</button>
     <button type="button" class="cr-session-name cr-session-selector" ng-click="crSession.toggle('connections')" aria-expanded="{{crSession.panel === 'connections'}}" aria-label="Select connections"><span>{{focusedClient.name || getName(clientGroup)}}</span><span class="cr-protocol-label" ng-if="focusedClient.protocol">{{focusedClient.protocol | uppercase}}</span><span class="cr-session-count" ng-if="clientGroup.clients.length > 1">{{clientGroup.clients.length}} selected</span><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="m5 8 5 5 5-5"/></svg></button>
-    <textarea class="cr-session-clipboard" ng-if="!crSession.clipboardPassthrough" rows="1" aria-label="Clipboard" placeholder="Clipboard" autocomplete="off" spellcheck="false" ng-model="crSession.clipboardText" ng-change="crSession.updateClipboard()"></textarea>
+    <textarea class="cr-session-clipboard" ng-if="!crSession.clipboardPassthrough" rows="1" aria-label="Clipboard" placeholder="Clipboard" autocomplete="off" spellcheck="false" ng-model="crSession.clipboardText" ng-trim="false" ng-readonly="crSession.clipboardReadOnly" ng-change="crSession.updateClipboard()"></textarea>
     <guac-client-zoom class="cr-session-zoom" ng-if="focusedClient" client="focusedClient"></guac-client-zoom>
     </div>
     <div class="cr-session-toolbar-actions">
@@ -144,7 +144,7 @@
   </section>
   <section class="cr-session-popover cr-session-options" ng-if="crSession.panel === 'options'" aria-label="Session options">
     <header><h2>Session options</h2>${button('close', 'Close session options', 'crSession.close()')}</header>
-    <label ng-if="!crSession.clipboardPassthrough">Clipboard<textarea class="clipboard" aria-label="Connection clipboard" ng-model="crSession.clipboardText" ng-change="crSession.updateClipboard()" spellcheck="false"></textarea></label>
+    <label ng-if="!crSession.clipboardPassthrough">Clipboard<textarea class="clipboard" aria-label="Connection clipboard" ng-model="crSession.clipboardText" ng-trim="false" ng-readonly="crSession.clipboardReadOnly" ng-change="crSession.updateClipboard()" spellcheck="false"></textarea></label>
     <div class="cr-session-fields">
       <label>Display scale<input type="number" min="0.1" max="3" step="0.1" ng-model="crSession.displayScale" ng-change="crSession.setScale()"></label>
       <label>Input method<select ng-model="menu.inputMethod"><option value="none">Direct keyboard</option><option value="text">Text input / IME</option><option value="osk">On-screen keyboard</option></select></label>
@@ -192,6 +192,7 @@
             s.clipboardText = ''; s.clipboardPassthrough = false;
             function updateClipboardField() {
                 var data = clipboardService.getConnectionClipboard(scope.focusedClient);
+                s.clipboardReadOnly = !!scope.focusedClient?.crangeClipboardReadOnly;
                 s.clipboardText = data && typeof data.data === 'string' ? data.data : '';
             }
             s.updateClipboard = function () { clipboardService.setConnectionClipboard(scope.focusedClient, s.clipboardText || ''); };

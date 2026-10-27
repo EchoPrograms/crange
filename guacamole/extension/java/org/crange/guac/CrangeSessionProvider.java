@@ -2,6 +2,7 @@ package org.crange.guac;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import java.io.ByteArrayOutputStream;
 import java.net.URI;
 import java.net.URLEncoder;
 import java.net.http.HttpClient;
@@ -18,6 +19,7 @@ import javax.ws.rs.core.Response;
 import org.apache.guacamole.*;
 import org.apache.guacamole.environment.LocalEnvironment;
 import org.apache.guacamole.io.GuacamoleReader;
+import org.apache.guacamole.io.GuacamoleWriter;
 import org.apache.guacamole.net.*;
 import org.apache.guacamole.net.auth.*;
 import org.apache.guacamole.protocol.*;
@@ -121,6 +123,56 @@ public final class CrangeSessionProvider extends AbstractAuthenticationProvider 
         finally { tunnel.close(); }
     }
 
+    /** A separate tracker for each direction prevents stream-index collisions.
+     * Clipboard contents stay in RAM only and disappear when the session ends. */
+    static final class ClipboardTracker {
+        final Session session;
+        final boolean writable;
+        final Map<String, ByteArrayOutputStream> streams = new HashMap<>();
+        final GuacamoleParser parser = new GuacamoleParser();
+        ClipboardTracker(Session session, boolean writable) { this.session = session; this.writable = writable; }
+        void accept(GuacamoleInstruction instruction) {
+            List<String> args = instruction.getArgs();
+            switch (instruction.getOpcode()) {
+                case "clipboard":
+                    if (args.size() >= 2) {
+                        streams.remove(args.get(0));
+                        if (args.get(1).startsWith("text/")) streams.put(args.get(0), new ByteArrayOutputStream());
+                        else if (writable ? session.canPaste() : session.canCopy()) session.clipboardText = null;
+                    }
+                    break;
+                case "blob":
+                    if (args.size() >= 2 && streams.containsKey(args.get(0))) {
+                        ByteArrayOutputStream value = streams.get(args.get(0));
+                        try {
+                            byte[] bytes = Base64.getDecoder().decode(args.get(1));
+                            if (value.size() + bytes.length > 16 * 1024 * 1024) streams.remove(args.get(0));
+                            else value.writeBytes(bytes);
+                        }
+                        catch (IllegalArgumentException ignored) { streams.remove(args.get(0)); }
+                    }
+                    break;
+                case "end":
+                    if (!args.isEmpty()) {
+                        ByteArrayOutputStream value = streams.remove(args.get(0));
+                        if (value != null && (writable ? session.canPaste() : session.canCopy()))
+                            session.clipboardText = value.toString(StandardCharsets.UTF_8);
+                    }
+                    break;
+                default: break;
+            }
+        }
+        void accept(char[] data, int offset, int length) throws GuacamoleException {
+            int end = offset + length;
+            while (offset < end) {
+                int count = parser.append(data, offset, end - offset);
+                while (parser.hasNext()) accept(parser.next());
+                if (count == 0) throw new GuacamoleServerException("Invalid clipboard protocol stream.");
+                offset += count;
+            }
+        }
+    }
+
     static final class Session {
         final Key key;
         final String id = UUID.randomUUID().toString();
@@ -129,18 +181,26 @@ public final class CrangeSessionProvider extends AbstractAuthenticationProvider 
         final GuacamoleProxyConfiguration proxy;
         final long started = System.currentTimeMillis();
         volatile long lastUsed = started;
+        volatile String clipboardText;
         final AtomicBoolean ended = new AtomicBoolean();
         final Set<GuacamoleTunnel> views = ConcurrentHashMap.newKeySet();
         Session(Key key, String name, GuacamoleTunnel owner, String connectionID, GuacamoleProxyConfiguration proxy) {
             this.key = key; this.name = name; this.owner = owner; this.connectionID = connectionID; this.proxy = proxy;
         }
         boolean isOpen() { return !ended.get() && owner.isOpen(); }
+        boolean canCopy() { return !"true".equals(((ConfiguredGuacamoleSocket) owner.getSocket()).getConfiguration().getParameter("disable-copy")); }
+        boolean canPaste() {
+            GuacamoleConfiguration config = ((ConfiguredGuacamoleSocket) owner.getSocket()).getConfiguration();
+            return !"true".equals(config.getParameter("disable-paste")) && !"true".equals(config.getParameter("read-only"));
+        }
         void start() {
             Thread keeper = new Thread(() -> {
                 GuacamoleReader reader = owner.acquireReader();
+                ClipboardTracker clipboard = new ClipboardTracker(this, false);
                 try {
                     GuacamoleInstruction instruction;
                     while (!ended.get() && (instruction = reader.readInstruction()) != null) {
+                        clipboard.accept(instruction);
                         List<String> args = instruction.getArgs();
                         switch (instruction.getOpcode()) {
                             case "sync":
@@ -172,7 +232,41 @@ public final class CrangeSessionProvider extends AbstractAuthenticationProvider 
                     ? new SSLGuacamoleSocket(proxy.getHostname(), proxy.getPort())
                     : new InetGuacamoleSocket(proxy.getHostname(), proxy.getPort());
             final GuacamoleTunnel joined;
-            try { joined = new SimpleGuacamoleTunnel(new ConfiguredGuacamoleSocket(raw, config, info)); }
+            try {
+                GuacamoleSocket configured = new ConfiguredGuacamoleSocket(raw, config, info);
+                ClipboardTracker incoming = new ClipboardTracker(this, false), outgoing = new ClipboardTracker(this, true);
+                GuacamoleReader nativeReader = configured.getReader();
+                GuacamoleWriter nativeWriter = configured.getWriter();
+                GuacamoleSocket tracked = new DelegatingGuacamoleSocket(configured) {
+                    final GuacamoleReader reader = new GuacamoleReader() {
+                        @Override public boolean available() throws GuacamoleException { return nativeReader.available(); }
+                        @Override public GuacamoleInstruction readInstruction() throws GuacamoleException {
+                            GuacamoleInstruction instruction = nativeReader.readInstruction();
+                            if (instruction != null) incoming.accept(instruction); return instruction;
+                        }
+                        @Override public char[] read() throws GuacamoleException {
+                            char[] data = nativeReader.read();
+                            // Native reads contain whole instructions; skip PNG,
+                            // video and other streams when no clipboard is active.
+                            if (data != null && (!incoming.streams.isEmpty() || new String(data).contains("9.clipboard,")))
+                                incoming.accept(data, 0, data.length);
+                            return data;
+                        }
+                    };
+                    final GuacamoleWriter writer = new GuacamoleWriter() {
+                        @Override public void writeInstruction(GuacamoleInstruction instruction) throws GuacamoleException {
+                            nativeWriter.writeInstruction(instruction); outgoing.accept(instruction);
+                        }
+                        @Override public void write(char[] data) throws GuacamoleException { write(data, 0, data.length); }
+                        @Override public void write(char[] data, int offset, int length) throws GuacamoleException {
+                            nativeWriter.write(data, offset, length); outgoing.accept(data, offset, length);
+                        }
+                    };
+                    @Override public GuacamoleReader getReader() { return reader; }
+                    @Override public GuacamoleWriter getWriter() { return writer; }
+                };
+                joined = new SimpleGuacamoleTunnel(tracked);
+            }
             catch (GuacamoleException e) { raw.close(); throw e; }
             GuacamoleTunnel view = new DelegatingGuacamoleTunnel(joined) {
                 final AtomicBoolean closed = new AtomicBoolean();
@@ -188,6 +282,7 @@ public final class CrangeSessionProvider extends AbstractAuthenticationProvider 
         synchronized void end() {
             if (!ended.compareAndSet(false, true)) return;
             SESSIONS.remove(key, this);
+            clipboardText = null;
             for (GuacamoleTunnel view : List.copyOf(views)) try { view.close(); } catch (GuacamoleException ignored) { }
             try { closeTunnel(owner); } catch (GuacamoleException ignored) { }
         }
@@ -238,6 +333,24 @@ public final class CrangeSessionProvider extends AbstractAuthenticationProvider 
                 return Response.ok(Map.of("sessions", rows), MediaType.APPLICATION_JSON).build();
             }
             catch (Exception e) { return error(503, "Could not load your remote sessions. Refresh to try again."); }
+        }
+        @GET @Path("clipboard") @Produces(MediaType.APPLICATION_JSON)
+        public Response clipboard(@HeaderParam("Guacamole-Token") String token,
+                @HeaderParam("X-Guacamole-Data-Source") String source, @QueryParam("connection") String connection) {
+            try {
+                String user = identity(source, token);
+                if (user == null) return error(401, "Sign in to Guacamole first.");
+                if (connection == null || connection.length() > 1024) return error(400, "Choose a connection.");
+                Session session = SESSIONS.get(new Key(source, user, connection));
+                if (session == null || !session.isOpen()) return error(404, "This remote session has ended.");
+                HttpResponse<String> access = get(encode(source) + "/connections/" + encode(connection), token);
+                if (access.statusCode() != 200) return error(403, "This connection is unavailable.");
+                if (!session.canCopy()) return error(403, "Clipboard access is disabled for this connection.");
+                String text = session.clipboardText;
+                return Response.ok(Map.of("known", text != null, "data", text == null ? "" : text,
+                        "writable", session.canPaste()), MediaType.APPLICATION_JSON).build();
+            }
+            catch (Exception e) { return error(503, "Could not restore the connection clipboard."); }
         }
         @DELETE @Path("sessions/{id}") @Produces(MediaType.APPLICATION_JSON)
         public Response end(@HeaderParam("Guacamole-Token") String token,

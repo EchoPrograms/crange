@@ -7,20 +7,35 @@
             var ClipboardData = $injector.get('ClipboardData'), root = $injector.get('$rootScope');
             var nativeGet = service.getClipboard, nativeSet = service.setClipboard, nativeResync = service.resyncClipboard;
             var connections = Object.create(null), active = null;
-            function entry(id) { return connections[id] || (connections[id] = {passthrough: false, data: new ClipboardData({type: 'text/plain', data: ''})}); }
+            function entry(id) { return connections[id] || (connections[id] = {passthrough: false, generation: 0, data: new ClipboardData({type: 'text/plain', data: ''})}); }
             function enabled(id) { return id !== null && id !== undefined && entry(id).passthrough; }
-            function remember(id, data) { entry(id).data = data; root.$broadcast('crangeClipboard', id, data); }
+            function remember(id, data) { entry(id).generation++; entry(id).data = data; root.$broadcast('crangeClipboard', id, data); }
             service.setActiveConnection = function (client, passthrough) {
                 active = client ? client.id : null;
                 if (client) entry(client.id).passthrough = !!passthrough;
             };
             service.getConnectionClipboard = function (client) { return client ? entry(client.id).data : new ClipboardData({type: 'text/plain', data: ''}); };
             service.setConnectionClipboard = function (client, text) {
-                if (!client) return;
+                if (!client || client.crangeClipboardReadOnly) return;
                 var data = new ClipboardData({type: 'text/plain', data: text});
                 data.crangeTarget = client.id;
                 remember(client.id, data);
                 root.$broadcast('guacClipboard', data);
+            };
+            service.restoreConnectionClipboard = function (client) {
+                var identifier = $injector.get('ClientIdentifier').fromString(client.id);
+                if (!identifier || identifier.type !== $injector.get('ClientIdentifier').Types.CONNECTION) return;
+                var generation = entry(client.id).generation;
+                return $injector.get('$http').get('api/ext/crange-resume/clipboard', {
+                    params: {connection: identifier.id}, headers: {
+                        'Guacamole-Token': $injector.get('authenticationService').getCurrentToken(),
+                        'X-Guacamole-Data-Source': identifier.dataSource
+                    }
+                }).then(function (response) {
+                    if (entry(client.id).generation !== generation) return;
+                    client.crangeClipboardReadOnly = response.data.writable === false;
+                    remember(client.id, new ClipboardData({source: client.id, type: 'text/plain', data: response.data.known ? response.data.data : ''}));
+                }, angular.noop);
             };
             service.allowConnectionClipboard = function (client, data) {
                 if (!data || data.crangeIgnore) return false;
@@ -49,6 +64,15 @@
     }]);
     angular.module('client').config(['$provide', function ($provide) {
         $provide.decorator('ManagedClient', ['$delegate', 'clipboardService', function (ManagedClient, clipboard) {
+            var nativeInstance = ManagedClient.getInstance;
+            ManagedClient.getInstance = function () {
+                var client = nativeInstance.apply(ManagedClient, arguments), onstate = client.client.onstatechange;
+                client.client.onstatechange = function (state) {
+                    if (onstate) onstate(state);
+                    if (state === Guacamole.Client.State.CONNECTED) clipboard.restoreConnectionClipboard(client);
+                };
+                return client;
+            };
             var nativeSet = ManagedClient.setClipboard;
             ManagedClient.setClipboard = function (client, data) {
                 if (clipboard.allowConnectionClipboard(client, data)) return nativeSet.call(ManagedClient, client, data);
