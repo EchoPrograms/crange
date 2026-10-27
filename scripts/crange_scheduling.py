@@ -636,7 +636,8 @@ def freeze(row, live, previous=None):
                 interface = retained_interface
         if isinstance(interface, str) and re.fullmatch(r'(?:scsi|sata|virtio|ide)[0-9]+', interface):
             values['disk_gb'] = size
-            values['disk_interface'] = interface
+            if row['resource_key'].startswith('vm:'):
+                values['disk_interface'] = interface
         elif row.get('box', {}).get('disk_gb') is not None:
             raise PlacementError('Cannot preserve an explicit existing VM disk without its verified system-disk interface.')
     if row['resource_key'].startswith('router:'):
@@ -1062,6 +1063,10 @@ def tf_overrides(prepared):
                 values['disk_gb'] = request['disk_gb']
             if request.get('disk_interface'):
                 values['disk_interface'] = request['disk_interface']
+        # Jump boxes use their module's fixed scsi0 disk; the configurable
+        # system-disk interface belongs only to scenario VM placements.
+        if not key.startswith('vm:'):
+            values.pop('disk_interface', None)
         resolved[key] = values
     return {'resolved_placements': resolved}
 

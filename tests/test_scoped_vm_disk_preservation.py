@@ -30,10 +30,20 @@ class ScopedVmDiskPreservationTests(unittest.TestCase):
                 result = media_tf_overrides(path, {}, {'placements': []},
                                            api=Mock(), scoped=True)['resolved_placements'][key]
         self.assertEqual(result['disk_gb'], 48)
-        self.assertEqual(result['disk_interface'], 'scsi0')
+        self.assertNotIn('disk_interface', result)
         self.assertEqual(result['image_id'], 'old-image')
         self.assertEqual(result['template_id'], 219)
         self.assertEqual(row['box']['disk_gb'], 64)
+
+    def test_prepared_placements_emit_custom_interface_only_for_scenario_vms(self):
+        prepared = {'placements': [
+            {'resource_key': key, 'resolved': {'node_name': 'proxmox6',
+                'datastore_id': 'local-lvm', 'disk_gb': 48, 'disk_interface': interface}}
+            for key, interface in [('jumpbox:t001-j01', 'scsi0'), ('vm:t254-win', 'sata0')]]}
+        placements = scheduling.tf_overrides(prepared)['resolved_placements']
+        self.assertEqual(placements['jumpbox:t001-j01']['disk_gb'], 48)
+        self.assertNotIn('disk_interface', placements['jumpbox:t001-j01'])
+        self.assertEqual(placements['vm:t254-win']['disk_interface'], 'sata0')
 
     def test_unproven_disk_interface_remains_blocked(self):
         row = {'resource_key': 'vm:legacy', 'kind': 'vm', 'box': {'disk_gb': 48}}
