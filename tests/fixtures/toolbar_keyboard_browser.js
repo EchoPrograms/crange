@@ -13,11 +13,14 @@ async page => {
  await page.evaluate(()=>window.__fixture.scope.$apply(()=>{window.__fixture.scope.crSession.box={state:'running',project:100,team:1};}));
  const layout=await page.locator('.cr-session-toolbar').evaluate(bar=>{
   const r=node=>node.getBoundingClientRect(),home=bar.querySelector('[aria-label="Return to project"]'),disconnect=bar.querySelector('.cr-session-disconnect'),selector=bar.querySelector('.cr-session-selector'),clipboard=bar.querySelector('.cr-session-clipboard'),zoom=bar.querySelector('.cr-session-zoom'),actions=bar.querySelector('.cr-session-toolbar-actions');
-  return {leftOrder:[home,disconnect,selector,clipboard,zoom].map(node=>r(node).left),right:r(actions).right,edge:r(bar).right,borders:[getComputedStyle(bar).borderTopWidth,getComputedStyle(bar).borderLeftWidth,getComputedStyle(bar).borderRightWidth],rightButtons:[...actions.querySelectorAll('button')].map(node=>node.getAttribute('aria-label')||node.textContent.trim())};
+  const primary=bar.querySelector('.cr-session-toolbar-primary'),controls=[home,disconnect,selector,clipboard,zoom,...actions.querySelectorAll('button')],center=node=>r(node).top+r(node).height/2;
+  return {leftOrder:[home,disconnect,selector,clipboard,zoom].map(node=>r(node).left),centerOffset:Math.abs((r(home).left+r(zoom).right)/2-innerWidth/2),aligned:controls.every(node=>Math.abs(center(node)-center(home))<=1&&r(node).height===32),right:r(actions).right,edge:r(bar).right,borders:[getComputedStyle(bar).borderTopWidth,getComputedStyle(bar).borderLeftWidth,getComputedStyle(bar).borderRightWidth],rightButtons:[...actions.querySelectorAll('button')].map(node=>node.getAttribute('aria-label')||node.textContent.trim())};
  });
  check(layout.leftOrder.every((x,i,a)=>i===0||x>a[i-1]),'Home, Disconnect, selector, Clipboard, and scale appear in order');
  check(layout.edge-layout.right>=7&&layout.edge-layout.right<=10,'Power, map, fullscreen, Options, and Close align to the right edge');
  check(layout.rightButtons.length===5,'All five session actions are grouped on the right');
+ check(layout.centerOffset<=3,'Primary controls are centered across the full toolbar while session actions stay right aligned');
+ check(layout.aligned,'Every docked button, clipboard, and scale control shares one 32px row');
  check(layout.borders.every(value=>value==='0px'),'Docked toolbar has no top or side border');
  const nativeKeyboard=await page.request.get('https://raw.githubusercontent.com/apache/guacamole-client/1.6.0/guacamole-common-js/src/main/webapp/modules/Keyboard.js');
  await page.addScriptTag({content:await nativeKeyboard.text()});
@@ -36,7 +39,10 @@ async page => {
  await scale.click();await scale.press('ControlOrMeta+A');await scale.pressSequentially('125');await scale.press('Tab');
  check(await scale.inputValue()==='125','Scale field also accepts local keyboard input');
  check(await page.evaluate(()=>window.__remoteKeys.length)===0,'Scale editing does not send keys to the connection');
+ await page.evaluate(()=>document.querySelector('.native-pane').addEventListener('mousedown',event=>event.preventDefault()));
+ await clipboard.click();
  await page.locator('.native-pane').first().click();await page.keyboard.press('z');
+ check(await clipboard.evaluate(node=>document.activeElement!==node),'Clicking the remote display releases clipboard focus even when native mousedown prevents its default');
  check(await page.evaluate(()=>window.__remoteKeys.length)>0,'Remote keyboard routing resumes after leaving toolbar controls');
  await clipboard.click();await page.keyboard.down('Control');await page.keyboard.down('Alt');await page.keyboard.down('Shift');
  await page.locator('.cr-session-options').waitFor({state:'visible'});
