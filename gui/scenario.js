@@ -57,7 +57,7 @@ function scenarioTabNoticeStates(projectId,jobList=jobs,contexts=uiJobContexts,d
   const relevant=jobList.filter(job=>Number(job.project)===Number(projectId)&&contexts.get(job.id)?.view==="scenario"&&(contexts.get(job.id)?.scope||jobScope(job.operation))===scope).sort((a,b)=>b.created-a.created||b.id.localeCompare(a.id));
   const active=relevant.find(job=>["queued","running","waiting-for-node","reconcile-required"].includes(job.status)),recent=relevant[0];
   const job=active||(recent&&["succeeded","failed","interrupted"].includes(recent.status)&&notified.has(recent.id)&&!dismissed.has(recent.id)?recent:null);
-  if(job)states[scope]={tone:["failed","interrupted"].includes(job.status)?"error":active?"pending":"success",label:`${jobContextTitle(job)} · ${job.status}`};
+  if(job){const needsAction=workflowJobActionRequired(job,jobList);states[scope]={tone:["failed","interrupted"].includes(job.status)?"error":needsAction?"action":active?"pending":"success",label:`${jobContextTitle(job)} · ${needsAction?"Action required":job.status}`}}
  }
  return states;
 }
@@ -184,15 +184,15 @@ function scenarioDeployment(p,state) {
  const busy=latest&&["queued","running","waiting-for-node","reconcile-required"].includes(latest.status);
  const failed=latest&&["failed","interrupted"].includes(latest.status);
  const ready=plan&&!plan.stale&&!plan.applied&&!plan.stagingBlocked;
- let title=workflowHasChanges(p)?"Changes ready to stage":"No pending changes",description=workflowHasChanges(p)?"Stage your changes, then review the infrastructure plan before deploying.":"Edit a machine or network to prepare an update.",tone="neutral";
+ let title=workflowHasChanges(p)?"Changes ready to stage":"No pending changes",description=workflowHasChanges(p)?"Stage your changes, then review the infrastructure plan before deploying.":"Edit a machine or network to prepare an update.",tone=workflowHasChanges(p)?"action":"neutral";
  if(busy){title=["stage-changes","plan"].includes(latest.operation)?"Staging changes…":"Deploying staging…";description=jobPhase(latest);tone="info"}
  else if(failed){title=["stage-changes","plan"].includes(latest.operation)?"Staging failed":"Deployment needs attention";description=String(latest.output||"").split("\n").filter(line=>line.startsWith("crange:")).pop()?.replace(/^crange:\s*/,"")||"Open the job to see what failed, then review your changes again.";tone="bad"}
  else if(plan?.stagingBlocked){title="Changes outside staging";description="This plan includes team or shared resources. Review it in Project Overview.";tone="warning"}
  else if(plan?.applied){title=plan.network_foundation?.length?"Network deployed":"Staging deployed";description=plan.network_foundation?.length?"The network and router are deployed. Verify the network, then review changes again to deploy its machines.":"Run health checks, then capture a release. Review again after making changes.";tone="good"}
  else if(plan?.stale){title="Changes need restaging";description="The plan expired or the scenario changed. Review again before deploying.";tone="warning"}
- else if(ready){title=plan.changes.length?`${plan.changes.length} planned ${plan.changes.length===1?"change":"changes"}`:"No infrastructure changes";description=plan.changes.length?"Inspect the plan, then apply it to staging.":"Accept the reviewed settings to finish this update.";tone="info"}
- const noticeKey=plan?.applied?`scenario-deployed:${p.project_id}:${plan.id}`:null;
- if(tone==="good"&&dismissedJobNotices.has(noticeKey)){
+ else if(ready){title=plan.changes.length?`${plan.changes.length} planned ${plan.changes.length===1?"change":"changes"}`:"No infrastructure changes";description=plan.changes.length?"Inspect the plan, then apply it to staging.":"Accept the reviewed settings to finish this update.";tone="action"}
+ const noticeKey=tone==="good"?`scenario-deployed:${p.project_id}:${plan.id}`:!busy&&!failed&&plan?.stale&&!plan.stagingBlocked?`scenario-stale:${p.project_id}:${plan.id}:${p.desired_revision||""}`:null;
+ if(noticeKey&&dismissedJobNotices.has(noticeKey)){
   const controls=el("div",undefined,"scenario-controls scenario-deployment-actions"),review=scenarioForm("Stage changes","stage-changes");
   controls.append(review);return controls;
  }
@@ -205,7 +205,7 @@ function scenarioDeployment(p,state) {
  if(ready&&!failed)buttons.prepend(workflowReviewButton(p));
  const deploy=workflowDeployAction(p,plan);if(failed){deploy.disabled=true;deploy.title=deploy.dataset.help="Restage changes before retrying deployment."}buttons.append(deploy);
  if(tone==="good")buttons.append(scenarioValidation(p,!workflowStagingMachines(p).length),scenarioForm("Capture release","release-capture"));
- if(tone==="good"){
+ if(noticeKey){
   const dismiss=scenarioButton("Dismiss",()=>{
    dismissJobNotice(noticeKey);
    for(const job of jobs)if(job.project===Number(p.project_id)&&["stage-changes","plan","stage-deploy","apply"].includes(job.operation)&&job.status==="succeeded"&&(job.plan_id===plan.id||(job.output||"").includes(`Plan ID: ${plan.id}`)))dismissJobNotice(job.id);

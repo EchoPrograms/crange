@@ -483,3 +483,11 @@ pre, code { font-family: "IBM Plex Mono", ui-monospace, Consolas, monospace; }
 
 .scenario-deployment-actions { justify-content: flex-end; margin-block-end: 22px; }
 .scenario-tab .nav-status-dot { display: inline-block; margin-inline-start: 8px; vertical-align: middle; }
+
+/* Workflow indicators distinguish work in progress from a required user action. */
+:root { --orange: #e8a548; }
+.nav-status-action { --nav-status: var(--orange); }
+.infrastructure-pending-progress { --pending-color: var(--blue); }
+.infrastructure-pending-apply, .infrastructure-pending-review { --pending-color: var(--orange); }
+.scenario-deployment-warning strong::before, .scenario-deployment-action strong::before { background: var(--orange); }
+.context-job-action-required .context-job-status::before { content: ""; display: inline-block; width: 5px; height: 5px; margin-right: 6px; vertical-align: 1px; border: 0; border-radius: 50%; background: var(--orange); animation: none; }

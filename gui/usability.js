@@ -230,8 +230,9 @@ function renderJobNextActions(job){
 }
 function contextJobCard(job){
  const busy=["queued","running","waiting-for-node"].includes(job.status),card=el("section",undefined,`context-job context-job-${job.status}`),copy=el("div",undefined,"context-job-copy"),top=el("div",undefined,"context-job-heading");
+ const needsAction=workflowJobActionRequired(job,jobs);if(needsAction)card.classList.add("context-job-action-required");
  card.dataset.jobId=job.id;card.setAttribute("aria-label",jobContextTitle(job));card.setAttribute("aria-busy",String(busy));
- top.append(el("strong",jobContextTitle(job)),el("span",({queued:"Queued",running:"Running",succeeded:"Completed",failed:"Failed",interrupted:"Stopped","waiting-for-node":"Waiting for node","reconcile-required":"Cleanup pending"})[job.status]||job.status,"context-job-status"));
+ top.append(el("strong",jobContextTitle(job)),el("span",needsAction?"Action required":({queued:"Queued",running:"Running",succeeded:"Completed",failed:"Failed",interrupted:"Stopped","waiting-for-node":"Waiting for node","reconcile-required":"Cleanup pending"})[job.status]||job.status,"context-job-status"));
  const phase=el("p",jobPhase(job),"muted");phase.setAttribute("role",busy?"status":"note");
  copy.append(top,phase,jobMetadata(job));const controls=el("div",undefined,"scenario-controls"),terminal=scenarioJob(job);terminal.id="terminal-"+job.id;controls.append(...workflowNextActions(job),terminal);
  if(job.status==="queued"||(job.status==="running"&&!["network-reconcile","network-publish"].includes(job.operation))){

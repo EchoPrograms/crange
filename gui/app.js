@@ -151,6 +151,23 @@ function infrastructurePendingState(projectId,jobList=jobs,plan=stagedPlan(proje
  if(latestEdit&&(!latestApply||latestEdit.created>latestApply.created))return {state:"review",label:"Infrastructure changes are unapplied",detail:"Desired infrastructure changed after the last successful apply. Review the current plan before applying."};
  return null;
 }
+function workflowJobActionRequired(job,jobList=[],projectList=typeof projects==="undefined"?[]:projects){
+ if(job.status==="reconcile-required")return true;
+ if(job.status!=="succeeded")return false;
+ const next={
+  "plan":["apply","stage-deploy"],"stage-changes":["apply","stage-deploy"],"bootstrap-plan":["bootstrap-apply"],"bootstrap-apply":["network-verify"],
+  "scenario-add":["stage-changes","plan","stage-deploy","apply"],"scenario-edit":["stage-changes","plan","stage-deploy","apply"],"scenario-remove":["stage-changes","plan","stage-deploy","apply"],
+  "container-add":["stage-changes","plan","stage-deploy","apply"],"container-edit":["stage-changes","plan","stage-deploy","apply"],"container-remove":["stage-changes","plan","stage-deploy","apply"],
+  "network-add":["stage-changes","plan","stage-deploy","apply"],"network-edit":["stage-changes","plan","stage-deploy","apply"],"network-remove":["stage-changes","plan","stage-deploy","apply"],
+  "team-add":["plan","apply"],"team-remove":["plan","apply"],"box-add":["plan","apply"],"box-remove":["plan","apply"],
+  "release-deploy":["release-stage","release-apply"],"release-stage":["release-apply"],"release-capture":["release-test-prepare"],
+  "release-test-prepare":["release-test-deploy","release-test-cleanup"],"release-test-stage":["release-test-deploy","release-test-cleanup"],"release-test-deploy":["release-test-check","release-test-cleanup"]
+ }[job.operation];
+ if(!next)return false;
+ const p=projectList.find(item=>Number(item.project_id)===Number(job.project)),planId=job.plan_id||String(job.output||"").match(/Plan ID: ([0-9a-f]{32})/)?.[1];
+ if(planId&&p?.staged_plans?.some(plan=>plan.plan_id===planId&&plan.applied_at))return false;
+ return !jobList.some(item=>Number(item.project)===Number(job.project)&&item.created>job.created&&next.includes(item.operation)&&["queued","running","succeeded","waiting-for-node","reconcile-required"].includes(item.status));
+}
 function projectNavigationNoticeStates(jobList,contexts,dismissed,projectId,notified=new Set(),now=Date.now()/1000){
  if(typeof notified==="number"){now=notified;notified=new Set()}
  const pages={"project-overview":new Set(["project-overview"]),teams:new Set(["teams","team-detail"]),scenario:new Set(["scenario"]),machines:new Set(["machines","machine-detail"]),"project-users":new Set(["project-users","project-user-detail"]),"project-settings":new Set(["project-settings"])};
@@ -162,12 +179,9 @@ function projectNavigationNoticeStates(jobList,contexts,dismissed,projectId,noti
    if(nav==="project-overview")return ["plan","stage-changes","apply","stage-deploy","bootstrap-plan","bootstrap-apply"].includes(job.operation);
    return true;
   }).sort((a,b)=>b.created-a.created||b.id.localeCompare(a.id));
-  const job=relevant.find(item=>{
-   if(["queued","running","waiting-for-node","reconcile-required"].includes(item.status))return true;
-   if(!["succeeded","failed","interrupted"].includes(item.status)||dismissed.has(item.id))return false;
-   return notified.has(item.id);
-  });
-  if(job)states[nav]={tone:["failed","interrupted"].includes(job.status)?"error":["queued","running","waiting-for-node","reconcile-required"].includes(job.status)?"pending":"success",label:`${jobContextTitle(job)} · ${job.status}`};
+  const active=relevant.find(item=>["queued","running","waiting-for-node","reconcile-required"].includes(item.status)),recent=relevant[0];
+  const job=active||(recent&&["succeeded","failed","interrupted"].includes(recent.status)&&notified.has(recent.id)&&!dismissed.has(recent.id)?recent:null);
+  if(job){const needsAction=workflowJobActionRequired(job,jobList);states[nav]={tone:["failed","interrupted"].includes(job.status)?"error":needsAction?"action":["queued","running","waiting-for-node"].includes(job.status)?"pending":"success",label:`${jobContextTitle(job)} · ${needsAction?"Action required":job.status}`}}
  }
  return states;
 }

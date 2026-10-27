@@ -51,7 +51,7 @@ const contexts = new Map([
 const notified = new Set(['success', 'failed', 'other']);
 const states = context.projectNavigationNoticeStates(baseJobs, contexts, new Set(), 7, notified, now);
 assert.equal(states.teams.tone, 'pending');
-assert.equal(states.scenario.tone, 'success');
+assert.equal(states.scenario.tone, 'action');
 assert.equal(states['project-users'].tone, 'error');
 assert.equal(states.machines, undefined);
 assert.equal(context.projectNavigationNoticeStates(baseJobs, contexts, new Set(['failed']), 7, notified, now)['project-users'], undefined);
@@ -60,4 +60,14 @@ assert.equal(context.projectNavigationNoticeStates([
     {id: 'old', project: 7, operation: 'team-add', status: 'succeeded', created: 1, finished: 900}
 ], new Map([['old', {view: 'teams'}]]), new Set(), 7, now).teams, undefined);
 
-console.log('Project navigation notices and infrastructure pending state checks passed.');
+const staged={id:'staged',project:7,operation:'stage-changes',status:'succeeded',created:100,output:'Plan ID: '+ 'a'.repeat(32)};
+const deployment={id:'deployed',project:7,operation:'stage-deploy',status:'succeeded',created:110};
+assert.equal(context.workflowJobActionRequired(staged,[staged]),true,'staging waits for the user to deploy');
+assert.equal(context.workflowJobActionRequired(staged,[deployment,staged]),false,'deployment completes the staging handoff');
+assert.equal(context.workflowJobActionRequired(staged,[staged],[{project_id:7,staged_plans:[{plan_id:'a'.repeat(32),applied_at:110}]}]),false,'applied plans do not need further deployment');
+assert.equal(context.workflowJobActionRequired({...deployment,status:'running'},[]),false,'running work does not need user action');
+assert.equal(context.workflowJobActionRequired({...deployment,status:'reconcile-required'},[]),true,'manual cleanup is an action-required state');
+const stagedContexts=new Map([['staged',{view:'scenario'}],['deployed',{view:'scenario'}]]);
+assert.equal(context.projectNavigationNoticeStates([staged],stagedContexts,new Set(),7,new Set(['staged'])).scenario.tone,'action');
+assert.equal(context.projectNavigationNoticeStates([deployment,staged],stagedContexts,new Set(['deployed']),7,new Set(['staged','deployed'])).scenario,undefined,'dismissal cannot reveal an older completed notification');
+console.log('Project navigation action states and infrastructure pending checks passed.');

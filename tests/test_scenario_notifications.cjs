@@ -6,6 +6,8 @@ const source = fs.readFileSync('gui/scenario.js', 'utf8');
 const start = source.indexOf('function scenarioTabNoticeStates(');
 const end = source.indexOf('\nfunction ', start + 1);
 const context = vm.createContext({jobScope: op => op === 'release-apply' ? 'deployments' : op.startsWith('release-') ? 'releases' : 'workspace', jobContextTitle: job => job.operation});
+const appSource=fs.readFileSync('gui/app.js','utf8'),helperStart=appSource.indexOf('function workflowJobActionRequired(');
+vm.runInContext(appSource.slice(helperStart,appSource.indexOf('\nfunction ',helperStart+1)),context);
 vm.runInContext(source.slice(start, end), context);
 const jobs = [
     {id: 'review', project: 100, operation: 'stage-changes', status: 'succeeded', created: 10},
@@ -30,4 +32,8 @@ assert.equal(context.scenarioTabNoticeStates(100, jobs, contexts, dismissed, not
 const newJob = {id: 'new-deploy', project: 100, operation: 'stage-deploy', status: 'running', created: 70};
 contexts.set(newJob.id, {view: 'scenario', scope: 'workspace'});
 assert.equal(context.scenarioTabNoticeStates(100, [newJob, ...jobs], contexts, dismissed, notified).workspace.tone, 'pending');
+const staged={id:'staged',project:100,operation:'stage-changes',status:'succeeded',created:80};
+contexts.set(staged.id,{view:'scenario',scope:'workspace'});notified.add(staged.id);
+assert.equal(context.scenarioTabNoticeStates(100,[staged],contexts,dismissed,notified).workspace.tone,'action','a plan waiting for deployment has an orange tab dot');
+assert.match(context.scenarioTabNoticeStates(100,[staged],contexts,dismissed,notified).workspace.label,/Action required/);
 console.log('Scenario tab notification scoping and dismissal checks passed.');
