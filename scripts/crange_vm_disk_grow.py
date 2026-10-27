@@ -319,6 +319,8 @@ def _selected_targets(path,cfg,resource_keys=None,team=None,api=None):
     try:applied=json.loads((path/'crange-applied-placements.json').read_text())
     except FileNotFoundError:applied={}
     approved=templates_for(path)
+    from crange_change_state import load_applied_definitions
+    applied_definitions=load_applied_definitions(path)
     selected=set(resource_keys) if resource_keys is not None else {'vm:'+k for k,v in cfg.get('scenario_boxes',{}).items() if v.get('disk_gb') is not None}
     rows=api.request('GET','/cluster/resources?type=vm')
     result=[]
@@ -346,7 +348,12 @@ def _selected_targets(path,cfg,resource_keys=None,team=None,api=None):
         else:vnet=f'p{project:03d}t{int(live.get("network_id",box.get("team_id"))):03d}'
         name=f'{vnet}-{box.get("name")}'
         native_rows=[r for r in rows if str(r.get('vmid'))==str(vmid)]
-        if len(native_rows)!=1 or any(native_rows[0].get(k)!=v for k,v in {'type':'qemu','pool':'crange-iac','node':node,'name':name,'status':'running'}.items()):raise DiskGrowError('Selected VM live Proxmox identity differs from desired ownership.')
+        if (len(native_rows)!=1 or any(native_rows[0].get(k)!=v for k,v in
+                {'type':'qemu','pool':'crange-iac','node':node,'name':name}.items())):
+            raise DiskGrowError('Selected VM live Proxmox identity differs from desired ownership.')
+        live_status=native_rows[0].get('status')
+        if live_status not in ('running','stopped'):
+            raise DiskGrowError('Selected VM must be running or stopped for safe disk handling.')
         native=api.request('GET',f'/nodes/{node}/qemu/{vmid}/config')
         tags=set(str(native.get('tags','')).split(';'))
         if native.get('name')!=name or f'p{project:03d}' not in tags or vnet not in tags or native.get('template',0):raise DiskGrowError('Selected VM live Proxmox tags or configuration are not owned by this project.')
@@ -366,7 +373,22 @@ def _selected_targets(path,cfg,resource_keys=None,team=None,api=None):
         if not isinstance(boot_order,list) or not boot_order:raise DiskGrowError('Selected VM has no approved immutable boot-disk profile.')
         image_disk=profile.get('system_disk')
         expected_interface=image_disk.get('interface') if isinstance(image_disk,dict) else profile.get('system_disk_interface')
-        result.append({'key':key,'resource_key':rk,'project_id':project,'guest_id':vmid,'node':node,'name':name,'target_gb':box['disk_gb'],'native':native,'box':box,'image_id':placement.get('image_id'),'approved_boot_order':boot_order,'expected_system_disk':expected_interface})
+        target={'key':key,'resource_key':rk,'project_id':project,'guest_id':vmid,'node':node,'name':name,'target_gb':box['disk_gb'],'native':native,'box':box,'image_id':placement.get('image_id'),'approved_boot_order':boot_order,'expected_system_disk':expected_interface}
+        if live_status=='stopped':
+            definitions=(applied_definitions or {}).get('scenario_box',{})
+            previous=definitions.get(key) if isinstance(definitions,dict) else None
+            unknown=(applied_definitions or {}).get('unknown',{}).get('scenario_box',[])
+            same_applied_disk=(str(box.get('team_id'))=='254' and key not in unknown and
+                isinstance(previous,dict) and previous.get('disk_gb')==box['disk_gb'] and
+                previous.get('template')==box.get('template') and
+                previous.get('node_name')==box.get('node_name'))
+            from crange_proxmox_disk import size_bytes
+            slot=system_disk_slot(native,boot_order,expected_interface)
+            native_bytes=size_bytes(native.get(slot,''))
+            if not same_applied_disk or native_bytes!=box['disk_gb']*1024**3:
+                raise DiskGrowError('Stopped VM has an unapplied or mismatched disk size; start it for guest-layout preflight.')
+            target.update(stopped_unchanged=True,native_system_disk_bytes=native_bytes)
+        result.append(target)
     return api,result
 
 
@@ -484,6 +506,11 @@ def preflight_selected(path,cfg,resource_keys=None,team=None,api=None):
     """Read and validate selected explicit-disk VM layouts before infrastructure apply."""
     api,targets=_selected_targets(path,cfg,resource_keys,team,api);result=[]
     for target in targets:
+        if target.get('stopped_unchanged'):
+            result.append({'resource_key':target['resource_key'],'guest_id':target['guest_id'],
+                'state':'skipped-unchanged-stopped','native_disk_bytes':target['native_system_disk_bytes'],
+                'guest_layout_checked':False})
+            continue
         m=_measure(api,target)
         if m.get('disk_bytes',0)>target['target_gb']*1024**3:
             raise DiskGrowError('Selected guest disk exceeds its declared target; preflight refuses to shrink.')
@@ -497,6 +524,11 @@ def initialize_selected(path,cfg,resource_keys=None,team=None,api=None):
     """Grow explicit-disk scenario VM filesystems after apply and verify readback."""
     api,targets=_selected_targets(path,cfg,resource_keys,team,api);result=[]
     for target in targets:
+        if target.get('stopped_unchanged'):
+            result.append({'resource_key':target['resource_key'],'guest_id':target['guest_id'],
+                'state':'skipped-unchanged-stopped','native_disk_bytes':target['native_system_disk_bytes'],
+                'guest_layout_checked':False})
+            continue
         m=_measure(api,target,refresh=True)
         target_gb=target['target_gb']
         if m.get('os')=='windows':

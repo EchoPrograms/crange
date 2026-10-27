@@ -1,4 +1,5 @@
 import sys
+import json
 from pathlib import Path
 import unittest
 import os
@@ -219,6 +220,62 @@ class VmDiskGrowTests(unittest.TestCase):
         with self.assertRaises(grow.DiskGrowError):grow._qga(api,target,['checkpointed-script'],resumable=True)
         self.assertEqual(grow._qga(api,target,['checkpointed-script'],resumable=True),'resumed')
         self.assertEqual(sum(call.args[0]=='POST' for call in api.request.call_args_list),2)
+
+
+ def _stopped_unchanged_scope(self, directory, *, checkpoint_disk=31, native_disk=31):
+    project=Path(directory)/'project-100';project.mkdir()
+    cfg={'project_id':100,'scenario_boxes':{'web':{'team_id':'254','template':'win-base',
+        'node_name':'proxmox6','name':'web','disk_gb':31}}}
+    outputs={'scenario_boxes':{'value':{'web':{'id':991,'network_id':254,
+        'placement':{'node_name':'proxmox6','image_id':'win-v2','template_id':435,
+                     'template_node':'proxmox6'}}}}}
+    receipt={'guest_id':991,'node_name':'proxmox6','declared_template':'win-base',
+        'image_id':'win-v2','template_id':435,'template_node':'proxmox6'}
+    (project/'crange-applied-placements.json').write_text(json.dumps({'vm:web':receipt}))
+    (project/'.crange-applied-definitions.json').write_text(json.dumps({'schema_version':1,
+        'staging':{'scenario_box':{'web':{'team_id':'254','template':'win-base',
+          'node_name':'proxmox6','disk_gb':checkpoint_disk}},'unknown':{'scenario_box':[]}}}))
+    native={'name':'p100t254-web','tags':'p100;p100t254','template':0,
+        'boot':'order=sata0','sata0':f'local-lvm:vm-991-disk-0,size={native_disk}G'}
+    template={'template':1,'boot':'order=sata0','sata0':'local-lvm:base-435-disk-0,size=22G'}
+    api=Mock()
+    def request(method,path,*args,**kwargs):
+        if path=='/cluster/resources?type=vm':
+            return [{'vmid':991,'type':'qemu','pool':'crange-iac','node':'proxmox6',
+                     'name':'p100t254-web','status':'stopped'}]
+        if path.endswith('/qemu/991/config'):return native
+        if path.endswith('/qemu/435/config'):return template
+        raise AssertionError(f'unexpected API read {method} {path}')
+    api.request.side_effect=request
+    approved={'win-base':{'template_id':435,'template_node':'proxmox6',
+        'profile':{'boot_order':['sata0'],'system_disk':{'interface':'sata0'}}}}
+    return project,cfg,outputs,approved,api
+
+ def test_stopped_vm_with_checkpointed_native_disk_skips_guest_calls(self):
+    with tempfile.TemporaryDirectory() as directory:
+        project,cfg,outputs,approved,api=self._stopped_unchanged_scope(directory)
+        with patch('crange.output_json',return_value=outputs), \
+             patch('crange.templates_for',return_value=approved), \
+             patch.object(grow,'_measure',side_effect=AssertionError('stopped guest must not receive QGA')):
+            preflight=grow.preflight_selected(project,cfg,{'vm:web'},team='254',api=api)
+            initialized=grow.initialize_selected(project,cfg,{'vm:web'},team='254',api=api)
+        expected={'resource_key':'vm:web','guest_id':991,'state':'skipped-unchanged-stopped',
+                  'native_disk_bytes':31*1024**3,'guest_layout_checked':False}
+        self.assertEqual(preflight,[expected])
+        self.assertEqual(initialized,[expected])
+
+ def test_stopped_vm_checkpoint_or_native_capacity_mismatch_cannot_skip(self):
+    for checkpoint_disk,native_disk in ((30,31),(31,30)):
+        with self.subTest(checkpoint_disk=checkpoint_disk,native_disk=native_disk), \
+             tempfile.TemporaryDirectory() as directory:
+            project,cfg,outputs,approved,api=self._stopped_unchanged_scope(
+                directory,checkpoint_disk=checkpoint_disk,native_disk=native_disk)
+            with patch('crange.output_json',return_value=outputs), \
+                 patch('crange.templates_for',return_value=approved):
+                with self.assertRaisesRegex(grow.DiskGrowError,'Stopped VM has an unapplied or mismatched disk size'):
+                    grow.preflight_selected(project,cfg,{'vm:web'},team='254',api=api)
+                with self.assertRaisesRegex(grow.DiskGrowError,'Stopped VM has an unapplied or mismatched disk size'):
+                    grow.initialize_selected(project,cfg,{'vm:web'},team='254',api=api)
 
 
 if __name__=='__main__':unittest.main()
