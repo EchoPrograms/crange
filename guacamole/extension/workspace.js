@@ -60,6 +60,7 @@
         }
         if (key === 'app/client/templates/client.html' && value.indexOf('<crange-session-toolbar') === -1) {
             return value.replace('<guac-viewport>', '<guac-viewport><crange-session-toolbar></crange-session-toolbar>')
+                .replace('<guac-clipboard></guac-clipboard>', '<label class="cr-check"><input type="checkbox" ng-model="crSession.clipboardPassthrough" ng-change="crSession.setClipboardPassthrough()">Clipboard passthrough</label><textarea ng-if="!crSession.clipboardPassthrough" class="clipboard" aria-label="Connection clipboard" ng-model="crSession.clipboardText" ng-change="crSession.updateClipboard()" spellcheck="false"></textarea>')
                 .replace('ng-class="{open: menu.shown}" id="guac-menu"', 'ng-class="{open: menu.shown && crSession.advanced}" id="guac-menu"')
                 .replace('ng-if="menu.shown" guac-touch-drag="menuDrag"', 'ng-if="menu.shown && crSession.advanced" guac-touch-drag="menuDrag"')
                 .replace(/<h2 ng-hide="rootConnectionGroups">[\s\S]*?<\/h2>\s*<h2 class="connection-select-menu" ng-show="rootConnectionGroups">[\s\S]*?<\/h2>/, '<h2>Advanced controls</h2>')
@@ -120,7 +121,7 @@
     ${button('home', 'Return to project', 'crSession.home()')}
     <button type="button" class="cr-session-disconnect" ng-click="crSession.disconnect()" crange-help="Disconnect the current remote session. The server keeps running">Disconnect</button>
     <button type="button" class="cr-session-name cr-session-selector" ng-click="crSession.toggle('connections')" aria-expanded="{{crSession.panel === 'connections'}}" aria-label="Select connections"><span>{{focusedClient.name || getName(clientGroup)}}</span><span class="cr-protocol-label" ng-if="focusedClient.protocol">{{focusedClient.protocol | uppercase}}</span><span class="cr-session-count" ng-if="clientGroup.clients.length > 1">{{clientGroup.clients.length}} selected</span><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="m5 8 5 5 5-5"/></svg></button>
-    <input class="cr-session-clipboard" type="text" aria-label="Clipboard" placeholder="Clipboard" autocomplete="off" spellcheck="false" ng-model="crSession.clipboardText" ng-change="crSession.updateClipboard()">
+    <textarea class="cr-session-clipboard" ng-if="!crSession.clipboardPassthrough" rows="1" aria-label="Clipboard" placeholder="Clipboard" autocomplete="off" spellcheck="false" ng-model="crSession.clipboardText" ng-change="crSession.updateClipboard()"></textarea>
     <guac-client-zoom class="cr-session-zoom" ng-if="focusedClient" client="focusedClient"></guac-client-zoom>
     </div>
     <div class="cr-session-toolbar-actions">
@@ -143,7 +144,7 @@
   </section>
   <section class="cr-session-popover cr-session-options" ng-if="crSession.panel === 'options'" aria-label="Session options">
     <header><h2>Session options</h2>${button('close', 'Close session options', 'crSession.close()')}</header>
-    <label>Clipboard<guac-clipboard></guac-clipboard></label>
+    <label ng-if="!crSession.clipboardPassthrough">Clipboard<textarea class="clipboard" aria-label="Connection clipboard" ng-model="crSession.clipboardText" ng-change="crSession.updateClipboard()" spellcheck="false"></textarea></label>
     <div class="cr-session-fields">
       <label>Display scale<input type="number" min="0.1" max="3" step="0.1" ng-model="crSession.displayScale" ng-change="crSession.setScale()"></label>
       <label>Input method<select ng-model="menu.inputMethod"><option value="none">Direct keyboard</option><option value="text">Text input / IME</option><option value="osk">On-screen keyboard</option></select></label>
@@ -188,10 +189,20 @@
             var prefs = preferenceService.preferences, destroyed = false, boxes = [], poll = null, appliedScale = Object.create(null);
             var s = scope.crSession = {visible: false, alignment: 'left', panel: null, advanced: false, box: null, networkLoading: true, displayScale: Number(prefs.crangeDisplayScale) || 1, network: [], mouseChoices: [{value: true, label: 'Touchscreen'}, {value: false, label: 'Touchpad'}]};
             var clipboardService = $injector.get('clipboardService'), ClipboardData = $injector.get('ClipboardData');
-            s.clipboardText = '';
-            s.updateClipboard = function () { if (clipboardService) clipboardService.setClipboard(new ClipboardData({type: 'text/plain', data: s.clipboardText || ''})); };
-            var unlistenClipboard = scope.$on('guacClipboard', function (_event, data) { if (data && typeof data.data === 'string') scope.$evalAsync(function () { s.clipboardText = data.data; }); });
-            if (clipboardService && typeof clipboardService.getClipboard === 'function') clipboardService.getClipboard().then(function (data) { if (!destroyed && data && typeof data.data === 'string') scope.$evalAsync(function () { s.clipboardText = data.data; }); }, angular.noop);
+            s.clipboardText = ''; s.clipboardPassthrough = false;
+            function updateClipboardField() {
+                var data = clipboardService.getConnectionClipboard(scope.focusedClient);
+                s.clipboardText = data && typeof data.data === 'string' ? data.data : '';
+            }
+            s.updateClipboard = function () { clipboardService.setConnectionClipboard(scope.focusedClient, s.clipboardText || ''); };
+            s.setClipboardPassthrough = function () {
+                clipboardService.setActiveConnection(scope.focusedClient, s.clipboardPassthrough);
+                saveToolbarState();
+                if (s.clipboardPassthrough) clipboardService.resyncClipboard();
+            };
+            var unlistenClipboard = scope.$on('crangeClipboard', function (_event, id) {
+                if (scope.focusedClient && scope.focusedClient.id === id) scope.$evalAsync(updateClipboardField);
+            });
             function request(payload) {
                 return $http.post('api/ext/crange-control/control', payload, {headers: {'Guacamole-Token': auth.getCurrentToken(), 'X-Guacamole-Data-Source': auth.getDataSource()}}).then(function (r) { return r.data; });
             }
@@ -203,7 +214,7 @@
             // toolbar field has DOM focus. Use its native before-key hooks
             // to keep local typing and button activation out of every client.
             function localToolbarKey(event) {
-                if (shell.contains(document.activeElement)) event.preventDefault();
+                if (shell.contains(document.activeElement) || document.activeElement?.closest("#guac-menu input, #guac-menu textarea, #guac-menu select")) event.preventDefault();
             }
             var unlistenLocalKeydown = scope.$on('guacBeforeKeydown', localToolbarKey);
             var unlistenLocalKeyup = scope.$on('guacBeforeKeyup', localToolbarKey);
@@ -223,7 +234,7 @@
             function validPosition(value) { return value && Number.isFinite(value.x) && Number.isFinite(value.y); }
             function validDock(value) { return value && ['left','right','top','bottom'].indexOf(value.edge) >= 0 && Number.isFinite(value.offset); }
             function saveToolbarState() {
-                if (activeToolbarKey) saveLocal(activeToolbarKey, {position:position,dock:dock,topDocked:topDocked,hidden:!s.visible});
+                if (activeToolbarKey) saveLocal(activeToolbarKey, {position:position,dock:dock,topDocked:topDocked,hidden:!s.visible,clipboardPassthrough:s.clipboardPassthrough});
             }
             function loadToolbarState(client) {
                 var key = toolbarKey(client);
@@ -235,6 +246,9 @@
                 dock = saved && validDock(saved.dock) ? saved.dock : {edge:'bottom',offset:0};
                 topDocked = !!(saved && saved.topDocked);
                 s.visible = !!(saved && saved.hidden === false);
+                s.clipboardPassthrough = !!(saved && saved.clipboardPassthrough);
+                clipboardService.setActiveConnection(client, s.clipboardPassthrough);
+                updateClipboardField();
                 window.requestAnimationFrame(function () {
                     if (!position) position = {x:10,y:Math.max(10,window.innerHeight-(shell.offsetHeight||44)-10)};
                     clampToolbar();

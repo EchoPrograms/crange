@@ -34,7 +34,7 @@ async page => {
  await clipboard.click();await clipboard.pressSequentially('typed clipboard text');
  check(await clipboard.inputValue()==='typed clipboard text','Real keyboard typing stays in the clipboard field');
  check(await page.evaluate(()=>window.__remoteKeys.length)===0,'Clipboard typing sends no remote key presses or releases');
- check(await page.evaluate(()=>window.__clipboardUpdates.at(-1))==='typed clipboard text','Typed clipboard content still reaches the clipboard service');
+ check(await page.evaluate(()=>angular.element(document.documentElement).injector().get('clipboardService').getConnectionClipboard(window.__fixture.scope.focusedClient).data)==='typed clipboard text','Typed clipboard content still reaches the clipboard service');
  const scale=page.getByRole('spinbutton',{name:'Display scale percent',exact:true});
  await scale.click();await scale.press('ControlOrMeta+A');await scale.pressSequentially('125');await scale.press('Tab');
  check(await scale.inputValue()==='125','Scale field also accepts local keyboard input');

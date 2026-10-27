@@ -12,6 +12,7 @@
     "login.js",
     "native-inventory.js",
     "clipboard.js",
+    "sessions.js",
     "ui.js",
     "workspace.js",
     "settings.js"
@@ -28,7 +29,8 @@
     "assets/os/freebsd.svg": "image/svg+xml"
   },
   "authProviders": [
-    "org.crange.guac.CrangeBridgeProvider"
+    "org.crange.guac.CrangeBridgeProvider",
+    "org.crange.guac.CrangeSessionProvider"
   ],
   "translations": [
     "translations/en.json"

@@ -104,6 +104,7 @@
             scope: { connectionGroups: '=' },
             template: [
                 '<div class="cr-box-list" ng-class="{\'cr-layout-grid\': cr.layout === \'grid\'}">',
+                "<crange-recent-connections ng-if=\"cr.page !== 'preferences'\"></crange-recent-connections>",
                 "<div class=\"cr-project-cards\" ng-if=\"cr.page === 'projects'\">",
                 "  <button type=\"button\" class=\"cr-project-card\" ng-repeat=\"project in projectGroups track by project.id\" ng-click=\"cr.openProject(project.id)\">",
                 "    <span class=\"cr-project-card-title\">{{project.label}}</span><span class=\"cr-project-card-state\"><span class=\"cr-status\" ng-class=\"{on: runningCount(project) === project.boxes.length}\">{{runningCount(project)}} / {{project.boxes.length}} running</span></span>",

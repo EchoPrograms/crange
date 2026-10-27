@@ -36,6 +36,7 @@
         };
       }]);
     angular.module('client', ['ng', 'clipboard'])
+      .value('ManagedClient', {setClipboard: angular.noop})
       .filter('translate', function () { return function (value) { return value; }; })
       .value('preferenceService', {preferences: {crangeDisplayScale: 1, crangeExitBehavior: 'home', timezone: 'America/Chicago', language: 'en'}, save: angular.noop})
       .value('authenticationService', {getCurrentToken: function () { return 'synthetic-token'; }, getDataSource: function () { return 'synthetic-source'; }, getCurrentUsername: function () { return 'fixture-user'; }})

@@ -1,0 +1,49 @@
+{
+  "recorded_at": "2026-10-27T15:19:46.121896+00:00",
+  "state": "live-http-verified",
+  "implementation": "Server-held guacd owner tunnels with authenticated per-user resume and explicit session end.",
+  "canary_validation": {
+    "state": "passed",
+    "same_remote_connection_after_reload": true,
+    "same_session_after_logout_login": true,
+    "other_user_cannot_list_or_end": true,
+    "clipboard_stream_works": true,
+    "end_closes_remote_session": true,
+    "resume_remote_connection_count": 1,
+    "read_only_policy_preserved": true
+  },
+  "browser_validation": {
+    "recent_connections": [
+      "hidden when empty",
+      "authorized resume route",
+      "visible after reload",
+      "End removes the table",
+      "desktop and mobile layout",
+      "Resume replaces a disconnected browser client instead of reopening its disconnected view"
+    ],
+    "clipboard": [
+      "connection-local field edits",
+      "remote updates reach both fields",
+      "multiline text preserved",
+      "passthrough hides fields",
+      "per-connection passthrough survives reload"
+    ]
+  },
+  "unit_checks": [
+    "tests/test_guac_clipboard.cjs",
+    "tests/test_guac_ui.cjs"
+  ],
+  "limits": [
+    "Held sessions end if Guacamole or guacd restarts, the remote guest disconnects, or the user chooses End.",
+    "Manual fields represent text; browser permissions and remote clipboard policy still apply."
+  ],
+  "served_assets": {
+    "clipboard.js": "21bdd1e048c0efc15cdef806889fd29c8962ab658441a1fcacd39ebca45a305f",
+    "workspace.js": "b764a77ad964d71a07e451803f1b3aa02a83e58216c7a2c37ae8a41410045b4b",
+    "ui.js": "06f2d761285a6c68c5db51138363f93443a26debe9836770f2f3b323c0fba6b3",
+    "workspace.css": "7f1cd5d1ed498f1d351336a21064c1e9e469ba28520683424a8dc182cf2fb1fc",
+    "guac-manifest.json": "60c997e44ffac333f503147cd18e35dddc8058395e2cf3b427561ef388218852",
+    "sessions.js": "b46a4314f9d7920ca86ae7271c44c97011298bdba17d79dc17200f9705c96cc6"
+  },
+  "temporary_test_instance": "Removed after successful live verification."
+}

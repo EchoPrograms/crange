@@ -1,110 +1,33 @@
 'use strict';
-
-const assert = require('node:assert/strict');
-const fs = require('node:fs');
-const vm = require('node:vm');
-
-let config;
-const moduleStub = {config(fn) { config = fn; return this; }};
-vm.runInNewContext(fs.readFileSync('guacamole/extension/clipboard.js', 'utf8'), {
-    angular: {module() { return moduleStub; }, noop() {} }
-});
-
-function createHarness(permissionState = 'prompt', permissionsSupported = true, queryFailure = '') {
-    const listeners = {};
-    const calls = {get: 0, set: [], resync: 0, queries: 0};
-    const clipboard = {type: 'text/plain', data: 'cached'};
-    const delegate = {
-        getClipboard() { calls.get++; return Promise.resolve(clipboard); },
-        setClipboard(data) { calls.set.push(data); return Promise.resolve(); },
-        resyncClipboard() { calls.resync++; return Promise.resolve(); }
-    };
-    const navigator = {clipboard: {readText() { return Promise.resolve('native'); }}};
-    if (permissionsSupported) navigator.permissions = {query() {
-        calls.queries++;
-        if (queryFailure === 'throw') throw new Error('Unsupported permission');
-        if (queryFailure === 'reject') return Promise.reject(new Error('Unsupported permission'));
-        return Promise.resolve({state: permissionState});
-    }};
-    const document = {addEventListener(name, listener) { listeners[name] = listener; }};
-    const provide = {decorator(_name, definition) { this.definition = definition; }};
-    config.at(-1)(provide);
-    const factory = provide.definition.at(-1);
-    const service = factory(delegate, {get() { return function ClipboardData(data) { Object.assign(this, data); }; }},
-        {navigator}, [document], {when: Promise.resolve.bind(Promise)});
-    return {service, calls, listeners, clipboard, navigator};
-}
-
-async function run() {
-    for (const state of ['prompt', 'denied']) {
-        const h = createHarness(state);
-        const data = await h.service.getClipboard();
-        assert.equal(data.data, '', 'empty internal clipboard is safe before a copy or paste');
-        await h.service.resyncClipboard();
-        assert.equal(h.calls.get, 0, `${state} must not read clipboard automatically`);
-        assert.equal(h.calls.resync, 0, `${state} must not resync automatically`);
-    }
-
-    const unsupported = createHarness('granted', false);
-    assert.equal((await unsupported.service.getClipboard()).data, '');
-    await unsupported.service.resyncClipboard();
-    assert.equal(unsupported.calls.get, 0, 'unsupported Permissions API must fail closed');
-    assert.equal(unsupported.calls.resync, 0);
-
-    for (const failure of ['throw', 'reject']) {
-        const h = createHarness('granted', true, failure);
-        assert.equal((await h.service.getClipboard()).data, '');
-        await h.service.resyncClipboard();
-        assert.equal(h.calls.get + h.calls.resync, 0, 'permission query errors must never request clipboard access');
-    }
-    const unavailable = createHarness('granted');
-    delete unavailable.navigator.clipboard.readText;
-    await unavailable.service.getClipboard();
-    await unavailable.service.resyncClipboard();
-    assert.equal(unavailable.calls.get + unavailable.calls.resync, 0, 'missing asynchronous clipboard support must not fall back to a prompting read');
-
-    const granted = createHarness('granted');
-    await granted.service.getClipboard();
-    await granted.service.resyncClipboard();
-    assert.equal(granted.calls.get, 1);
-    assert.equal(granted.calls.resync, 1);
-
-    const manual = createHarness('prompt');
-    const pasteTarget = {closest(selector) { return selector.includes('.clipboard') ? this : null; }};
-    manual.listeners.paste({isTrusted: true, target: pasteTarget,
-        clipboardData: {getData(type) { assert.equal(type, 'text/plain'); return 'manual text'; }}});
-    assert.equal(manual.calls.get, 0, 'manual paste event should use event data rather than prompt read');
-    assert.equal(manual.calls.set[0].data, 'manual text');
-    assert.equal((await manual.service.getClipboard()).data, 'manual text');
-
-    const remotePaste = createHarness('prompt');
-    const remoteTarget = {closest(selector) { return selector.includes('.client .display') ? this : null; }};
-    remotePaste.listeners.paste({isTrusted: true, target: remoteTarget,
-        clipboardData: {getData() { return 'explicit display paste'; }}});
-    assert.equal(remotePaste.calls.get, 0, 'event-provided remote paste data must not trigger a native read prompt');
-    assert.equal(remotePaste.calls.set[0].data, 'explicit display paste');
-
-    // A Ctrl+V key event is left completely to Guacamole.Keyboard. Reading
-    // asynchronously and replaying it would reorder clipboard and key streams.
-    assert.equal(remotePaste.listeners.keydown, undefined);
-
-    const forms = createHarness('prompt');
-    const formTarget = {closest(selector) {
-        if (selector.includes('input')) return this;
-        if (selector.includes('.client-body')) return this;
-        return null;
-    }};
-    forms.listeners.paste({isTrusted: true, target: formTarget,
-        clipboardData: {getData() { return 'form paste'; }}});
-    assert.equal(forms.calls.get, 0, 'ordinary form paste must not invoke native clipboard read');
-    assert.equal(forms.calls.set.length, 0, 'ordinary form paste must not be intercepted');
-
-    const copied = createHarness('prompt');
-    await copied.service.setClipboard({type: 'text/plain', data: 'remote copy'});
-    assert.equal(copied.calls.set[0].data, 'remote copy');
-    assert.equal((await copied.service.getClipboard()).data, 'remote copy');
-
-    console.log('Guacamole clipboard: automatic permission gating and explicit paste paths passed.');
-}
-
-run().catch(error => { console.error(error); process.exitCode = 1; });
+const assert=require('assert'),fs=require('fs'),vm=require('vm');
+const decorators={};
+const modules={};
+const angular={module(name){return modules[name]||(modules[name]={config(def){def.at(-1)({decorator(name,def){decorators[name]=def.at(-1);}});return this;}});}};
+vm.runInNewContext(fs.readFileSync('guacamole/extension/clipboard.js','utf8'),{angular});
+const calls={get:0,set:[],resync:0,sent:[]};
+const clients=[{id:'alice/ssh',clientProperties:{focused:true}},{id:'alice/rdp',clientProperties:{focused:false}}];
+let managed;
+const root={$broadcast(name,...args){if(name==='guacClipboard')clients.forEach(client=>managed.setClipboard(client,args[0]));}};
+const native={getClipboard(){calls.get++;return Promise.resolve({data:'local system'});},setClipboard(data){calls.set.push(data);root.$broadcast('guacClipboard',data);return Promise.resolve();},resyncClipboard(){calls.resync++;return Promise.resolve();}};
+const clipboard=decorators.clipboardService(native,{get(name){return name==='$rootScope'?root:function ClipboardData(data){Object.assign(this,data);};}},{when:Promise.resolve.bind(Promise)});
+managed=decorators.ManagedClient({setClipboard(client,data){if(data.source!==client.id)calls.sent.push([client.id,data.data]);}},clipboard);
+(async()=>{
+ clipboard.setActiveConnection(clients[0],false);
+ managed.setClipboard(clients[0],await clipboard.getClipboard());await clipboard.resyncClipboard();
+ assert.equal(calls.get+calls.resync,0,'default never reads the browser clipboard');assert.equal(calls.sent.length,0,'initialization never overwrites remote clipboard');
+ await clipboard.setClipboard({source:clients[0].id,type:'text/plain',data:'remote A'});
+ assert.equal(clipboard.getConnectionClipboard(clients[0]).data,'remote A');assert.equal(calls.set.length,0,'remote copy never writes browser clipboard by default');
+ clipboard.setConnectionClipboard(clients[0],'field\ntext  ');
+ assert.deepEqual(calls.sent,[[clients[0].id,'field\ntext  ']],'field changes reach only that connection, preserving whitespace');
+ clipboard.setConnectionClipboard(clients[0],'');assert.equal(calls.sent.at(-1)[1],'','clearing the field clears remote text');
+ await clipboard.setClipboard({source:clients[1].id,type:'text/plain',data:'background B'});
+ assert.equal(clipboard.getConnectionClipboard(clients[1]).data,'background B');assert.equal(clipboard.getConnectionClipboard(clients[0]).data,'','background updates cannot replace another connection clipboard');
+ await clipboard.setClipboard({data:'unrelated local clipboard'});assert.equal(calls.sent.length,2,'native paste cannot bypass the text field by default');
+ clipboard.setActiveConnection(clients[0],true);await clipboard.getClipboard();await clipboard.resyncClipboard();
+ assert.equal(calls.get,1);assert.equal(calls.resync,1);
+ await clipboard.setClipboard({source:clients[0].id,type:'text/plain',data:'passthrough remote'});assert.equal(calls.set.at(-1).data,'passthrough remote','opt-in enables remote-to-browser clipboard');
+ managed.setClipboard(clients[0],{data:'passthrough local'});assert.deepEqual(calls.sent.at(-1),[clients[0].id,'passthrough local']);
+ managed.setClipboard(clients[1],{data:'passthrough local'});assert.equal(calls.sent.at(-1)[0],clients[0].id,'passthrough cannot leak into a connection with fields enabled');
+ clipboard.setActiveConnection(clients[0],false);await clipboard.getClipboard();await clipboard.resyncClipboard();assert.equal(calls.get,1);assert.equal(calls.resync,1,'disabling passthrough immediately stops automatic access');
+ console.log('Connection clipboard isolation and opt-in passthrough checks passed');
+})().catch(e=>{console.error(e);process.exitCode=1;});

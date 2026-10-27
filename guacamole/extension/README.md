@@ -136,3 +136,25 @@ poll. This prevents a portal opened before deployment from retaining empty
 Connect cells or hiding newly deployed workstations. Keep the current native
 tree as the link authorization boundary. Regression check:
 `node tests/test_guac_ui.cjs`.
+
+## Resumable sessions and clipboard
+
+Recent connections appears above the inventory while the signed-in user owns
+live remote sessions. Resume attaches to the same guacd session after browser
+reload, tab closure, or Guacamole logout and login. End closes the session and
+removes its row. Disconnect detaches the current view; it can be resumed later.
+Sessions remain in server memory until ended, the guest disconnects, or the
+Guacamole/guacd service restarts. They do not survive a server restart.
+
+Each session is keyed by the authenticated data source, user, and connection.
+New login tokens do not transfer ownership. Current connection access is checked
+again when listing and resuming, and other users cannot list or end the session.
+The native provider still authorizes initial connections and records their use.
+
+Text clipboard fields are connection-specific. Edits send text only to the
+focused connection, and its remote clipboard events update both fields. The
+compact field also preserves multiline text. Automatic browser clipboard access
+is off by default. Advanced controls → Clipboard passthrough enables native
+clipboard sharing for that connection and hides the manual fields. This setting
+is remembered per account and connection in the browser. Browser permissions and
+remote clipboard policy still apply; text fields do not represent binary data.
