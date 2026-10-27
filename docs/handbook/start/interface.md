@@ -10,7 +10,7 @@ Use the sidebar's project selector to choose context. Project actions operate on
 | Jobs | Follow task progress, output, failures and reruns |
 | Templates | Administrators build, publish and distribute approved bases |
 | Cluster | Administrators inspect refreshed capacity, workloads and image replicas |
-| Project Overview | See allocation, release state, project tasks and infrastructure tools |
+| Project Overview | See allocation and release state, review project-wide infrastructure changes, and open network tools |
 | Teams | Open a team, its machines and users; manage team definitions |
 | Scenario | Work on staging, releases and team deployments |
 | Machines | Search the project's deployed/declared machine inventory |
@@ -21,7 +21,7 @@ Use the sidebar's project selector to choose context. Project actions operate on
 
 **Workspace** is Team 0's authoring area: machine definitions, default/custom networks, current review and staging deployment. **Releases** holds captured versions and fresh-copy test status. **Team deployments** shows selected and applied versions, service checks and rollout history.
 
-The release chooser opens a version menu. Each entry explains whether it is ready or still needs a fresh-copy test or cleanup. Selecting a version opens its own team form.
+The release chooser opens a version menu. Each entry explains whether it is ready or still needs a fresh-copy test or cleanup. Selecting a version opens its own team form. Scenario rows and edited fields use green for additions, orange for edits and red for pending removals. Unchanged values stay plain; the markers show which declarations differ before you apply them.
 
 ## Machine rows and detail pages
 
@@ -33,6 +33,6 @@ Tables support search and relevant filters. Selecting machines exposes group pow
 
 ## Progress and dialogs
 
-A form collects parameters; a job performs the action. Closing its dialog leaves the job running. Reopen output from the contextual task card or Jobs. Task rows show the actor, current status, activity and runtime. A disabled action usually means a required stage has not completed; check the adjacent explanation and task result.
+A form collects parameters; a job performs the action. Closing its dialog leaves the job running. Reopen output from the contextual task card or Jobs. Task rows show the actor, current status, activity and runtime. Sidebar status dots and contextual task notices identify recent or active work in the page where it belongs; the Project Overview also shows the reviewed infrastructure plan and any unapplied changes. A disabled action usually means a required stage has not completed; check the adjacent explanation and task result.
 
 Keyboard users can move Scenario tabs with arrow keys, Home and End. Forms have labels, and menus and dialogs retain keyboard interaction. On small screens the navigation collapses and wide tables scroll within their area.

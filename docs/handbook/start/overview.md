@@ -20,7 +20,7 @@ Staging edits do not silently modify a deployed release. A release captures a po
 | Reviewed | The exact saved deployment proposal | Terraform plans to create that VM on a specific node/storage |
 | Observed/applied | What was deployed or recently read from Proxmox | The guest is running with its recorded deployment identity |
 
-Saving a form does not necessarily change a running guest. Follow the page's **Review changes** and deployment action. Runtime power observations are separate from saved power intent.
+Saving a form does not necessarily change a running guest. Follow the page's **Review changes** and deployment action. Runtime power observations are separate from saved power intent. The project **Overview** includes project-wide infrastructure and network tools, the current reviewed infrastructure plan, and any unapplied or running infrastructure task. Sidebar status dots and contextual task notices point back to work that needs attention; open the related page to inspect the result or continue the review.
 
 ## Team 0 is staging
 

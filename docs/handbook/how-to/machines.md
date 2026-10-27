@@ -20,7 +20,7 @@ Snapshots are local native resources and can depend on their node/storage. They 
 
 ## Resize and remove
 
-Edit resource declarations, review and apply. Quotas and placement headroom still apply to increases; a stop/start may be required to expose hardware changes. Increasing a virtual disk and growing its guest filesystem are different operations. General live disk shrinking is not supported by changing a number in a machine form.
+Edit resource declarations, review and apply. Quotas and placement headroom still apply to increases; a stop/start may be required to expose hardware changes. For Scenario VMs, **System disk (GiB)** accepts a requested size from 8 to 1024 GiB when the approved image has verified disk metadata. A fresh VM's minimum is the image's operating-system disk size; an unchanged existing VM keeps its measured current size. Increasing the virtual disk also grows and verifies supported Linux root filesystems or Windows C: partitions. A small approved base image can therefore be cloned with a larger system disk without modifying the shared base. General disk reduction is not available by lowering the form value; use only a separately reviewed, supported image-copy workflow where applicable.
 
 Removing a machine declaration requires a reviewed deletion to remove the actual guest. Deletion affects all users assigned to that machine. Deleting a project user retains that user's machines unless you explicitly remove them.
 

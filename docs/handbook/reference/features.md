@@ -7,6 +7,8 @@ This maps the current interface and fixed workflows. Availability still depends 
 | Projects and quotas | Projects / Project Overview | Separate state; administrator quota editing with revision checks |
 | Teams and staging | Teams / Scenario Workspace | Team 0 uses network 254; team removal still requires complete reviewed retirement |
 | VM/container authoring | Workspace → Add VM/container | Approved images, static addressing, resources, protocols and checks |
+| Scenario VM disk sizing | Workspace → Add/Edit VM | Request 8–1024 GiB when verified image metadata is available; fresh clones respect the image OS-disk minimum, and supported guest filesystems grow after reviewed increases |
+| Infrastructure change visibility | Project Overview / Scenario | Reviewed infrastructure plan and task status on Overview; Scenario rows mark saved or planned machine changes |
 | Custom networks | Workspace / owning team | Separate foundation, verification and guest admission may be needed |
 | Staging review/apply | Workspace | Cache preparation plus exact retained plan; separate reviewed deployment |
 | Capture/versioning | Capture release / Releases | Immutable manifests/images; source stop/restart may be required |

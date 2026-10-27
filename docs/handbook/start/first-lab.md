@@ -4,17 +4,17 @@ This walkthrough creates a small web-server exercise. Use an administrator-appro
 
 ## 1. Open your project
 
-Sign in to CRANGE Control and select your project in the sidebar. Open **Project Overview** to check its team list, resource limits and recent task results. If the project has no deployed router foundation, ask the administrator to complete its reviewed bootstrap first.
+Sign in to CRANGE Control and select your project in the sidebar. Open **Project Overview** to check its team list, resource limits and recent task results. The page also shows project-wide router/network tools, the current infrastructure plan and unapplied work. Sidebar status markers and task notices link back to recent or active work. If the project has no deployed router foundation, ask the administrator to complete its reviewed bootstrap first.
 
-![Project overview with allocation and management links](/img/screenshots/overview.png)
+![Project overview with allocation, infrastructure review and a sidebar task indicator](/img/screenshots/overview.png)
 
 ## 2. Add a staging machine
 
-Open **Scenario → Workspace → Add VM**. Give the machine a clear name such as `web-01`, choose an approved Linux image, select Team 0's default network, and choose a free static host octet such as `20`. Start with resources appropriate to the image and project quota. Select SSH only if the image already provides it.
+Open **Scenario → Workspace → Add VM**. Give the machine a clear name such as `web-01`, choose an approved Linux image, select Team 0's default network, and choose a free static host octet such as `20`. Start with resources appropriate to the image and project quota. If the image has verified system-disk metadata, you can request a system disk from 8 to 1024 GiB, subject to the image's minimum size. A larger request does not change the shared approved image. Select SSH only if the image already provides it.
 
 The form previews the resulting address. Do not use `.1` or the DHCP range for a static scenario server. Add an HTTP check for `/health` on port 80, expected status 200, if your application will provide that endpoint. You can edit the checks later.
 
-![The Add VM form in the actual interface](/img/screenshots/add-machine.png)
+![The Add VM form showing a custom system disk size and verified image minimum](/img/screenshots/add-machine.png)
 
 Save the declaration. Select **Review changes**, open **Deployment plan**, and read the resource actions. The first review can take time while an approved image cache is prepared. Use **Deploy to staging** for the reviewed plan. Watch its task output until it completes.
 

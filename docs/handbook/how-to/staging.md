@@ -4,7 +4,7 @@ Open **Scenario → Workspace**. Team 0 is the working copy of your scenario; it
 
 ## Add a VM or container
 
-Choose **Add VM** or **Add container**. Select an approved OS/image, set CPU and RAM, select the default or an owned custom network, and choose a free static host octet. The form shows the full IP and a GiB equivalent for RAM. Remote protocol choices publish connection settings; the guest must already run the selected service.
+Choose **Add VM** or **Add container**. Select an approved OS/image, set CPU and RAM, select the default or an owned custom network, and choose a free static host octet. For a VM whose approved image has verified system-disk metadata, you can request 8–1024 GiB, at least the image's operating-system disk size. A small base can be cloned with a larger requested disk without changing the shared image. The form shows the full IP and a GiB equivalent for RAM. Remote protocol choices publish connection settings; the guest must already run the selected service.
 
 VMs have their own virtual hardware/kernel; containers use an approved LXC root filesystem and share the host kernel. Available images and nodes depend on administrator approval, provider compatibility and network acceptance.
 
