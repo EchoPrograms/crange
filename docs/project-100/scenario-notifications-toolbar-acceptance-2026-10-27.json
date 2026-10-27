@@ -68,7 +68,7 @@
     "keyboard_fix": "Use native guacBeforeKeydown/guacBeforeKeyup hooks when a toolbar control has focus; local input does not reach remote clients.",
     "floating_layout_preserved": true,
     "served_workspace_js_sha256": "41211cd2fd9ac179a6318b6624e5162eab30aaeb8b4d4e74f28a0160d9319702",
-    "served_workspace_css_sha256": "32ac4f337ccf89fd897c20293dac90bcbed0a89612a13cd161b6a50b46565836",
+    "served_workspace_css_sha256": "6158589b27c1f5bcd038b5a12bbf080a97fe21b5e709ea1b0e4cdb76c6ae6894",
     "regression_checks": [
       "Home, Disconnect, selector, Clipboard, and scale appear in order",
       "Power, map, fullscreen, Options, and Close align to the right edge",
@@ -89,7 +89,23 @@
     ],
     "primary_controls_alignment": "Centered across the full desktop toolbar; action controls remain right aligned. Narrow viewports wrap within the available width.",
     "all_docked_controls_height_px": 32,
-    "focus_return": "A capture-phase pointerdown outside the toolbar explicitly blurs its focused control, including when the remote display prevents the normal mousedown default."
+    "focus_return": "A capture-phase pointerdown outside the toolbar explicitly blurs its focused control, including when the remote display prevents the normal mousedown default.",
+    "scale_button_fix": {
+      "cause": "The flex item could shrink below its buttons and percentage field, clipping the plus button at the right edge.",
+      "change": "Keep the scale widget and its editor at their intrinsic width.",
+      "browser_viewport_widths_px": [
+        1680,
+        1440,
+        390
+      ],
+      "checks": [
+        "Both icons centered and contained inside the editor",
+        "Zoom in and out update the scale",
+        "No horizontal viewport overflow"
+      ],
+      "deployed_at": "2026-10-27T13:30:37.770868+00:00",
+      "state": "live-http-verified"
+    }
   },
   "validation_environment": "Chromium with desktop 1440px and emulated mobile 390px viewports. Guacamole fixture uses the upstream 1.6.0 Keyboard module and its before-key event routing; no remote guest test keystrokes or infrastructure changes.",
   "services": "Controller broker refreshed; static dashboard assets updated without restarting controller workers; Guacamole restarted to load extension assets.",
