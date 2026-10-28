@@ -29,7 +29,7 @@
         '<div class="cr-home" ng-class="{loading: !isLoaded()}">',
         '  <header class="cr-home-header">',
         '    <div class="cr-brand"><img class="cr-home-logo" src="app/ext/crange-theme/assets/remote-access.svg?v=3" alt="CRANGE"><div><h1>{{cr.page === "preferences" ? "Preferences" : cr.page === "projects" ? "Projects" : cr.projectTitle()}} <span class="cr-title-loading" ng-class="{active: cr.loading || cr.nativeLoading}" role="status" aria-label="Refreshing" aria-live="polite"><span aria-hidden="true">↻</span></span></h1></div></div>',
-        '    <div class="cr-header-actions"><button type="button" ng-click="cr.navigate(\'projects\')" ng-if="cr.page !== \'projects\'">Projects</button><select ng-if="cr.page === \'servers\'" class="cr-project-select" aria-label="Project" ng-model="cr.selectedProject" ng-options="project.id as project.label for project in cr.projects"></select><button type="button" class="cr-icon-button" ng-click="cr.refresh()" ng-disabled="cr.loading" aria-label="Refresh servers" crange-help="Refresh server access and power status"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M16.7 8a7 7 0 1 1-2.1-3.2M16.8 2.5V7h-4.5"/></svg></button><guac-user-menu></guac-user-menu><a class="cr-controller-link" href="https://crange.brogano.dev/" target="_blank" rel="noopener noreferrer">CRANGE Control<svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2.2" aria-hidden="true"><path d="M11 3h6v6m0-6-8 8M8 4H4v12h12v-4"/></svg></a></div>',
+        '    <div class="cr-header-actions"><button type="button" ng-click="cr.navigate(\'projects\', true)" ng-if="cr.page !== \'projects\'">Projects</button><select ng-if="cr.page === \'servers\'" class="cr-project-select" aria-label="Project" ng-model="cr.selectedProject" ng-options="project.id as project.label for project in cr.projects"></select><button type="button" class="cr-icon-button" ng-click="cr.refresh()" ng-disabled="cr.loading" aria-label="Refresh servers" crange-help="Refresh server access and power status"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M16.7 8a7 7 0 1 1-2.1-3.2M16.8 2.5V7h-4.5"/></svg></button><guac-user-menu></guac-user-menu><a class="cr-controller-link" href="https://crange.brogano.dev/" target="_blank" rel="noopener noreferrer">CRANGE Control<svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2.2" aria-hidden="true"><path d="M11 3h6v6m0-6-8 8M8 4H4v12h12v-4"/></svg></a></div>',
         '  </header>',
         '  <crange-box-list connection-groups="rootConnectionGroups"></crange-box-list>',
         '</div>'
@@ -458,9 +458,16 @@
                 scope.cr = scope.$parent.cr = {page: returningProject || returningView==='servers' ? 'servers' : 'projects', layout: preferenceService && preferenceService.preferences.crangeMachineLayout === 'list' ? 'list' : 'grid', refresh: function () { scope.refresh(); }, loading: false, nativeLoading: true, projects: initialProjects, selectedProject: selectedProject};
                 scope.$watch('cr.search', function (value) { scope.search = value || ''; });
                 function rememberHome(){if(scope.cr.page==='preferences')return;try{window.sessionStorage.setItem('crange-home-context',JSON.stringify({page:scope.cr.page,project:scope.cr.selectedProject}));}catch(ignored){}}
-                scope.cr.navigate = function (page) { scope.closeMenu(); if(page==='preferences')scope.cr.previousPage=scope.cr.page;scope.cr.page = page;rememberHome(); };
+                var explicitProjectsOverview = false;
+                function soleProject() { var available = (scope.projectGroups || []).filter(function (project) { return project.id !== 'other'; }); return available.length === 1 ? available[0] : null; }
+                function defaultHome() {
+                    if (!scope.listLoaded || scope.cr.page !== 'projects' || explicitProjectsOverview) return;
+                    var only = soleProject();
+                    if (only) { scope.cr.selectedProject = String(only.id); scope.cr.page = 'servers'; rememberHome(); }
+                }
+                scope.cr.navigate = function (page, explicitOverview) { scope.closeMenu(); if(page==='preferences')scope.cr.previousPage=scope.cr.page;explicitProjectsOverview=page==='projects'&&explicitOverview===true;scope.cr.page = page;defaultHome();rememberHome(); };
                 scope.cr.back = function () { scope.cr.navigate(scope.cr.previousPage || (scope.cr.selectedProject==='all'?'projects':'servers')); };
-                scope.cr.openProject = function (id) { scope.cr.selectedProject = String(id); scope.cr.navigate('servers'); };
+                scope.cr.openProject = function (id) { var only = soleProject(); scope.cr.selectedProject = id === 'all' && only ? String(only.id) : String(id); scope.cr.navigate('servers'); };
                 scope.cr.projectTitle = function () { var selected = scope.cr.projects.find(function (p) { return p.id === scope.cr.selectedProject; }); return selected ? selected.label : 'Remote access'; };
                 scope.cr.setLayout = function (layout) { scope.cr.layout = layout; if (preferenceService) { preferenceService.preferences.crangeMachineLayout = layout; preferenceService.save(); } };
                 scope.runningCount = function (project) { return project.boxes.filter(function (box) { return box.state === 'running'; }).length; };
@@ -494,11 +501,13 @@
                         projectOptions.push({id: savedId, label: savedId === 'other' ? 'Other connections' : 'Project ' + savedId});
                     }
                     scope.cr.projects = projectOptions;
+                    var onlyProject = soleProject(), fallbackProject = onlyProject ? String(onlyProject.id) : 'all';
                     if (scope.listLoaded && !scope.projectOptionsReady) {
-                        if (scope.cr.selectedProject !== 'all' && !projects[scope.cr.selectedProject]) scope.cr.selectedProject = 'all';
+                        if (scope.cr.selectedProject !== 'all' && !projects[scope.cr.selectedProject]) scope.cr.selectedProject = fallbackProject;
                         scope.projectOptionsReady = true;
                     }
-                    else if (scope.projectOptionsReady && scope.cr.selectedProject !== 'all' && !projects[scope.cr.selectedProject]) scope.cr.selectedProject = 'all';
+                    else if (scope.projectOptionsReady && scope.cr.selectedProject !== 'all' && !projects[scope.cr.selectedProject]) scope.cr.selectedProject = fallbackProject;
+                    defaultHome();
                 }
                 scope.refresh = function () {
                     if (listRequest) return listRequest;

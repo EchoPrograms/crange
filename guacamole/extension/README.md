@@ -171,3 +171,10 @@ preferences apply once the remote display exists.
 Ctrl+Shift+Alt toggles the toolbar itself. Options and Advanced controls remain
 available from the Options button. Showing and hiding controls uses a 110 ms
 fade, supports reversing the fade, and respects reduced-motion preferences.
+
+
+When exactly one project is available in the authorized inventory, sign-in and
+implicit Home, disconnect, and Back navigation open that project's machines.
+Other connections do not count as an additional project. The Projects button
+explicitly opens the overview and keeps it open during inventory refreshes.
+Accounts with multiple projects continue to land on the overview.

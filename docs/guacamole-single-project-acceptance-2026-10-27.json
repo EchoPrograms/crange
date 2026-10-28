@@ -1,0 +1,32 @@
+{
+  "recorded_at": "2026-10-28T03:19:32.811945+00:00",
+  "state": "live-http-verified",
+  "served_assets": {
+    "ui.js": "f07e3b1099d41321ac9be229877281dc6d1fafa7a9853a63343a38888072fd0f"
+  },
+  "backup": "/opt/guacamole/backups/crange-theme-before-single-project-1793157528.jar",
+  "behavior": [
+    "Users with one available project open that project after sign-in and implicit home navigation.",
+    "Only the Projects button explicitly opens the overview for single-project accounts.",
+    "Other connections do not count as another project.",
+    "Invalid or revoked return destinations fall back to the sole authorized project.",
+    "Multiple-project and empty inventories retain the overview."
+  ],
+  "browser_validation": {
+    "singleProjectLogin": true,
+    "projectsButtonKeepsOverview": true,
+    "refreshPreservesExplicitOverview": true,
+    "logoOpensProject": true,
+    "preferencesBackOpensProject": true,
+    "connectionReturnOpensProject": true,
+    "multipleProjectsKeepOverview": true,
+    "desktopAndMobile": true
+  },
+  "browser_scope": "Authenticated home inventory fixture, including fresh initialization and connection-return markers.",
+  "unit_checks": [
+    "tests/test_guac_ui.cjs",
+    "tests/test_guac_workspace.cjs",
+    "tests/test_guac_settings.cjs"
+  ],
+  "committed_ui_and_test_pair_verified": true
+}

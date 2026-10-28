@@ -144,11 +144,28 @@ async function renderFor(savedProject, nativePending = false, dataSource = 'mysq
     const invalid = await renderFor('999');
     assert.deepStrictEqual(invalid.initialOptionIds, ['all'], 'out-of-range saved project is discarded before option rendering');
     assert.strictEqual(invalid.scope.projectOptionsReady, true);
-    assert.strictEqual(invalid.scope.cr.selectedProject, 'all', 'invalid saved project falls back to All projects');
+    assert.strictEqual(invalid.scope.cr.selectedProject, '100', 'invalid saved projects fall back to the sole authorized project');
 
     const defaulted = await renderFor('');
     assert.strictEqual(defaulted.initialSelection, 'all', 'All projects is the explicit default before inventory arrives');
     assert.ok(defaulted.scope.cr.projects.some(p => p.id === 'all' && p.label === 'All projects'));
+    assert.equal(defaulted.scope.cr.page,'servers','login opens the sole available project');
+    assert.equal(defaulted.scope.cr.selectedProject,'100');
+    defaulted.scope.cr.navigate('projects',true);assert.equal(defaulted.scope.cr.page,'projects','Projects explicitly opens the overview');
+    await defaulted.scope.refresh();assert.equal(defaulted.scope.cr.page,'projects','background refresh preserves an explicitly opened overview');
+    defaulted.scope.cr.navigate('preferences');defaulted.scope.cr.back();assert.equal(defaulted.scope.cr.page,'servers','Back from preferences follows the single-project default');
+    defaulted.scope.cr.navigate('projects');assert.equal(defaulted.scope.cr.page,'servers','implicit overview returns open the sole project');
+    defaulted.scope.cr.openProject('all');assert.equal(defaulted.scope.cr.selectedProject,'100','the logo opens the sole project');
+    sandbox.window.sessionStorage={getItem(key){return key==='crange-return-view'?'projects':null;},removeItem(){}};
+    const homeReturn=await renderFor('all');assert.equal(homeReturn.scope.cr.page,'servers');assert.equal(homeReturn.scope.cr.selectedProject,'100','Home and disconnect return markers resolve after authorized inventory loads');delete sandbox.window.sessionStorage;
+    sandbox.window.sessionStorage={getItem(key){return key==='crange-return-project'?'100':null;},removeItem(){}};
+    const revokedReturn=await renderFor('100',false,'json',['json'],[],[],()=>[{project:200,team:1,resource_key:'vm:remaining',name:'Remaining',protocols:[]}]);assert.equal(revokedReturn.scope.cr.selectedProject,'200','a revoked return destination falls back to the sole authorized project');delete sandbox.window.sessionStorage;
+    const multi=await renderFor('',false,'json',['json'],[],[],()=>[{project:100,team:1,resource_key:'vm:first',name:'First',protocols:[]},{project:200,team:1,resource_key:'vm:second',name:'Second',protocols:[]}]);
+    assert.equal(multi.scope.cr.page,'projects','multiple projects retain the overview landing');
+    const withOther=await renderFor('',false,'json',['json'],[],[],()=>[{project:100,team:1,resource_key:'vm:first',name:'First',protocols:[]},{project:null,team:null,resource_key:'native:other',name:'Other',protocols:[]}]);
+    assert.equal(withOther.scope.cr.page,'servers');assert.equal(withOther.scope.cr.selectedProject,'100','Other connections do not count as another project');
+    const empty=await renderFor('',false,'json',['json'],[],[],()=>[]);assert.equal(empty.scope.cr.page,'projects','empty inventory cannot invent a project');
+
     assert.ok(homeTemplate.includes('ng-options="project.id as project.label for project in cr.projects"'));
     assert.ok(homeTemplate.includes('class="cr-home-logo"'));
     assert.ok(homeTemplate.includes('class="cr-title-loading"'));
