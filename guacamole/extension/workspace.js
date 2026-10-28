@@ -32,7 +32,6 @@
       <div class="cr-native-language"><guac-form content="languageField" model="preferences" namespace="'SETTINGS_PREFERENCES'"></guac-form></div>
       <label>Input method<select ng-model="preferences.inputMethod"><option value="none">Direct keyboard</option><option value="text">Text input / IME</option><option value="osk">On-screen keyboard</option></select></label>
       <label>Touch input<select ng-model="preferences.emulateAbsoluteMouse" ng-options="choice.value as choice.label for choice in mouseChoices"></select></label>
-      <label>Home button<select ng-model="presentation.exitBehavior"><option value="home">Return to project, keep session connected</option><option value="disconnect">Disconnect and return to project</option></select></label>
     </section>
     <section class="cr-setting-group"><h2>Account</h2>
       <p class="cr-help" ng-if="canUpdateSelf === null">Checking account permissions…</p>
@@ -96,7 +95,6 @@
             scope.presentation = {
                 machineLayout: p.crangeMachineLayout === 'list' ? 'list' : 'grid',
                 displayScale: Number(p.crangeDisplayScale) || 1,
-                exitBehavior: p.crangeExitBehavior === 'disconnect' ? 'disconnect' : 'home',
             };
             scope.mouseChoices = [{value: true, label: 'Touchscreen'}, {value: false, label: 'Touchpad'}];
             scope.savePresentation = function () {
@@ -107,7 +105,6 @@
                 catch (error) { scope.preferenceMessage = 'Enter a valid timezone, for example America/Chicago.'; return; }
                 p.crangeMachineLayout = values.machineLayout;
                 p.crangeDisplayScale = values.displayScale;
-                p.crangeExitBehavior = values.exitBehavior;
                 preferenceService.save();
                 scope.preferenceError = false;
                 scope.preferenceMessage = 'Preferences saved for this browser.';
@@ -121,7 +118,7 @@
     <button type="button" class="cr-session-icon cr-session-drag" aria-label="Collapse session controls" aria-expanded="true" crange-help="Click to collapse; drag to move. Arrow keys move the toolbar; Home resets its position">${icon('drag')}</button>
     <div class="cr-session-toolbar-primary">
     ${button('home', 'Return to project', 'crSession.home()')}
-    <button type="button" class="cr-session-disconnect" ng-click="crSession.disconnect()" crange-help="Disconnect the current remote session. The server keeps running">Disconnect</button>
+    <button type="button" class="cr-session-disconnect" ng-click="crSession.disconnect()" ng-disabled="crSession.disconnecting" crange-help="End the selected remote connection and return to your project">{{crSession.disconnecting ? 'Disconnecting…' : 'Disconnect'}}</button>
     <button type="button" class="cr-session-name cr-session-selector" ng-click="crSession.toggle('connections')" aria-expanded="{{crSession.panel === 'connections'}}" aria-label="Select connections"><span>{{focusedClient.name || getName(clientGroup)}}</span><span class="cr-protocol-label" ng-if="focusedClient.protocol">{{focusedClient.protocol | uppercase}}</span><span class="cr-session-count" ng-if="clientGroup.clients.length > 1">{{clientGroup.clients.length}} selected</span><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="m5 8 5 5 5-5"/></svg></button>
     <textarea class="cr-session-clipboard" ng-if="!crSession.clipboardPassthrough" rows="1" aria-label="Clipboard" placeholder="Clipboard" autocomplete="off" spellcheck="false" ng-model="crSession.clipboardText" ng-trim="false" ng-readonly="crSession.clipboardReadOnly" ng-change="crSession.updateClipboard()"></textarea>
     <guac-client-zoom class="cr-session-zoom" ng-if="focusedClient" client="focusedClient"></guac-client-zoom>
@@ -382,8 +379,32 @@
             s.show = function () { var from=toolbarFade?window.getComputedStyle(shell).opacity:0;cancelToolbarFade();hidingToolbar = false; s.visible = true; saveToolbarState(); window.requestAnimationFrame(function () { if(destroyed||!s.visible||hidingToolbar)return;if(!position)position={x:10,y:Math.max(10,window.innerHeight-shell.offsetHeight-10)};clampToolbar();handle.focus();fadeToolbar(1,null,from); }); };
             s.hide = function () { s.close(); document.dispatchEvent(new CustomEvent('crange-session-controls-hidden')); hidingToolbar = true; var finish=function(){hidingToolbar=false;s.visible=false;saveToolbarState();window.requestAnimationFrame(function(){if(destroyed)return;clampToolbar();reopen.focus();});};if(s.visible)fadeToolbar(0,finish);else finish(); };
             function returnToProject(){try{if(s.box){window.sessionStorage.removeItem('crange-return-view');window.sessionStorage.setItem('crange-return-project',String(s.box.project));window.localStorage.setItem('crange-selected-project',String(s.box.project));}else{window.sessionStorage.removeItem('crange-return-project');window.sessionStorage.setItem('crange-return-view','projects');window.localStorage.setItem('crange-selected-project','all');}}catch(ignored){}$location.url('/');}
-            s.home = function () { if (prefs.crangeExitBehavior === 'disconnect') scope.disconnect(); s.close(); returnToProject(); };
-            s.disconnect = function () { scope.disconnect(); s.close(); returnToProject(); };
+            s.home = function () { s.close(); returnToProject(); };
+            s.disconnect = function () {
+                if (s.disconnecting) return;
+                var clients = (scope.clientGroup ? scope.clientGroup.clients : [scope.focusedClient]).filter(function (client) { return client && client.clientProperties.focused; });
+                var ClientIdentifier = $injector.get('ClientIdentifier'), manager = $injector.get('guacClientManager'), sources = Object.create(null);
+                s.disconnecting = true;
+                clients.forEach(function (client) {
+                    var id = ClientIdentifier.fromString(client.id);
+                    if (id.type !== ClientIdentifier.Types.CONNECTION) return;
+                    (sources[id.dataSource] || (sources[id.dataSource] = [])).push(String(id.id));
+                });
+                return Promise.all(Object.keys(sources).map(function (source) {
+                    var options = {headers: {'Guacamole-Token': auth.getCurrentToken(), 'X-Guacamole-Data-Source': source}};
+                    return $http.get('api/ext/crange-resume/sessions', options).then(function (response) {
+                        return Promise.all((response.data.sessions || []).filter(function (session) { return session.source === source && sources[source].indexOf(String(session.connection)) !== -1; }).map(function (session) {
+                            return $http.delete('api/ext/crange-resume/sessions/' + encodeURIComponent(session.id), options).catch(function (error) { if (error.status !== 404) throw error; });
+                        }));
+                    });
+                })).then(function () {
+                    clients.forEach(function (client) { manager.removeManagedClient(client.id); });
+                    if (!destroyed) scope.$evalAsync(function () { s.close(); returnToProject(); });
+                }, function () {
+                    if (!destroyed) scope.$evalAsync(function () { feedback('Could not end the connection. Try Disconnect again.', true); });
+                }).finally(function () { if (!destroyed) scope.$evalAsync(function () { s.disconnecting = false; }); });
+            };
+            (scope.clientMenuActions || []).forEach(function (action) { if (/(?:^|\s)disconnect(?:\s|$)/.test(action.className || '')) action.callback = s.disconnect; });
             s.fullscreen = function () { fullscreen.toggleFullscreenMode(); s.close(); };
             s.openAdvanced = function () { s.panel = 'advanced'; s.advanced = true; scope.menu.shown = true; };
             s.copy = function (ip) {

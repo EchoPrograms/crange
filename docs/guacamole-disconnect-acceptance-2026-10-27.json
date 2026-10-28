@@ -1,0 +1,29 @@
+{
+  "recorded_at": "2026-10-28T03:33:32.684495+00:00",
+  "state": "live-http-verified",
+  "served_assets": {
+    "workspace.js": "4b4f462d59e2c1c6feb9c0b224c9fc3c8f1b20996b4335026a92fbef942402de"
+  },
+  "backup": "/opt/guacamole/backups/crange-theme-before-disconnect-end-1793158345.jar",
+  "behavior": [
+    "Home always returns without ending a connection, including when an older disconnect-on-home preference exists.",
+    "Disconnect ends the selected authenticated server-held sessions and removes their native browser clients.",
+    "Native menu Disconnect uses the same action as the toolbar.",
+    "Failed termination stays in the connection and offers retry; unselected sessions remain available."
+  ],
+  "browser_validation": {
+    "homeKeepsSession": true,
+    "legacyHomePreferenceIgnored": true,
+    "disconnectEndsHeldSession": true,
+    "disconnectClearsBrowserClient": true,
+    "failureKeepsConnection": true,
+    "retryWorks": true,
+    "desktopAndMobile": true
+  },
+  "browser_scope": "Toolbar integration with the authenticated session-list and end endpoint shapes.",
+  "unit_checks": [
+    "tests/test_guac_workspace.cjs",
+    "tests/test_guac_initial_size.cjs",
+    "tests/test_guac_settings.cjs"
+  ]
+}

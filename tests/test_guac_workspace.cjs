@@ -49,8 +49,12 @@ async function flush(){await new Promise(resolve=>setImmediate(resolve));}
  const first={id:'native-ci',name:'CI SSH',title:'CI SSH',protocol:null,clientProperties:{scale:1,focused:true}},second={id:'native-other',name:'Other connection',title:'Other connection',protocol:'ssh',clientProperties:{scale:1,focused:true}};
  class ClipboardData {constructor(value){Object.assign(this,value);}}
  const clipboardService={setActiveConnection(){},getConnectionClipboard(){return new ClipboardData({type:'text/plain',data:'cached clipboard'});},setConnectionClipboard(_client,text){clipboardUpdates.push(new ClipboardData({type:'text/plain',data:text}));}};
- const injector={get(name){return name==='clipboardService'?clipboardService:ClipboardData;}};
- const scope={menu:{shown:false},focusedClient:first,clientGroup:{clients:[first,second]},closeClientTile(client){this.closed=client;},$watch(name,fn){watchers[name]=fn;},$on(name,fn){scopeEvents[name]=fn;return()=>{delete scopeEvents[name];};},$evalAsync(fn){fn();},disconnect(){this.disconnected=true;}};
+ const removedClients=[],endedSessions=[];let endFailure=false,endMissing=false;
+ const clientIdentifier={Types:{CONNECTION:'c'},fromString:id=>({type:'c',dataSource:'postgresql',id})};
+ http.get=(_url,options)=>{requests.push({operation:'session-list',source:options.headers['X-Guacamole-Data-Source']});return Promise.resolve({data:{sessions:[{id:'held-ci',source:'postgresql',connection:first.id},{id:'held-other',source:'postgresql',connection:second.id}]}});};
+ http.delete=url=>{endedSessions.push(url);return endFailure?Promise.reject({status:503}):endMissing?Promise.reject({status:404}):Promise.resolve({data:{ended:true}});};
+ const injector={get(name){return name==='clipboardService'?clipboardService:name==='ClientIdentifier'?clientIdentifier:name==='guacClientManager'?{removeManagedClient:id=>removedClients.push(id)}:ClipboardData;}};
+ const scope={clientMenuActions:[{className:'danger disconnect',callback(){}}],menu:{shown:false},focusedClient:first,clientGroup:{clients:[first,second]},closeClientTile(client){this.closed=client;},$watch(name,fn){watchers[name]=fn;},$on(name,fn){scopeEvents[name]=fn;return()=>{delete scopeEvents[name];};},$evalAsync(fn){fn();},disconnect(){this.disconnected=true;}};
  let destination=null;const toolbar=directives.crangeSessionToolbar(http,interval,{url(value){destination=value;}},{getCurrentToken(){return 'test-token';},getDataSource(){return 'postgresql';}},preferenceService,{toggleFullscreenMode(){}},injector);
  const tabButtons=[{focus(){document.activeElement=this;}},{focus(){document.activeElement=this;}}];
  toolbar.link(scope,{0:{parentNode:{querySelector(){return clientView;},querySelectorAll(){return tabButtons;}},querySelector(s){return s.includes('shell')?shell:s.includes('reopen')?reopen:handle;}}});await flush();assert.equal(scope.crSession.box.resource_key,'container:ci');
@@ -62,7 +66,7 @@ async function flush(){await new Promise(resolve=>setImmediate(resolve));}
  scope.crSession.power('shutdown');await flush();scope.crSession.power('stop');await flush();
  const submissions=requests.filter(r=>r.operation==='submit');assert.deepEqual(submissions.map(r=>r.action),['shutdown','stop']);assert.equal(submissions[1].resource_key,'container:ci');assert.equal(submissions[1].project,100);
  scope.crSession.displayScale=1000;scope.crSession.setScale();assert.equal(scope.focusedClient.clientProperties.scale,1.5);
- const session=scope.crSession;session.home();assert.equal(destination,'/');assert.equal(sessionLocal.get('crange-return-project'),'100');
+ const session=scope.crSession;preferenceService.preferences.crangeExitBehavior='disconnect';session.home();assert.equal(destination,'/');assert.equal(sessionLocal.get('crange-return-project'),'100');assert.equal(scope.disconnected,undefined,'Home ignores old disconnect-on-home preferences');assert.equal(endedSessions.length,0,'Home never ends the server-held session');assert.equal(removedClients.length,0,'Home keeps the browser client available');assert.equal(scope.clientMenuActions[0].callback,session.disconnect,'native menu Disconnect uses the same session-ending action');
  const keyEvent=(key,extra={})=>({key,ctrlKey:true,altKey:true,shiftKey:true,repeat:false,preventDefault(){},stopImmediatePropagation(){},...extra});
  windowEvents.keydown(keyEvent('Control'));assert.equal(session.visible,true,'Ctrl+Alt+Shift opens controls');assert.equal(session.panel,null,'the shortcut does not open Options');
  windowEvents.keydown(keyEvent('Control',{repeat:true}));windowEvents.keydown(keyEvent('Alt'));assert.equal(session.visible,true,'held chord and repeat events toggle once');
@@ -111,5 +115,9 @@ async function flush(){await new Promise(resolve=>setImmediate(resolve));}
  scope.focusedClient=first;watchers['focusedClient.id']();assert.equal(shell.style.left,'388px');assert.equal(shell.style.top,'90px','switching back restores the first connection position');
  scope.focusedClient=second;watchers['focusedClient.id']();
  session.home();assert.equal(sessionLocal.get('crange-return-project'),undefined,'native connections clear stale managed project return markers');assert.equal(sessionLocal.get('crange-return-view'),'projects');assert.equal(local.get('crange-selected-project'),'all');
+ first.clientProperties.focused=false;destination=null;endFailure=true;
+ const failed=session.disconnect();session.disconnect();await failed;assert.equal(destination,null,'failed session termination stays in the connection');assert.equal(removedClients.length,0);assert.equal(session.disconnecting,false);assert.match(session.message,/Could not end/);assert.equal(requests.filter(r=>r.operation==='session-list').length,1,'repeated clicks do not enqueue duplicate termination');
+ endFailure=false;await session.disconnect();assert.equal(destination,'/');assert.deepEqual(removedClients,[second.id],'Disconnect removes only selected native clients');assert.equal(endedSessions.at(-1),'api/ext/crange-resume/sessions/held-other','Disconnect ends the matching server-owned session');assert(!endedSessions.some(url=>url.endsWith('/held-ci')),'unselected sessions remain resumable');
+ endMissing=true;destination=null;await session.disconnect();assert.equal(destination,'/','an already-ended remote session can still be closed');
  console.log('Guacamole workspace: native multi-pane layout, per-connection toolbar state, project return routing, template preservation and power controls passed.');
 })().catch(error=>{console.error(error);process.exitCode=1;});

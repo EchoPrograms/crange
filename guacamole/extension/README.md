@@ -142,7 +142,9 @@ tree as the link authorization boundary. Regression check:
 Recent connections appears above the inventory while the signed-in user owns
 live remote sessions. Resume attaches to the same guacd session after browser
 reload, tab closure, or Guacamole logout and login. End closes the session and
-removes its row. Disconnect detaches the current view; it can be resumed later.
+removes its row. Disconnect ends selected remote connections and removes them
+from Recent connections. Home returns to the project while keeping sessions
+connected and available to resume; older Home preferences do not override this.
 Sessions remain in server memory until ended, the guest disconnects, or the
 Guacamole/guacd service restarts. They do not survive a server restart.
 
